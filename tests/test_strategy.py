@@ -242,3 +242,19 @@ def test_one_bot_two_timeframes_hourly_sleeve_on_15m_bot(tmp_path):
     assert set(got - pd.Timedelta(minutes=45)) == sig_hours and len(got) == len(sig_hours)
     i = df.index[df["date"] == h1["date"].iloc[1000] + pd.Timedelta(minutes=45)][0]
     assert df.loc[i, "at:h"] == pytest.approx(ref["atr"].iloc[1000])  # hourly ATR drives the stop
+
+
+def test_market_relative_sleeve_gets_btc_merged_without_look_ahead(tmp_path):
+    from AIPortfolio import AIPortfolio
+    pair = "SOL/USDT:USDT"
+    coin, btc = ohlcv(3000, seed=4, vol=0.012), ohlcv(3000, seed=9, vol=0.008)
+    m = Manifest(sleeves=[Sleeve(id="r", family="rel_strength", params={}, pairs=[pair], stage="exploration", risk=0.001)])
+    path = tmp_path / "manifest.json"
+    m.save(path)
+    st = AIPortfolio({"aitrader": {"manifest_path": str(path)}, "runmode": "backtest", "exchange": {"demo_trading": True}})
+    st.bot_start()
+    st.dp = SimpleNamespace(get_pair_dataframe=lambda p, tf, **kw: btc, current_whitelist=lambda: [pair])
+    assert ("BTC/USDT:USDT", "1h") in st.informative_pairs()
+    df = _populate(st, coin, pair)
+    assert (df["mkt_close"].to_numpy() == btc["close"].to_numpy()).all()  # same candle, same moment
+    assert df["enter_long"].fillna(0).sum() + df.get("enter_short", pd.Series(0)).fillna(0).sum() > 0

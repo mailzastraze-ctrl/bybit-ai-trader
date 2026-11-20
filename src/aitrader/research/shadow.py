@@ -7,6 +7,7 @@ import logging
 from concurrent.futures import ThreadPoolExecutor
 from datetime import timedelta
 
+from aitrader.families import MARKET_PAIR
 from aitrader.manifest import Manifest, Sleeve
 from aitrader.realism import real_pnl
 from aitrader.research.ftrunner import FreqtradeRunner, Job, research_config
@@ -63,7 +64,7 @@ def run(s: Settings, entries: list[dict], out, workers: int = 4, ft: FreqtradeRu
     root.mkdir(parents=True, exist_ok=True)
     for tf in sorted({e.get("timeframe") or s.research.timeframe for e in entries}):
         group = [e for e in entries if (e.get("timeframe") or s.research.timeframe) == tf]
-        pairs = sorted({p for e in group for p in e["pairs"]})
+        pairs = sorted({p for e in group for p in e["pairs"]} | {MARKET_PAIR})  # BTC: market-relative families
         start = min(parse_dt(e["freeze"]) for e in group) - timedelta(days=35)  # + indicator warm-up
         dl = Job(root / f"_download-{tf}")
         cfg = ft.write_config(dl, "config.json", research_config(s, pairs, timeframe=tf))

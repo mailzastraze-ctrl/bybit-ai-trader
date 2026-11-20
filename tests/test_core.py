@@ -54,6 +54,8 @@ def test_family_produces_signals_and_bounded_conviction(name):
         import numpy as np
         f = 0.0001 + 0.0006 * np.sin(np.arange(len(df)) / 90.0) + np.random.default_rng(3).normal(0, 0.0001, len(df))
         df["funding"] = np.where(np.arange(len(df)) % 8 == 0, f, np.nan)
+    if name == "rel_strength":  # a market (BTC) series the coin drifts against
+        df["mkt_close"] = ohlcv(3000, seed=9, vol=0.008)["close"].values
     out = fam.populate(df, fam.defaults())
     assert out["long_sig"].sum() + out["short_sig"].sum() > 0
     assert out["conviction"].between(0.5, 1.5).all()
@@ -206,3 +208,9 @@ def test_ported_strategy_lab_families_signal_and_stay_causal():
         assert full["long_sig"].sum() > 0 and full["short_sig"].sum() > 0, name
         cut = fam.populate(df.iloc[:1000], prm)  # no look-ahead: past signals don't change
         assert (cut["long_sig"].to_numpy() == full["long_sig"].iloc[:1000].to_numpy()).all(), name
+
+
+def test_relative_strength_is_silent_without_market_data():
+    fam = get_family("rel_strength")
+    out = fam.populate(ohlcv(1500, seed=2), fam.defaults())
+    assert out["long_sig"].sum() + out["short_sig"].sum() == 0

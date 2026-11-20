@@ -8,7 +8,7 @@ const FAM = {trend_ema: "EMA-тренд + откат", meanrev_bb: "Боллин
   squeeze_momentum: "Сжатие → импульс", tsmom: "Импульс за дни", funding_reversal: "Перекос фандинга",
   zscore_revert: "Z-score: возврат", supertrend: "SuperTrend", macd_cross: "MACD", adx_di: "ADX + DI",
   hull_turn: "Разворот Hull MA", rsi_revert: "RSI: возврат", stoch_cross: "Стохастик", ema_cross: "Пересечение EMA",
-  bb_revert: "Боллинджер: возврат", turtle: "Черепахи (Дончиан)"};
+  bb_revert: "Боллинджер: возврат", turtle: "Черепахи (Дончиан)", rel_strength: "Сила против BTC"};
 const famName = (f) => FAM[f] || f || "—";
 const pair = (p) => String(p || "").replace("/USDT:USDT", "");
 const nf = (v, d = 2) => (+v).toLocaleString("ru-RU", {minimumFractionDigits: d, maximumFractionDigits: d});

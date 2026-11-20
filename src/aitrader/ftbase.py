@@ -26,7 +26,7 @@ from freqtrade.strategy import (
 )
 
 from aitrader import indicators as ta
-from aitrader.families import EXIT_PARAMS, NEEDS_FUNDING, get_family
+from aitrader.families import EXIT_PARAMS, MARKET_PAIR, NEEDS_FUNDING, NEEDS_MARKET, get_family
 from aitrader.manifest import ManifestWatcher, Sleeve
 from aitrader.riskcore import EntryContext, bars_held, signal_row, size_multiplier, stake_for_risk
 from aitrader.settings import MAX_LEVERAGE
@@ -116,7 +116,29 @@ class AIBase(IStrategy):
         if self._needs_funding():
             ftf = self._funding_tf()
             out += [(p, ftf, "funding_rate") for p in wl]
+        if self._needs_market():
+            out.append((MARKET_PAIR, self.timeframe))
+            out += [(MARKET_PAIR, self._tf(sl)) for sl in self.all_sleeves()
+                    if sl.family in NEEDS_MARKET and self._tf(sl) != self.timeframe]
         return list(dict.fromkeys(out))
+
+    def _needs_market(self) -> bool:
+        return bool(self.families_in_use() & NEEDS_MARKET)
+
+    def _merge_market(self, dataframe: pd.DataFrame, tf: str) -> pd.DataFrame:
+        """BTC close of the same candle (known at the same moment: no look-ahead)."""
+        try:
+            m = self.dp.get_pair_dataframe(MARKET_PAIR, tf) if self.dp else None
+            if m is None or m.empty:
+                dataframe["mkt_close"] = float("nan")
+                return dataframe
+            mk = m[["date", "close"]].rename(columns={"close": "mkt_close"})
+            out = dataframe.drop(columns=["mkt_close"], errors="ignore").merge(mk, on="date", how="left")
+            dataframe["mkt_close"] = out["mkt_close"].values
+        except Exception as e:  # noqa: BLE001 – missing market data must never break trading
+            logger.warning("market (BTC) data unavailable: %s", e)
+            dataframe["mkt_close"] = float("nan")
+        return dataframe
 
     def _sleeve_signals(self, dataframe: pd.DataFrame, pair: str, sleeve: Sleeve, cols: list[str]) -> pd.DataFrame | None:
         """Signals of one sleeve aligned to the bot's candles. A sleeve researched on a higher
@@ -135,6 +157,8 @@ class AIBase(IStrategy):
         inf = inf[["date", "open", "high", "low", "close", "volume"]].copy()
         if "funding" in cols:
             inf = self._merge_funding(inf, pair)
+        if sleeve.family in NEEDS_MARKET:
+            inf = self._merge_market(inf, tf)
         res = fam.populate(inf, sleeve.params)
         keep = res[["date", "atr", "long_sig", "short_sig", "exit_long_sig", "exit_short_sig", "conviction"]].copy()
         m = merge_informative_pair(dataframe[["date"]].copy(), keep, self.timeframe, tf, ffill=True)
@@ -178,6 +202,8 @@ class AIBase(IStrategy):
         dataframe["atr"] = ta.atr(dataframe, 14)
         if self._needs_funding():
             dataframe = self._merge_funding(dataframe, metadata["pair"])
+        if self._needs_market():
+            dataframe = self._merge_market(dataframe, self.timeframe)
         return dataframe
 
     def populate_entry_trend(self, dataframe: pd.DataFrame, metadata: dict) -> pd.DataFrame:
@@ -186,7 +212,7 @@ class AIBase(IStrategy):
         sleeves = self.sleeves_for_pair(metadata["pair"])
         if not sleeves:
             return dataframe
-        cols = ["date", "open", "high", "low", "close", "volume"] + (["funding"] if "funding" in dataframe else [])
+        cols = ["date", "open", "high", "low", "close", "volume"] + [c for c in ("funding", "mkt_close") if c in dataframe]
         paused = self.entries_paused()
         free = pd.Series(True, index=dataframe.index)  # rows not yet claimed by a higher-priority sleeve
         for i, sleeve in enumerate(sleeves):

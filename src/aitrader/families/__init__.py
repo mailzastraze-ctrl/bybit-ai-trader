@@ -424,13 +424,48 @@ TURTLE = Family(
     signal_fn=_turtle, affinity="trend")
 
 
+# ------------------------------------------- relative strength vs the market (BTC)
+MARKET_PAIR = "BTC/USDT:USDT"
+
+
+def _rel_strength(df: pd.DataFrame, p: dict) -> pd.DataFrame:
+    """Information the classic indicators don't have: how a coin moves *relative to the
+    market* (BTC). Coins persistently out-/under-performing BTC tend to keep doing so for a
+    while (cross-sectional momentum). Needs a 'mkt_close' column merged by the strategy."""
+    no = pd.Series(False, index=df.index)
+    if "mkt_close" not in df or df["mkt_close"].isna().all():
+        return _sig(no, no, no, no, index=df.index)
+    ratio = np.log(df["close"] / df["mkt_close"].replace(0, np.nan))
+    n = int(p["rs_len"])
+    rs = ratio - ratio.shift(n)
+    w = max(4 * n, 200)
+    z = (rs - rs.rolling(w, min_periods=w // 2).mean()) / rs.rolling(w, min_periods=w // 2).std().replace(0, np.nan)
+    k, x = p["rs_z"], p["rs_exit"]
+    t = int(p["rs_trend"])
+    tr = ta.ema(df["close"], t) if t >= 20 else None
+    ok_l = (df["close"] > tr) if tr is not None else True
+    ok_s = (df["close"] < tr) if tr is not None else True
+    return _sig(ta.crossed_above(z, k) & ok_l, ta.crossed_below(z, -k) & ok_s, z < x, z > -x,
+                0.5 + z.abs() / (k + 1.0), index=df.index)
+
+
+REL_STRENGTH = Family(
+    name="rel_strength", title="Relative strength vs BTC",
+    description="Trades coins that break out of their usual performance relative to BTC (cross-sectional "
+                "momentum); exits when the relative move fades.",
+    entry_params=(Param("rs_len", "int", 12, 336, 72, "buy"), Param("rs_z", "float", 0.5, 3.0, 1.5, "buy", 2),
+                  Param("rs_exit", "float", -0.5, 1.5, 0.3, "buy", 2), Param("rs_trend", "int", 0, 400, 0, "buy")),
+    signal_fn=_rel_strength, affinity="trend")
+
+
 FAMILIES: dict[str, Family] = {f.name: f for f in (TREND_EMA, MEANREV_BB, DONCHIAN, SQUEEZE, TSMOM, FUNDING, ZSCORE,
                                                    SUPERTREND, MACD, ADX_DI, HULL, RSI_REVERT, STOCH,
-                                                   EMA_CROSS, BB_REVERT, TURTLE)}
+                                                   EMA_CROSS, BB_REVERT, TURTLE, REL_STRENGTH)}
 # families researched on 15m as well as 1h (short-horizon ideas; funding needs 1h alignment)
 MULTI_TF = {"zscore_revert", "meanrev_bb", "squeeze_momentum", "supertrend", "macd_cross", "adx_di", "hull_turn",
-            "rsi_revert", "stoch_cross", "ema_cross", "bb_revert", "turtle"}
+            "rsi_revert", "stoch_cross", "ema_cross", "bb_revert", "turtle", "rel_strength"}
 NEEDS_FUNDING = {"funding_reversal"}
+NEEDS_MARKET = {"rel_strength"}
 
 # Freqtrade strategy class name used for hyperopting each family.
 RESEARCH_CLASS: dict[str, str] = {
@@ -450,6 +485,7 @@ RESEARCH_CLASS: dict[str, str] = {
     "ema_cross": "FamEmaCross",
     "bb_revert": "FamBBRevert",
     "turtle": "FamTurtle",
+    "rel_strength": "FamRelStrength",
 }
 
 
@@ -460,4 +496,4 @@ def get_family(name: str) -> Family:
         raise ValueError(f"unknown family {name!r}; known: {sorted(FAMILIES)}") from e
 
 
-__all__ = ["EXIT_PARAMS", "FAMILIES", "NEEDS_FUNDING", "RESEARCH_CLASS", "Family", "Param", "get_family"]
+__all__ = ["EXIT_PARAMS", "FAMILIES", "MARKET_PAIR", "NEEDS_FUNDING", "NEEDS_MARKET", "RESEARCH_CLASS", "Family", "Param", "get_family"]

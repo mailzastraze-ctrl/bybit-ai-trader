@@ -16,7 +16,7 @@ from datetime import timedelta
 import numpy as np
 import pandas as pd
 
-from aitrader.families import RESEARCH_CLASS, get_family
+from aitrader.families import MARKET_PAIR, NEEDS_MARKET, RESEARCH_CLASS, get_family
 from aitrader.manifest import Manifest, Sleeve
 from aitrader.registry import Registry
 from aitrader.research import metrics as M
@@ -102,10 +102,11 @@ class Pipeline:
         # 1) data -----------------------------------------------------------
         self._progress(eid, "download")
         data_start = folds[0].train_start - timedelta(days=35)  # + 720-candle indicator warm-up
+        data_pairs = sorted(set(pairs) | ({MARKET_PAIR} if fam.name in NEEDS_MARKET else set()))
         if tf == rs.timeframe:
-            self.ft.download(job, base_cfg, pairs, f"{data_start:%Y%m%d}-")
+            self.ft.download(job, base_cfg, data_pairs, f"{data_start:%Y%m%d}-")
         else:
-            self.ft.download(job, base_cfg, pairs, f"{data_start:%Y%m%d}-", timeframe=tf)
+            self.ft.download(job, base_cfg, data_pairs, f"{data_start:%Y%m%d}-", timeframe=tf)
 
         # 2) walk-forward ---------------------------------------------------
         oos_trades, stress_trades, fold_reports, all_sharpes = [], [], [], []
