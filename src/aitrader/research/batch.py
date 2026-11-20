@@ -324,6 +324,16 @@ def cmd_cycle(out: Path, budget_min: float, run_id: str, server: str | None, max
         cmd_scan(out, reg)
         uni = json.loads((out / "universe.json").read_text())
         lab.run_event("scan", exchange=uni.get("exchange"), pairs=uni.get("pairs"))
+    if len(uni.get("pairs") or []) < 4 and s.research.exchange == "bybit":
+        log.error("Bybit universe empty (%s) – falling back to OKX data for this run", uni.get("pairs"))
+        lab.run_event("scan", exchange="bybit-failed", pairs=[])
+        s.research.exchange, s.research.relay, s.research.relay_token = "okx", "", ""
+        cmd_scan(out, reg)
+        uni = json.loads((out / "universe.json").read_text())
+    if len(uni.get("pairs") or []) < 4:
+        log.error("universe too small (%s) – no experiments this run", uni.get("pairs"))
+        lab.run_event("end", experiments=0, error="universe too small")
+        return None
     for p, d in uni.get("market", {}).items():
         reg.upsert("market", {"pair": p, "ts": uni["ts"], "data": d}, key="pair")
     pairs = uni["pairs"]

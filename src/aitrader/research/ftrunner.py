@@ -27,9 +27,12 @@ CCXT_LINEAR_ONLY = {"options": {"fetchMarkets": {"types": ["linear"]}}}
 
 def ccxt_config(settings: Settings) -> dict:
     cfg = dict(CCXT_LINEAR_ONLY) if settings.research.exchange == "bybit" else {}
-    if settings.research.relay:
-        # freqtrade hands ccxt_config to the sync and async ccxt instances
-        cfg["proxyUrl"] = settings.research.relay
+    if settings.research.relay and settings.research.exchange == "bybit":
+        # Route Bybit's REST base URLs through the live server's relay (EU egress). Using
+        # ccxt's own proxy options conflicts with ccxt's proxy-agent detection, so the API
+        # base URLs are overridden instead; freqtrade hands ccxt_config to sync + async ccxt.
+        base = settings.research.relay + "https://api.bybit.com"
+        cfg["urls"] = {"api": {k: base for k in ("spot", "futures", "v2", "public", "private")}}
         cfg["headers"] = {"X-Lab-Token": settings.research.relay_token}
     return cfg
 
