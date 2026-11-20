@@ -36,11 +36,24 @@ def persistent_secret(path, env_name: str) -> str:
     return val
 
 
+def _oom_adj(score: int):
+    """Raise a child's OOM score so the kernel kills research before the trading bot
+    when the container hits its memory limit (raising is always permitted)."""
+    def fn():
+        try:
+            with open("/proc/self/oom_score_adj", "w") as fh:
+                fh.write(str(score))
+        except OSError:
+            pass
+    return fn
+
+
 @dataclass
 class Proc:
     name: str
     cmd: list[str]
     env: dict = field(default_factory=dict)
+    oom_score: int = 0
     popen: subprocess.Popen | None = None
     restarts: int = 0
     started: float = 0.0
@@ -85,12 +98,15 @@ def main() -> None:
                  "FREQTRADE__API_SERVER__WS_TOKEN": ws}))
     else:
         reg.event("supervisor", "BYBIT_API_KEY / BYBIT_API_SECRET not set – trading bot NOT started", "error")
-    procs.append(Proc("manager", [py, "-m", "aitrader.manager"]))
+    procs.append(Proc("manager", [py, "-m", "aitrader.manager"], oom_score=300))
     if os.environ.get("RESEARCH_ENABLED", "1") != "0":
-        procs.append(Proc("research", ["nice", "-n", "10", py, "-m", "aitrader.research.worker"]))
+        # research (and every freqtrade hyperopt/backtest it spawns) is the first OOM victim
+        procs.append(Proc("research", ["nice", "-n", "10", py, "-m", "aitrader.research.worker"],
+                          oom_score=1000))
     port = os.environ.get("PORT", "8000")
     procs.append(Proc("web", [py, "-m", "uvicorn", "aitrader.web.app:app", "--host", "0.0.0.0",
-                              "--port", port, "--log-level", "warning", "--proxy-headers"]))
+                              "--port", port, "--log-level", "warning", "--proxy-headers"],
+                     oom_score=300))
 
     stopping = threading.Event()
 
@@ -102,7 +118,8 @@ def main() -> None:
 
     def start(p: Proc) -> None:
         log.info("starting %s", p.name)
-        p.popen = subprocess.Popen(p.cmd, env={**os.environ, **p.env})
+        p.popen = subprocess.Popen(p.cmd, env={**os.environ, **p.env},
+                                   preexec_fn=_oom_adj(p.oom_score) if p.oom_score else None)
         p.started = time.time()
 
     for p in procs:

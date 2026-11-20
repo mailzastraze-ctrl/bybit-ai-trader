@@ -4,7 +4,9 @@ FROM freqtradeorg/freqtrade:2026.10
 ENV PYTHONUNBUFFERED=1 \
     AITRADER_APP=/app \
     AITRADER_DATA=/data \
-    PYTHONUSERBASE=/home/ftuser/.local
+    PYTHONUSERBASE=/home/ftuser/.local \
+    MALLOC_ARENA_MAX=2 \
+    NUMEXPR_MAX_THREADS=2
 
 USER root
 RUN mkdir -p /app /data && chown -R ftuser:ftuser /app /data
