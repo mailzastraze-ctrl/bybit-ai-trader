@@ -55,6 +55,28 @@ class Generator:
                           (family,))
         return [r for r in rows if not r.get("expires") or r["expires"] > now]
 
+    def revalidation_spec(self, universe: list[str], every_days: int = 14) -> dict | None:
+        """Live strategies drift: periodically re-run walk-forward research for each
+        production/incubation strategy on its pairs with fresh data."""
+        from aitrader.util import parse_dt, utcnow
+        now = utcnow()
+        for st in self.reg.q("SELECT id, family, pairs, stage_since FROM strategies "
+                             "WHERE stage IN ('production','incubation','eligible') ORDER BY score DESC"):
+            since = parse_dt(st.get("stage_since"))
+            last = parse_dt((self.reg.kv_get("revalidated") or {}).get(st["id"]))
+            ref = last or since
+            if ref is None or (now - ref).days < every_days:
+                continue
+            spec = self.next_spec(universe, family=st["family"])
+            own = [p for p in (st.get("pairs") or []) if p in universe]
+            spec["pairs"] = (own + [p for p in spec["pairs"] if p not in own])[: max(len(own), self.s.research.pairs_per_experiment)]
+            spec["revalidates"] = st["id"]
+            marks = self.reg.kv_get("revalidated") or {}
+            marks[st["id"]] = iso()
+            self.reg.kv_set("revalidated", marks)
+            return spec
+        return None
+
     def next_spec(self, universe: list[str], family: str | None = None) -> dict:
         family = family or ucb_pick(self.family_stats(), rng=self.rng)
         fam = FAMILIES[family]

@@ -5,6 +5,7 @@ that the optimiser never saw. Builds the manifest the trading bot executes."""
 from __future__ import annotations
 
 import logging
+from datetime import timedelta
 
 from aitrader.families import FAMILIES
 from aitrader.learner import live_metrics
@@ -120,7 +121,10 @@ class Lifecycle:
                     self.reg.set_stage(s["id"], "retired", f"forward test failed: {n} trades, PF {pf}")
                 elif s["stage"] == "incubation" and age > lc.incubation_max_days:
                     self.reg.set_stage(s["id"], "retired", f"incubation timed out ({n} trades, PF {pf})")
-            elif s["stage"] == "production":
+            if s["stage"] in ("incubation", "eligible", "production") and self.diverges(s):
+                self.reg.set_stage(s["id"], "retired", "live results diverge from out-of-sample expectation")
+                continue
+            if s["stage"] == "production":
                 recent = self.reg.q("SELECT profit_abs FROM live_trades WHERE sleeve_id=? "
                                     "ORDER BY close_date DESC LIMIT ?", (s["id"], lc.production_window))
                 if len(recent) >= lc.production_window:
@@ -136,6 +140,26 @@ class Lifecycle:
 
         self._promote()
         self._fill_slots()
+
+    def diverges(self, s: dict, min_trades: int = 20) -> bool:
+        """Live mean trade return significantly (2 SE) below the OOS expectation and negative."""
+        import numpy as np
+        oos_exp = (s.get("oos") or {}).get("expectancy")
+        rows = self.reg.q("SELECT profit_ratio FROM live_trades WHERE sleeve_id=?", (s["id"],))
+        if oos_exp is None or oos_exp <= 0 or len(rows) < min_trades:
+            return False
+        r = np.array([float(x["profit_ratio"] or 0) for x in rows])
+        se = r.std(ddof=1) / np.sqrt(len(r)) if len(r) > 1 else 0
+        return bool(r.mean() < 0 and r.mean() < oos_exp - 2 * se)
+
+    def risk_multiplier(self, s: dict, prior: int = 20) -> float:
+        """Shift capital towards sleeves with proven live edge (shrunk towards PF=1)."""
+        live = s.get("live") or {}
+        n, pf = int(live.get("trades", 0)), float(live.get("profit_factor", 1.0) or 1.0)
+        if n < 10:
+            return 1.0
+        shrunk = (n * min(pf, 3.0) + prior * 1.0) / (n + prior)
+        return round(min(max(shrunk, 0.5), 1.5), 3)
 
     def _promote(self) -> None:
         lc = self.lc
@@ -165,6 +189,50 @@ class Lifecycle:
                 break
             self.reg.set_stage(cand["id"], "exploration", "relaxed gates passed → tiny-risk live experiment")
             n_exp += 1
+        # Always-on learning: keep the exploration lane busy with the best recent near-misses
+        # (profitable out-of-sample but failed a strict gate) so live evidence keeps flowing.
+        if n_exp < lc.max_exploration:
+            for cand in self.near_misses(lc.max_exploration - n_exp):
+                self.reg.set_stage(cand["id"], "exploration",
+                                   "always-on exploration: near-miss (positive OOS, failed a strict gate)")
+                n_exp += 1
+        self.ensure_activity()
+
+    def near_misses(self, k: int, days: int = 30) -> list[dict]:
+        cutoff = iso(utcnow() - timedelta(days=days))
+        out = []
+        for r in self.reg.q("SELECT * FROM strategies WHERE stage='rejected' AND created >= ? "
+                            "ORDER BY created DESC LIMIT 200", (cutoff,)):
+            o = r.get("oos") or {}
+            if r.get("pairs") and o.get("trades", 0) >= 10 and o.get("total_return", 0) > 0 \
+                    and o.get("profit_factor", 0) >= 1.0 and not str(r["id"]).startswith("rnd-"):
+                out.append(r)
+        out.sort(key=lambda r: -(r["oos"].get("sharpe", 0)))
+        return out[:k]
+
+    def ensure_activity(self) -> None:
+        """If nothing at all is trading, launch random-variant explorers on liquid pairs so the
+        system keeps generating live evidence instead of going idle."""
+        if self.reg.strategies(DEPLOYED):
+            return
+        import random
+        uni = (self.reg.kv_get("universe") or {}).get("pairs") or BOOT_PAIRS
+        rng = random.Random()
+        for _ in range(2):
+            fam = rng.choice(list(FAMILIES.values()))
+            params = fam.perturb(fam.defaults(), 0.25, rng)
+            pairs = rng.sample(uni, k=min(3, len(uni)))
+            sid = f"rnd-{fam.name[:5]}-{rng.randrange(16**6):06x}"
+            now = iso()
+            self.reg.upsert("strategies", {
+                "id": sid, "experiment_id": "", "family": fam.name, "params": params, "pairs": pairs,
+                "sides": ["long", "short"], "stage": "exploration", "score": 0.0,
+                "oos": {"variant": fam.variant(params)}, "gates": {}, "live": {}, "created": now,
+                "updated": now, "stage_since": now,
+                "history": [{"ts": now, "to": "exploration", "reason": "random explorer (nothing else trading)"}],
+                "note": "Random variant at exploration risk – keeps live learning active",
+            })
+            self.reg.event("lifecycle", f"{sid}: random explorer launched ({fam.variant(params)}) on {pairs}")
 
     # ------------------------------------------------------------------ manifest
     def build_manifest(self, open_trades: list[dict], excluded: set[str], paused: bool) -> Manifest:
@@ -181,7 +249,9 @@ class Lifecycle:
             taken.update(mine)
             stage = "incubation" if r["stage"] == "eligible" else r["stage"]
             sleeves.append(Sleeve(id=r["id"], family=r["family"], params=r["params"], pairs=mine,
-                                  stage=stage, risk=self.risk_for(r["stage"]),
+                                  stage=stage,
+                                  risk=round(self.risk_for(r["stage"]) * (self.risk_multiplier(r)
+                                             if r["stage"] in ("production", "incubation", "eligible") else 1.0), 6),
                                   leverage=self.lc.leverage, sides=r.get("sides") or ["long", "short"],
                                   score=float(r.get("score") or 0.0)))
         # retired sleeves that still hold positions keep managing them (no new entries)

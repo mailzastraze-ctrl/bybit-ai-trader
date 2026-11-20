@@ -71,7 +71,7 @@ def main() -> None:
                 continue
             n_pairs, epoch_factor, jobs = scale.params()
             s.research.hyperopt_jobs = jobs
-            spec = gen.next_spec(pairs)
+            spec = gen.revalidation_spec(pairs) or gen.next_spec(pairs)
             spec["pairs"] = spec["pairs"][:n_pairs]
             spec["epochs"] = max(30, int(base_epochs * epoch_factor))
             spec["scale_level"] = scale.level()

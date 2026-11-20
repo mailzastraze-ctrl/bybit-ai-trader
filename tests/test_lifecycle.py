@@ -281,3 +281,40 @@ def test_batch_run_merge_and_import(env, tmp_path, monkeypatch):
     assert life.import_offline_candidates(imp) == 0  # idempotent
     st = reg.one("SELECT * FROM strategies WHERE id=?", (m["candidates"][0]["id"],))
     assert "okx data" in st["note"]
+
+
+def test_always_on_exploration_near_miss_and_random_explorer(env):
+    s, reg = env
+    life = Lifecycle(s, reg)
+    # nothing deployed → random explorers keep live learning going
+    life.evaluate(10_000)
+    rnd = [r for r in reg.strategies(("exploration",)) if r["id"].startswith("rnd-")]
+    assert len(rnd) == 2 and all(r["pairs"] for r in rnd)
+    # a profitable near-miss gets an exploration slot
+    _strategy(reg, "near", "rejected", ["SOL/USDT:USDT"])
+    reg.update("strategies", "near", {"created": iso(), "oos": {"trades": 15, "total_return": 0.03,
+                                                                 "profit_factor": 1.1, "sharpe": 0.5}})
+    life.evaluate(10_000)
+    assert reg.one("SELECT stage FROM strategies WHERE id='near'")["stage"] == "exploration"
+
+
+def test_divergence_retires_and_risk_follows_live_edge(env):
+    s, reg = env
+    life = Lifecycle(s, reg)
+    _strategy(reg, "p1", "production", ["BTC/USDT:USDT"])
+    reg.update("strategies", "p1", {"oos": {"expectancy": 0.01}})
+    _live(reg, "p1", [-10, -12, 3] * 8)
+    life.evaluate(10_000)
+    assert reg.one("SELECT stage FROM strategies WHERE id='p1'")["stage"] == "retired"
+    assert life.risk_multiplier({"live": {"trades": 40, "profit_factor": 2.0}}) > 1.2
+    assert life.risk_multiplier({"live": {"trades": 40, "profit_factor": 0.6}}) < 0.9
+    assert life.risk_multiplier({"live": {"trades": 3, "profit_factor": 5}}) == 1.0
+
+
+def test_revalidation_spec_targets_stale_live_strategy(env):
+    s, reg = env
+    _strategy(reg, "old", "production", ["BTC/USDT:USDT"], family="meanrev_bb")
+    gen = Generator(s, reg, seed=3)
+    spec = gen.revalidation_spec(["BTC/USDT:USDT", "ETH/USDT:USDT", "SOL/USDT:USDT", "XRP/USDT:USDT"])
+    assert spec["revalidates"] == "old" and spec["family"] == "meanrev_bb" and spec["pairs"][0] == "BTC/USDT:USDT"
+    assert gen.revalidation_spec(["BTC/USDT:USDT"]) is None  # marked, not again for 14 days
