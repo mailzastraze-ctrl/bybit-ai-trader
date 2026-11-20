@@ -200,3 +200,21 @@ def test_pipeline_end_to_end(env, good):
     Lifecycle(s, reg).evaluate(10_000)
     man = Manifest.from_dict(Lifecycle(s, reg).build_manifest([], set(), False).to_dict())
     assert (st["id"] in {x.id for x in man.sleeves}) == good
+
+
+def test_runner_creates_userdir(env, monkeypatch):
+    """freqtrade exits with 'Directory ... does not exist' for a missing --userdir (seen in CI)."""
+    import subprocess
+
+    from aitrader.research.ftrunner import FreqtradeRunner, Job
+    s, _ = env
+    seen = {}
+
+    def fake_run(cmd, **kw):
+        seen["userdir_exists"] = Path(cmd[cmd.index("--userdir") + 1]).is_dir()
+        return subprocess.CompletedProcess(cmd, 0, stdout="[]", stderr="")
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    job = Job(s.jobs_dir / "xtest")
+    FreqtradeRunner(s).test_pairlist(job, job.path("c.json"))
+    assert seen["userdir_exists"]

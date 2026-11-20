@@ -9,10 +9,10 @@ jobs:
     name: Unit tests (framework stub)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
         with: {python-version: "3.13"}
-      - run: pip install pandas numpy pytest ruff
+      - run: pip install pandas numpy requests pytest ruff
       - run: ruff check src ft tests
       - run: pytest -q
 
@@ -20,7 +20,7 @@ jobs:
     name: Tests inside the real Freqtrade image
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - name: Build production image
         run: docker build -t aitrader:ci .
       - name: Run full test suite against real freqtrade + fastapi
@@ -30,4 +30,4 @@ jobs:
       - name: Freqtrade can load every strategy and the hyperopt loss
         run: |
           docker run --rm -w /app --entrypoint "" aitrader:ci sh -c \
-            "freqtrade list-strategies --strategy-path ft/strategies -1 && freqtrade list-hyperoptloss --hyperopt-path ft/hyperopts -1 | grep AIRobustLoss"
+            "freqtrade create-userdir --userdir /tmp/ud && freqtrade list-strategies --userdir /tmp/ud --strategy-path ft/strategies -1 | tee /tmp/s.txt && grep -q AIPortfolio /tmp/s.txt && grep -q FamSqueeze /tmp/s.txt && freqtrade list-hyperoptloss --userdir /tmp/ud --hyperopt-path ft/hyperopts -1 | grep AIRobustLoss"

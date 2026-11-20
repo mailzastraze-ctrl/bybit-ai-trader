@@ -89,6 +89,7 @@ class FreqtradeRunner:
             if k.startswith("FREQTRADE__"):
                 full_env.pop(k)
         job.root.mkdir(parents=True, exist_ok=True)
+        job.userdir.mkdir(parents=True, exist_ok=True)  # freqtrade refuses a missing --userdir
         log.info("freqtrade %s", " ".join(args[:3]))
         with open(job.path("freqtrade.log"), "a") as logf:
             logf.write(f"\n$ {' '.join(cmd)}\n")
