@@ -1,6 +1,6 @@
 # PROJECT_STATUS
 
-_Last updated: 2026-11-20 21:00 CET_
+_Last updated: 2026-11-20 22:00 CET_
 
 ## Summary
 The system is **deployed and running autonomously on Bybit Demo**. It never trades real money: `demo_trading` is hard-required.
@@ -26,6 +26,32 @@ Links and rules:
 | 7 | Web terminal | ✅ live | **Control room** (primary, desktop + phone): capital curve, positions with protection state, forward-test verdict, 4 live lab runners, results with fold squares, bandit, gates, lifecycle, goals, readiness, log, learnings, closed trades. **3D HQ v3** at `/hq`: real data on every screen (live 1h candles with entry/stop/target, live GitHub hyperopt epochs, fold results, gates, bandit, market map, goals). Company mission board, stand-up meetings built from real numbers, GitHub-lab cloud with data beam, expressive characters. Rendered headlessly on every UI change (`hq-preview` workflow, screenshots in `docs/preview/`, fails on JS errors) |
 | — | Cloud, independent of your PC | ✅ / ⚠️ | Railway **trial** credit runs out in about 15 days. Hobby is needed for indefinite operation |
 | — | GitHub + PROJECT_STATUS | ✅ | CI green with the real Freqtrade image; 113 tests |
+
+## Owner's Strategy Lab integrated + owner's rules (2026-11-20, 22:00)
+Research pipeline, end to end:
+1. **Stage 1, mass screener** (`screener/`, Node): the owner's Bybit Strategy Lab engine (`engine.js`, unchanged) tries thousands of strategy × parameter × exit combinations per coin and timeframe (15m + 1h, 1x, Bybit fees + slippage).
+   - It searches on the first 60% of the history.
+   - Survivors must stay profitable on the **unseen last 40%** with a steady equity curve (R² ≥ 0.5), a positive last 3 months, ≥ 15 trades, max drawdown < 30% and PF ≥ 1.15.
+2. **Stage 2, freqtrade walk-forward:** survivors run first on the 4 runners as fixed configurations: 4 unseen 90-day windows, double costs, Deflated Sharpe and steadiness.
+3. **Stage 3, forward test** on live Bybit data after freeze.
+4. **Stage 4, demo trading** at 0.1% risk, then readiness.
+
+Strategy families:
+- **16 families.** All 10 engine strategies have exact twins: SuperTrend, MACD, ADX+DI, Hull MA, RSI, Stochastic, Z-score, EMA cross, plain Bollinger, turtle. The 6 earlier families remain.
+- The owner's own SOL 15m z-score configuration is imported (`research/external/`). It is walk-forward tested with fixed parameters and forward-tested.
+
+Ranking and the trading bot:
+- **Equity steadiness** (owner's criterion), measured on unseen windows: curve R², share of profitable months, last 3 months. It is part of the ranking score and shown in the UI.
+- **One bot, two timeframes:** the demo bot runs on 15m candles. 1h strategies are computed on hourly candles and fire on the first 15m candle after the hourly close (no look-ahead). No second process is needed.
+
+Owner's rules:
+- **No leverage** (hard 1x cap in code).
+- **Maker-first entries and exits**: 0.02% instead of 0.055%. Stop-type exits cross immediately.
+- **Learning limits relaxed for demo:** up to 24 exploration strategies, 6 per family, 4 per coin, 45 coins, 40 open trades. Each trade risks 0.1%, and open risk is capped at 8%.
+
+Server footprint:
+- Measured: freqtrade ≈ 430 MB, web+manager ≈ 180 MB, CPU ≈ 0.03–0.06 vCPU. Estimated cost ≈ $7–9/month on Hobby; `MALLOC_ARENA_MAX=2` is set.
+- The owner paid for Hobby on 2026-11-20. Set a usage limit (e.g. $20).
 
 ## Forward test — "can this system make money?" (2026-11-20, 21:00)
 The direct answer to the owner's question, in days to weeks instead of months.
@@ -127,8 +153,8 @@ First run, 2026-11-20: scan finished at 14:56 UTC, experiments streaming.
 userdir must exist · absolute `file:////` pairlist URL · OOM on 1 GB (now: no research on the server) · universe too small · artifact permissions · forced-entry stake · keep-alive reset · hyperopt hang (watchdog) · weak candidates (stricter gates + retraction) · placeholders blocking research · CI missing psutil.
 
 ## Needs the owner
-1. **Railway Hobby** (with a hard usage limit) for operation beyond the trial (≈ $10/month measured; trial credit ≈ 15 days). This is the only payment needed now; compute is free on GitHub.
-2. The list of configurations from the owner's own strategy analyzer (`nvidia-trading-ai-2` keeps results in its database, not the repo). They will be added to the forward test.
+1. A usage limit in Railway (Hobby is paid since 2026-11-20).
+2. Optional: more configurations from the owner's Strategy Lab can be dropped into `research/external/*.json`; the screener already runs the same engine automatically.
 3. A second Railway project `boreal-quant-demo` (empty repo) appeared at 20:29 CET, not created by this system. It spends the same trial credit; delete it if unused.
 
 Owner decisions (2026-11-20): keep the current Bybit **Demo** API key (no rotation); make the repo public for free research compute.
