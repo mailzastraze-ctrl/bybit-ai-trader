@@ -60,13 +60,3 @@ export function staffBones(model) {
   model.traverse(node => { if (node.isBone) all[node.name] = node; });
   return Object.fromEntries(Object.entries(boneMap).map(([k, name]) => [k, all[name]]));
 }
-
-export function seatedClip(model) {
-  const clip = model.animations.find(a => a.name === "Sit_Stand");
-  if (!clip) return null;
-  const tracks = clip.tracks.map(track => {
-    const values = track.createInterpolant().evaluate(3.03);
-    return new track.constructor(track.name, [0], values);
-  });
-  return new THREE.AnimationClip("Seated", 1, tracks);
-}

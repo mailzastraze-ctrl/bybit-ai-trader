@@ -7,7 +7,9 @@ import { RoomEnvironment } from "three/addons/environments/RoomEnvironment.js";
 import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
 import * as SkeletonUtils from "three/addons/utils/SkeletonUtils.js";
 import { buildSurroundings, tileTexture } from "./hq-architecture.js";
-import { fittedProp, loadSurface, officeModels, seatedClip, staffBones } from "./hq-visual-assets.js";
+import { deskLayout, prepareStaffClips } from "./hq-staff-motion.js";
+import { mergeGeometries } from "three/addons/utils/BufferGeometryUtils.js";
+import { fittedProp, loadSurface, officeModels, staffBones } from "./hq-visual-assets.js";
 
 // ============================================================== utils
 const $ = s => document.querySelector(s);
@@ -57,13 +59,13 @@ const controls = new OrbitControls(camera, renderer.domElement);
 controls.target.copy(HOME_TGT); controls.enableDamping = true; controls.dampingFactor = 0.08;
 controls.maxPolarAngle = Math.PI * 0.46; controls.minDistance = 4; controls.maxDistance = 140;
 
-const hemi = new THREE.HemisphereLight(0xe0efff, 0x404050, 1.05); scene.add(hemi);
+const hemi = new THREE.HemisphereLight(0xd1e1fc, 0x47404a, 1.0); scene.add(hemi);
 const sun = new THREE.DirectionalLight(0xd9eaff, 2.15);
-sun.position.set(-18, 32, 16); sun.castShadow = true; sun.shadow.mapSize.set(2048, 2048);
+sun.position.set(-18, 32, 16); sun.castShadow = true; sun.shadow.mapSize.setScalar(Math.min(innerWidth,innerHeight) < 650 ? 1024 : 2048);
 Object.assign(sun.shadow.camera, {left: -28, right: 28, top: 24, bottom: -24, near: 3, far: 100});
 sun.shadow.bias = -0.0004; sun.shadow.normalBias = 0.02;
 scene.add(sun);
-const fill = new THREE.DirectionalLight(0xffe0b8, 1.06); fill.position.set(13, 18, -25); scene.add(fill);
+const fill = new THREE.DirectionalLight(0xffd5ac, 0.96); fill.position.set(13, 18, -25); scene.add(fill);
 const lobbyLight = new THREE.PointLight(0xffd8a7, 29, 17, 2);
 lobbyLight.position.set(7, 4.7, 1.1); scene.add(lobbyLight);
 
@@ -95,7 +97,7 @@ const M = {
   floor: new THREE.MeshStandardMaterial({map: tileTexture(canvasTex), roughness: 0.45, metalness: 0.08}),
   wall: new THREE.MeshStandardMaterial({color: 0x2f4152, roughness: 0.61, metalness: 0.18}),
   wallDark: new THREE.MeshStandardMaterial({color: 0x182a3a, roughness: 0.76}),
-  deskTop: new THREE.MeshStandardMaterial({color: 0xb0aeaa, roughness: 0.46, metalness: 0.08}),
+  deskTop: new THREE.MeshStandardMaterial({color: 0x958a79, roughness: 0.57, metalness: 0.035}),
   deskWood: new THREE.MeshStandardMaterial({map: woodTex, roughness: 0.51}),
   metal: new THREE.MeshStandardMaterial({color: 0x7d9ba6, roughness: 0.34, metalness: 0.72}),
   black: new THREE.MeshStandardMaterial({color: 0x15202b, roughness: 0.46, metalness: 0.29}),
@@ -112,7 +114,7 @@ const M = {
   warmLight: new THREE.MeshBasicMaterial({color: 0xffd6a8, toneMapped: false}),
   coolLight: new THREE.MeshBasicMaterial({color: 0x84d7e3, toneMapped: false}),
 };
-loadSurface(M.floor, "terrazzo", 2.8, 2.0, 0xacadb1, 0.4);
+loadSurface(M.floor, "terrazzo", 2.8, 2.0, 0x989da3, 0.24);
 loadSurface(M.deskWood, "oak", 1, 1, 0xcbbba5, 0.23);
 const [planterAsset, sofaAsset] = await Promise.all([officeModels.planter, officeModels.sofa]);
 function at(o, x, y, z) { o.position.set(x, y, z); return o; }
@@ -166,37 +168,71 @@ function block(x0, z0, x1, z1) {
   const [a, b] = toCell(Math.min(x0, x1), Math.min(z0, z1)), [c, d] = toCell(Math.max(x0, x1), Math.max(z0, z1));
   for (let i = a; i <= c; i++) for (let j = b; j <= d; j++) blocked[j * GX + i] = 1;
 }
-function blockObj(obj, pad = 0.15) { obj.updateMatrixWorld(true); const bb = new THREE.Box3().setFromObject(obj); block(bb.min.x - pad, bb.min.z - pad, bb.max.x + pad, bb.max.z + pad); }
+function blockObj(obj, pad = 0.15) { obj.updateWorldMatrix(true, true); const bb = new THREE.Box3().setFromObject(obj); block(bb.min.x - pad, bb.min.z - pad, bb.max.x + pad, bb.max.z + pad); }
 block(-W / 2, -D / 2, W / 2, -D / 2 + 0.6); block(-W / 2, -D / 2, -W / 2 + 0.6, D / 2);
+function freeStep(from, x, z) {
+  const [a,b] = toCell(from.x,from.z), [c,d] = toCell(x,z);
+  return !blocked[d*GX+c] && (a===c || b===d || (!blocked[b*GX+c] && !blocked[d*GX+a]));
+}
 function findPath(from, to) {
-  let [sx, sz] = toCell(from.x, from.z), [tx, tz] = toCell(to.x, to.z);
   const free = (x, z) => x >= 0 && z >= 0 && x < GX && z < GZ && !blocked[z * GX + x];
-  const nearestFree = (x, z) => { if (free(x, z)) return [x, z]; for (let r = 1; r < 8; r++) for (let dx = -r; dx <= r; dx++) for (let dz = -r; dz <= r; dz++) if (free(x + dx, z + dz)) return [x + dx, z + dz]; return [x, z]; };
-  [sx, sz] = nearestFree(sx, sz); [tx, tz] = nearestFree(tx, tz);
-  const key = (x, z) => z * GX + x, open = [[0, sx, sz]], g = new Map([[key(sx, sz), 0]]), came = new Map();
-  const h = (x, z) => Math.hypot(x - tx, z - tz);
-  const dirs = [[1, 0, 1], [-1, 0, 1], [0, 1, 1], [0, -1, 1], [1, 1, 1.414], [1, -1, 1.414], [-1, 1, 1.414], [-1, -1, 1.414]];
-  let guard = 0;
-  while (open.length && guard++ < 20000) {
-    let bi = 0; for (let i = 1; i < open.length; i++) if (open[i][0] < open[bi][0]) bi = i;
-    const [, x, z] = open.splice(bi, 1)[0];
+  function nearest(point) {
+    const [x, z] = toCell(point.x, point.z);
+    if (free(x, z)) return [x, z];
+    for (let r = 1; r < 10; r++) {
+      let best = null, cost = Infinity;
+      for (let dx = -r; dx <= r; dx++) for (let dz = -r; dz <= r; dz++) {
+        if (Math.max(Math.abs(dx), Math.abs(dz)) !== r || !free(x + dx, z + dz)) continue;
+        const d = toWorld(x + dx, z + dz).distanceToSquared(point);
+        if (d < cost) { best = [x + dx, z + dz]; cost = d; }
+      }
+      if (best) return best;
+    }
+    return null;
+  }
+  const start = nearest(from), end = nearest(to);
+  if (!start || !end) return [];
+  const [sx, sz] = start, [tx, tz] = end;
+  const goal = freeStep(to,to.x,to.z) ? to.clone() : toWorld(tx,tz);
+  // A sampled line includes its endpoints. A wall corner cannot be cut diagonally.
+  const clear = (a, b) => {
+    const n = Math.max(1, Math.ceil(a.distanceTo(b) / (CELL * 0.27)));
+    let [px, pz] = toCell(a.x, a.z);
+    for (let i = 1; i <= n; i++) {
+      const [x, z] = toCell(lerp(a.x, b.x, i/n), lerp(a.z, b.z, i/n));
+      if (!free(x, z) || (x !== px && z !== pz && (!free(px, z) || !free(x, pz)))) return false;
+      px = x; pz = z;
+    }
+    return true;
+  };
+  if (clear(from, goal)) return [goal];
+  const key = (x, z) => z * GX + x, open = [[0, sx, sz]], cost = new Map([[key(sx, sz), 0]]), came = new Map(), closed = new Set();
+  const dirs = [[1,0],[-1,0],[0,1],[0,-1],[1,1],[-1,1],[1,-1],[-1,-1]];
+  while (open.length) {
+    let best = 0;
+    for (let i = 1; i < open.length; i++) if (open[i][0] < open[best][0]) best = i;
+    const [, x, z] = open.splice(best, 1)[0], previous = key(x, z);
+    if (closed.has(previous)) continue;
+    closed.add(previous);
     if (x === tx && z === tz) break;
-    for (const [dx, dz, c] of dirs) {
-      const nx = x + dx, nz = z + dz;
-      if (!free(nx, nz) || (dx && dz && (!free(x + dx, z) || !free(x, z + dz)))) continue;
-      const ng = g.get(key(x, z)) + c, k = key(nx, nz);
-      if (ng < (g.get(k) ?? Infinity)) { g.set(k, ng); came.set(k, key(x, z)); open.push([ng + h(nx, nz), nx, nz]); }
+    for (const [dx, dz] of dirs) {
+      const nx = x + dx, nz = z + dz, k = key(nx, nz);
+      if (!free(nx,nz) || closed.has(k) || (dx && dz && (!free(x + dx,z) || !free(x,z + dz)))) continue;
+      const g = cost.get(previous) + (dx && dz ? Math.SQRT2 : 1);
+      if (g >= (cost.get(k) ?? Infinity)) continue;
+      cost.set(k,g); came.set(k,previous); open.push([g + Math.hypot(nx-tx,nz-tz),nx,nz]);
     }
   }
-  const pts = []; let k = key(tx, tz);
-  if (!came.has(k) && k !== key(sx, sz)) return [to.clone()];
-  while (k !== undefined && k !== key(sx, sz)) { pts.push(toWorld(k % GX, Math.floor(k / GX))); k = came.get(k); }
-  pts.reverse();
-  // string-pull: drop points with line of sight
-  const los = (a, b) => { const n = Math.ceil(a.distanceTo(b) / (CELL * 0.5)); for (let i = 1; i < n; i++) { const p = a.clone().lerp(b, i / n); const [cx, cz] = toCell(p.x, p.z); if (blocked[cz * GX + cx]) return false; } return true; };
-  const out = []; let cur = from.clone();
-  for (let i = 0; i < pts.length; i++) { if (i === pts.length - 1 || !los(cur, pts[i + 1])) { out.push(pts[i]); cur = pts[i]; } }
-  out.push(to.clone()); return out;
+  if (!closed.has(key(tx,tz))) return [];
+  const path = [];
+  for (let k = key(tx,tz); k !== key(sx,sz); k = came.get(k)) path.push(toWorld(k % GX, Math.floor(k/GX)));
+  path.reverse(); path.push(goal);
+  const out = []; let anchor = from;
+  for (let i = 0; i < path.length; i++) {
+    if (i < path.length - 1 && clear(anchor, path[i + 1])) continue;
+    if (anchor.distanceToSquared(path[i]) > 0.0001) { out.push(path[i]); anchor = path[i]; }
+  }
+  return out;
 }
 
 // ============================================================== screens (live canvases)
@@ -214,7 +250,33 @@ function drawSpark(g, x, y, w, h, pts, color) {
 }
 
 // ============================================================== furniture
-const seats = {}; // name -> {pos, face, desk}
+const UP_AXIS = new THREE.Vector3(0, 1, 0);
+const seats = {};
+const deskSolids = [];
+// Furniture shares materials. Batch the rigid pieces while keeping screens and
+// moving chairs addressable; across the floor, hundreds of submissions become a few.
+function batchSolids(parent, pieces) {
+  parent.updateWorldMatrix(true, false);
+  const inverse = parent.matrixWorld.clone().invert(), groups = new Map();
+  for (const piece of pieces) {
+    const key = [piece.material.uuid, piece.castShadow, piece.receiveShadow].join("/");
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(piece);
+  }
+  for (const group of groups.values()) {
+    if (group.length < 2) continue;
+    const parts = group.map(piece => {
+      piece.updateWorldMatrix(true, false);
+      const g = piece.geometry.index ? piece.geometry.toNonIndexed() : piece.geometry.clone();
+      return g.applyMatrix4(new THREE.Matrix4().multiplyMatrices(inverse, piece.matrixWorld));
+    });
+    const combined = mergeGeometries(parts);
+    parts.forEach(part => part.dispose());
+    if (!combined) continue;
+    const first = group[0], solid = mesh(combined, first.material, first.castShadow, first.receiveShadow);
+    group.forEach(part => part.removeFromParent()); parent.add(solid);
+  }
+}
 M.chair.map = carpetTex("#39434a");
 M.chair.map.repeat.set(1, 2);
 M.chair.color.setHex(0xacaeaf);
@@ -245,23 +307,42 @@ function lightPool(color, x, y, z, w, h, opacity) {
   scene.add(glow);
   return glow;
 }
+let chairTemplate;
 function chair() {
+  if (chairTemplate) return chairTemplate.clone();
   const g = new THREE.Group();
-  const seat = rbox(0.51, 0.09, 0.49, 0.04, M.chair); seat.position.y = 0.47; g.add(seat);
-  const back = rbox(0.43, 0.61, 0.065, 0.11, M.chair); back.position.set(0, 0.81, 0.22); back.rotation.x = -0.12; g.add(back);
-  const lumbar = rbox(0.35, 0.17, 0.053, 0.048, M.frame); lumbar.position.set(0, 0.65, 0.267); g.add(lumbar);
-  g.add(boxM(0.05, 0.4, 0.05, M.metal, 0, 0.25, 0));
-  for (const x of [-0.28, 0.28]) {
-    g.add(boxM(0.032, 0.16, 0.035, M.frame, x, 0.55, 0.035));
-    g.add(boxM(0.07, 0.035, 0.24, M.black, x, 0.638, 0.025));
+  const cushion = rbox(0.50, 0.46, 0.068, 0.095, M.chair);
+  cushion.rotation.x = -Math.PI / 2; cushion.position.y = 0.484; g.add(cushion);
+  const backGeo = new THREE.PlaneGeometry(1, 1, 16, 16);
+  const vertices = backGeo.attributes.position;
+  for (let i = 0; i < vertices.count; i++) {
+    const u = vertices.getX(i) * 2, v = vertices.getY(i) + 0.5;
+    const width = 0.219 + 0.025 * Math.sin(v * Math.PI) - 0.033 * v ** 3;
+    vertices.setXYZ(i, u * width, 0.56 + v * 0.50 - 0.032 * u*u * v**4,
+      0.184 + v * 0.095 - 0.065 * u*u - 0.025 * Math.sin(v * 2 * Math.PI));
+  }
+  backGeo.computeVertexNormals();
+  const textile = M.chair.clone(); textile.side = THREE.DoubleSide;
+  g.add(mesh(backGeo, textile));
+  const lumbar = rbox(0.30, 0.107, 0.039, 0.046, M.frame);
+  lumbar.position.set(0, 0.71, 0.234); g.add(lumbar);
+  g.add(boxM(0.051, 0.36, 0.044, M.frame, 0, 0.58, 0.238));
+  const piston = mesh(new THREE.CylinderGeometry(0.028, 0.035, 0.34, 12), M.metal);
+  piston.position.y = 0.25; g.add(piston);
+  for (const x of [-0.259, 0.259]) {
+    g.add(boxM(0.028, 0.14, 0.032, M.frame, x, 0.55, 0.039));
+    const pad = rbox(0.059, 0.027, 0.205, 0.015, M.black);
+    pad.position.set(x, 0.621, 0.018); g.add(pad);
   }
   for (let i = 0; i < 5; i++) {
     const a = i / 5 * Math.PI * 2;
-    const leg = boxM(0.31, 0.031, 0.038, M.metal, Math.cos(a) * 0.15, 0.066, Math.sin(a) * 0.15); leg.rotation.y = -a; g.add(leg);
-    const wheel = mesh(new THREE.CylinderGeometry(0.033, 0.033, 0.028, 12), M.black, false);
-    wheel.rotation.set(Math.PI / 2, 0, -a); wheel.position.set(Math.cos(a) * 0.29, 0.033, Math.sin(a) * 0.29); g.add(wheel);
+    const leg = boxM(0.30, 0.028, 0.037, M.metal, Math.cos(a) * 0.15, 0.076, Math.sin(a) * 0.15);
+    leg.rotation.y = -a; g.add(leg);
+    const wheel = mesh(new THREE.CylinderGeometry(0.036, 0.036, 0.048, 12), M.black, false);
+    wheel.rotation.set(Math.PI / 2, 0, -a); wheel.position.set(Math.cos(a) * 0.283, 0.036, Math.sin(a) * 0.283); g.add(wheel);
   }
-  return g;
+  batchSolids(g, g.children.slice()); chairTemplate = g;
+  return g.clone();
 }
 function plant(x, z, s = 1) {
   const g = new THREE.Group();
@@ -283,7 +364,8 @@ function plant(x, z, s = 1) {
 function desk(name, x, z, rot = 0, opts = {}) {
   const g = new THREE.Group();
   workstationShadows.push([x, z, rot]);
-  const top = rbox(1.6, 0.061, 0.8, 0.027, opts.dark ? M.deskWood : M.deskTop); top.position.y = 0.74; g.add(top);
+  const top = rbox(1.6, 0.80, 0.046, 0.048, opts.dark ? M.deskWood : M.deskTop);
+  top.rotation.x = -Math.PI / 2; top.position.y = 0.733; g.add(top);
   g.add(boxM(1.54, 0.025, 0.68, M.frame, 0, 0.699, 0));
   g.add(boxM(1.46, 0.012, 0.021, opts.dark ? M.brass : M.metal, 0, 0.705, 0.313));
   for (const dx of [-0.72, 0.72]) {
@@ -308,18 +390,22 @@ function desk(name, x, z, rot = 0, opts = {}) {
   const scr = monitor(opts.second ? 0.72 : 0.82, 0.40, opts.second ? -0.19 : 0, 1.125, 0.21, 0);
   if (opts.second) scr.second = monitor(0.49, 0.31, 0.455, 1.08, 0.14, -0.32);
   const keyboard = new THREE.Mesh(new THREE.PlaneGeometry(0.43, 0.15), keyboardMat);
-  g.add(boxM(0.64, 0.007, 0.29, M.chair, 0.065, 0.775, -0.088));
-  keyboard.position.set(-0.02, 0.778, -0.085); keyboard.rotation.x = -Math.PI / 2; g.add(keyboard);
+  g.add(boxM(0.77, 0.008, 0.29, M.chair, -0.040, 0.762, deskLayout.keyboardZ));
+  g.add(boxM(0.444, 0.012, 0.155, M.black, 0.018, 0.772, deskLayout.keyboardZ));
+  keyboard.position.set(0.018, 0.780, deskLayout.keyboardZ); keyboard.rotation.x = -Math.PI / 2; g.add(keyboard);
   const mouse = mesh(new THREE.SphereGeometry(1, 12, 8), M.black, false, false);
-  mouse.scale.set(0.036, 0.018, 0.066); mouse.position.set(0.31, 0.777, -0.083); g.add(mouse);
+  mouse.scale.set(0.036, 0.018, 0.066); mouse.position.set(deskLayout.mouseX, 0.776, deskLayout.keyboardZ - 0.008); g.add(mouse);
   if (Math.random() > 0.5) { const mug = mesh(new THREE.CylinderGeometry(0.04, 0.035, 0.09, 12), new THREE.MeshStandardMaterial({color: pick([0xe66767, 0x3987e5, 0xfab219, 0xffffff])})); mug.position.set(-0.55, 0.81, -0.1); g.add(mug); }
   if (Math.random() > 0.6) { const p = boxM(0.21, 0.01, 0.3, M.paper, 0.45, 0.77, -0.1); p.rotation.y = 0.3; g.add(p); }
-  const ch = chair(); ch.position.set(0, 0, -0.7); ch.rotation.y = Math.PI; g.add(ch);
+  g.traverse(o => { if (o.isMesh && o !== scr.mesh && o !== scr.second?.mesh) deskSolids.push(o); });
+  const ch = chair(); ch.position.set(0, deskLayout.floorY, deskLayout.seatZ); ch.rotation.y = Math.PI; g.add(ch);
   g.position.set(x, 0, z); g.rotation.y = rot; scene.add(g);
   blockObj(top, 0.1);
-  const seatPos = new THREE.Vector3(0, 0, -0.62).applyAxisAngle(new THREE.Vector3(0, 1, 0), rot).add(g.position);
-  const approach = new THREE.Vector3(0, 0, -1.35).applyAxisAngle(new THREE.Vector3(0, 1, 0), rot).add(g.position);
-  seats[name] = {pos: seatPos, approach, face: rot, desk: g, screen: scr, chair: ch, taken: null};
+  const mark = (x, z) => new THREE.Vector3(x, 0, z).applyAxisAngle(UP_AXIS, rot).add(g.position);
+  const seatPos = mark(0, deskLayout.feetZ), dock = mark(0, deskLayout.feetZ - deskLayout.pullback);
+  const approach = mark(1.35, -0.97), chairCenter = mark(0, deskLayout.seatZ - 0.10);
+  block(chairCenter.x - 0.24, chairCenter.z - 0.24, chairCenter.x + 0.24, chairCenter.z + 0.24);
+  seats[name] = {pos: seatPos, dock, approach, face: rot, desk: g, screen: scr, chair: ch, taken: null};
   return seats[name];
 }
 function rug(x, z, w, d, hex, accent) {
@@ -378,10 +464,11 @@ function acousticPanel(x, width, tint) {
   lightPool(tint, x, 0.009, z + 0.5, width * 1.9, 2, 0.16);
 }
 function pendant(x, z, width) {
-  const y = 3.05;
+  const y = 3.38;
   const housing = boxM(width, 0.07, 0.125, M.black, x, y, z);
   housing.castShadow = false;
-  scene.add(housing, boxM(width - 0.13, 0.017, 0.052, M.warmLight, x, y - 0.04, z));
+  scene.add(housing, boxM(width - 0.13, 0.017, 0.076, M.warmLight, x, y - 0.04, z));
+  for (const side of [-1,1]) scene.add(boxM(0.036,0.073,0.13,M.brass,x + side*(width/2 - 0.03),y,z));
   for (const side of [-1, 1]) scene.add(boxM(0.014, 0.71, 0.014, M.frame, x + side * width * 0.40, 3.43, z));
   lightPool(0xffe0b8, x, 0.032, z, width + 1.3, 3.7, 0.14);
 }
@@ -401,7 +488,7 @@ scene.add(boxM(13.36, 3.48, 0.22, M.black, 0, 2.16, -14.76), boxM(13.4, 0.03, 0.
 scene.add(boxM(0.082, 3.45, 0.08, M.frame, -6.62, 2.16, -14.65), boxM(0.082, 3.45, 0.08, M.frame, 6.62, 2.16, -14.65));
 lightPool(0x53a8fa, 0, 0.006, -13.15, 16, 4.8, 0.34);
 acousticPanel(-7.27, 1.15, 0xe4bd8d); acousticPanel(7.27, 1.15, 0xe4bd8d);
-pendant(0, -9.8, 12.1);
+pendant(-3.65, -11.38, 3.2); pendant(3.65, -11.38, 3.2);
 
 // --- Research lab (north-west), whiteboard
 dept("research", "Research Lab", -15.5, -8.5, 0x78e7d1);
@@ -455,9 +542,9 @@ table.position.set(-1.8, 0, 8.6); scene.add(table); blockObj(tTop, 0.15);
 for (const x of [-4.28, 0.65]) {
   const seat = chair();
   seat.position.set(x, 0, 8.62); seat.rotation.y = x < -1 ? -Math.PI / 2 : Math.PI / 2;
-  scene.add(seat);
+  scene.add(seat); block(x - 0.26, 8.36, x + 0.26, 8.88);
 }
-const meetSpots = [new THREE.Vector3(-3.6, 0, 8.6), new THREE.Vector3(0, 0, 8.6), new THREE.Vector3(-1.8, 0, 7.4), new THREE.Vector3(-1.8, 0, 9.8)];
+
 const lampBar = new THREE.Group(), lamps = [];
 lampBar.add(boxM(6.83, 0.54, 0.14, M.frame, 0, 0, 0));
 lampBar.add(boxM(6.68, 0.392, 0.05, M.black, 0, 0, 0.086));
@@ -570,12 +657,13 @@ const coffee = new THREE.Group(); coffee.add(boxM(0.45, 0.55, 0.4, M.black, 0, 1
 const coffeeLed = mesh(new THREE.SphereGeometry(0.025, 8, 6), new THREE.MeshBasicMaterial({color: 0xff6b3d})); coffeeLed.position.set(0.15, 1.35, 0.205); coffee.add(coffeeLed);
 coffee.position.x = -0.9; kitchen.add(coffee);
 kitchen.position.set(18.8, 0, 0); kitchen.rotation.y = -Math.PI / 2; scene.add(kitchen); blockObj(kitchen.children[0], 0.1);
-const coffeeSpots = [new THREE.Vector3(17.4, 0, 0.9), new THREE.Vector3(16.6, 0, -0.4), new THREE.Vector3(17.6, 0, -1.4)];
+
 // lifecycle manager (CEO) desk in the middle
 dept("ceo", "Lifecycle Office", 6.5, 0.5, 0xe1a0ac);
 departments.ceo.anchor.set(7.8, 3.3, 0.5);
 lightPool(0xe5ae80, 6.5, 0.007, 0.7, 6.2, 5.1, 0.15);
 const ceoSeat = desk("ceo", 6.5, 0.8, -Math.PI / 2, {dark: true, second: true});
+batchSolids(scene, deskSolids);
 {
   const shadowMat = new THREE.MeshBasicMaterial({map: softDisc, color: 0x162331, transparent: true, opacity: 0.43, depthWrite: false});
   const shadows = new THREE.InstancedMesh(poolGeo, shadowMat, workstationShadows.length);
@@ -597,6 +685,8 @@ const missionScr = screen(6.4, 2.25, 1024, 360);
   mb.add(rbox(6.7, 2.5, 0.17, 0.075, M.black));
   mb.children[0].position.z = -0.11;
   missionScr.mesh.position.z = 0.0; mb.add(missionScr.mesh);
+  const reverse = new THREE.Mesh(missionScr.mesh.geometry, missionScr.mesh.material);
+  reverse.rotation.y = Math.PI; reverse.position.z = -0.205; mb.add(reverse);
   mb.add(boxM(6.45, 0.025, 0.044, M.coolLight, 0, -1.165, -0.011));
   for (const x of [-3.2, 3.2]) {
     mb.add(boxM(0.12, 3.3, 0.12, M.frame, x, -1.6, -0.1));
@@ -658,18 +748,27 @@ const pipeLine = new THREE.Mesh(new THREE.TubeGeometry(pipeline, 156, 0.013, 6, 
 scene.add(pipeLine);
 let flowSpeed = 0.02;
 
+// Snap each side approach to an open aisle after walls and all furniture are in
+// the grid. People cross the reserved chair bay only to enter or leave that seat.
+for (const seat of Object.values(seats)) {
+  for (const [x,z] of [[1.35,-0.97],[-1.35,-0.97],[1.45,-1.16],[-1.45,-1.16],[1.56,-1.28],[-1.56,-1.28]]) {
+    const candidate = seat.desk.localToWorld(new THREE.Vector3(x,0,z));
+    if (freeStep(candidate,candidate.x,candidate.z)) { seat.approach.copy(candidate); break; }
+  }
+}
+
 // ============================================================== characters
 const SKIN = [0xf3cfa9, 0xe5b88f, 0xc68e5e, 0x8d5a3a, 0xf6d9c2, 0xb07a4f];
 const HAIR = [0x2b2018, 0x5a3b22, 0x0f0f10, 0xa4774c, 0xd9b26a, 0x8a8a8a, 0x6e2b1d];
 const OUTFIT = {trader: [0xe8e6e0, 0xcfd6e2], research: [0xf6f6f2], risk: [0x2f3a52], scanner: [0x1baf7a], learn: [0x7a6fd6], ops: [0x3b3f47], ceo: [0x1f2433]};
 const PANTS = [0x2a2f3a, 0x3b3b40, 0x24364f, 0x403527];
 const chars = [];
-const UP = new THREE.Vector3(0, 1, 0);
+const UP = UP_AXIS;
 
 // ---- skinned office cast. The lightweight rigs remain as fallbacks for failed asset loads.
 const staff = await Promise.all([officeModels["staff-sam"], officeModels["staff-maya"], officeModels["staff-harper"]]);
 const [maleStaff, femaleStaff, suitedStaff] = staff;
-for (const model of staff) if (model) model.sitPose = seatedClip(model);
+for (const model of staff) if (model) prepareStaffClips(model);
 const XBOT_URL = "https://raw.githubusercontent.com/mrdoob/three.js/r170/examples/models/gltf/Xbot.glb";
 let XBOT = null;
 if (!staff.some(Boolean)) try {
@@ -684,6 +783,7 @@ const officeCast = {
   Mila: suitedStaff, Ada: suitedStaff, Lena: femaleStaff, Ines: femaleStaff, Noor: femaleStaff,
   Priya: femaleStaff, Sofia: suitedStaff, Hana: femaleStaff, Zara: femaleStaff,
 };
+const garmentColors = {Jonas: 0x60748b, Marco: 0x996f5c, Eli: 0x71978a, Tom: 0x7491a0, Priya: 0x76648c, Hana: 0xbc9287, Zara: 0x98abb4, Lena: 0x638d8a, Ines: 0xbc996d, Noor: 0x838aa4, Sam: 0x596871, Ravi: 0x6e8e7d, Kenji: 0x92a4b2, Omar: 0x976e62, Viktor: 0x606978};
 const suitTints = {trader: 0xc1d7ef, research: 0xc3d9d6, risk: 0xb5bfc4, scanner: 0xc9e2c9, learn: 0xdad0eb, ops: 0xabbaca, ceo: 0xf0dad0};
 // Clothing shader: the mannequin's single surface is painted as skin, hair, shirt/jacket,
 // trousers, belt, shoes (and lab coat / tie) by bind-pose height, so staff read as people.
@@ -735,7 +835,7 @@ const _q1 = new THREE.Quaternion(), _q2 = new THREE.Quaternion(), _delta = new T
 const _v1 = new THREE.Vector3(), _v2 = new THREE.Vector3();
 function rotWorld(bone, axis, angle) {
   // rotate a bone about a WORLD axis, independent of the rig's local bone axes
-  if (!bone || !angle) return;
+  if (!bone || Math.abs(angle) < 0.00001) return;
   bone.parent.getWorldQuaternion(_q1);
   _q2.setFromAxisAngle(axis, angle);
   _delta.copy(_q1).invert().multiply(_q2).multiply(_q1);
@@ -747,93 +847,92 @@ class Person {
   constructor(name, role, home, opts = {}) {
     this.name = name; this.role = role; this.homeSeat = home; this.state = "idle"; this.queue = [];
     this.speed = rand(1.15, 1.45); this.phase = rand(0, 10); this.talkT = 0; this.mood = 0; this.speaking = false;
-    this.blinkT = rand(1, 4); this.lookTarget = null; this.carryObj = null; this.sitBlend = 0; this.line = "";
-    const skin = new THREE.MeshStandardMaterial({color: pick(SKIN), roughness: 0.6});
-    const top = new THREE.MeshStandardMaterial({color: pick(OUTFIT[role] || [0xdddddd]), roughness: 0.75});
-    const pants = new THREE.MeshStandardMaterial({color: pick(PANTS), roughness: 0.8});
-    const hairM = new THREE.MeshStandardMaterial({color: pick(HAIR), roughness: 0.7});
-    const shoeM = new THREE.MeshStandardMaterial({color: 0x1a1a1c, roughness: 0.5});
-    const R = new THREE.Group(); this.root = R;
-    this.hitArea = new THREE.Mesh(hitShape, hitMat);
-    this.hitArea.position.y = 0.825; R.add(this.hitArea);
-    // shadow blob
-    const blob = new THREE.Mesh(new THREE.CircleGeometry(0.32, 20), new THREE.MeshBasicMaterial({color: 0x000000, transparent: true, opacity: 0.22, depthWrite: false}));
-    blob.rotation.x = -Math.PI / 2; blob.position.y = 0.015; R.add(blob); this.blob = blob;
-    const hips = new THREE.Group(); hips.position.y = 0.92; R.add(hips); this.hips = hips;
-    { const pelvis = mesh(new THREE.CapsuleGeometry(0.13, 0.12, 4, 10), pants); pelvis.scale.set(1.25, 1, 0.8); hips.add(pelvis); }
-    const torso = new THREE.Group(); torso.position.y = 0.08; hips.add(torso); this.torso = torso;
-    const chest = mesh(new THREE.CapsuleGeometry(0.17, 0.3, 4, 12), top); chest.scale.set(1.15, 1, 0.72); chest.position.y = 0.27; torso.add(chest);
-    const collar = mesh(new THREE.TorusGeometry(0.068, 0.02, 6, 18), new THREE.MeshStandardMaterial({color: new THREE.Color(top.color).multiplyScalar(0.82), roughness: 0.7}));
-    collar.rotation.x = Math.PI / 2; collar.position.y = 0.515; collar.scale.set(1, 0.8, 1); torso.add(collar);
-    const belt = mesh(new THREE.CylinderGeometry(0.168, 0.168, 0.045, 18), new THREE.MeshStandardMaterial({color: 0x2a2320, roughness: 0.5})); belt.scale.z = 0.78; belt.position.y = 0.075; hips.add(belt);
-    const buckle = boxM(0.04, 0.03, 0.01, M.metal, 0, 0.075, 0.132); hips.add(buckle);
-    if (role === "research") { const coat = mesh(new THREE.CylinderGeometry(0.21, 0.25, 0.62, 14, 1, true), new THREE.MeshStandardMaterial({color: 0xfdfdfb, roughness: 0.8, side: THREE.DoubleSide})); coat.position.y = 0.12; coat.scale.z = 0.75; torso.add(coat); }
-    if (role === "ceo" || role === "risk") { const tie = boxM(0.045, 0.24, 0.02, new THREE.MeshStandardMaterial({color: role === "ceo" ? 0xd55181 : 0xeda100}), 0, 0.33, 0.125); torso.add(tie); }
-    if (opts.badge) { const b = boxM(0.06, 0.08, 0.01, new THREE.MeshStandardMaterial({color: 0x3987e5, emissive: 0x3987e5, emissiveIntensity: .4}), 0.09, 0.36, 0.126); torso.add(b); }
-    const neck = mesh(new THREE.CylinderGeometry(0.05, 0.055, 0.09, 10), skin); neck.position.y = 0.55; torso.add(neck);
-    const head = new THREE.Group(); head.position.y = 0.6; torso.add(head); this.head = head;
-    const skull = mesh(new THREE.SphereGeometry(0.115, 20, 16), skin); skull.scale.set(0.95, 1.1, 1.0); skull.position.y = 0.11; head.add(skull);
-    const nose = mesh(new THREE.SphereGeometry(0.02, 8, 6), skin); nose.position.set(0, 0.1, 0.11); head.add(nose);
-    const white = new THREE.MeshStandardMaterial({color: 0xf7f5f0, roughness: 0.35});
-    const eyeM = new THREE.MeshStandardMaterial({color: 0x1b1a1f, roughness: 0.2});
-    this.eyes = [-0.042, 0.042].map(x => { const g = new THREE.Group(); g.position.set(x, 0.135, 0.097);
-      const w = mesh(new THREE.SphereGeometry(0.019, 12, 8), white, false); w.scale.set(1, 0.85, 0.55); g.add(w);
-      const pu = mesh(new THREE.SphereGeometry(0.0105, 10, 8), eyeM, false); pu.position.z = 0.0085; g.add(pu); g.userData.pupil = pu; head.add(g); return g; });
-    this.brows = [-0.043, 0.043].map((x, i) => { const b = boxM(0.042, 0.009, 0.012, hairM, x, 0.172, 0.104); b.castShadow = false; b.userData.side = i ? -1 : 1; head.add(b); return b; });
-    this.mouth = new THREE.Group(); this.mouth.position.set(0, 0.06, 0.104); head.add(this.mouth);
-    this.smile = mesh(new THREE.TorusGeometry(0.021, 0.0048, 6, 14, Math.PI), new THREE.MeshStandardMaterial({color: 0x8a3f37, roughness: 0.6}), false);
-    this.smile.rotation.z = Math.PI; this.mouth.add(this.smile);
-    this.mouthOpen = mesh(new THREE.SphereGeometry(0.016, 10, 8), new THREE.MeshStandardMaterial({color: 0x3a1512}), false);
-    this.mouthOpen.scale.set(1.15, 0.15, 0.4); this.mouthOpen.position.y = 0.002; this.mouth.add(this.mouthOpen);
-    [-1, 1].forEach(sd => { const e = mesh(new THREE.SphereGeometry(0.027, 10, 8), skin); e.scale.set(0.45, 1, 0.8); e.position.set(sd * 0.111, 0.118, -0.005); head.add(e); });
-    const style = opts.hair ?? Math.floor(Math.random() * 4);
-    const cap = mesh(new THREE.SphereGeometry(0.122, 20, 12, 0, Math.PI * 2, 0, Math.PI * 0.55), hairM); cap.position.y = 0.125; cap.scale.set(1, 1.1, 1.05); head.add(cap);
-    if (style === 1) { const pony = mesh(new THREE.CapsuleGeometry(0.04, 0.14, 4, 8), hairM); pony.position.set(0, 0.08, -0.12); pony.rotation.x = 0.4; head.add(pony); }
-    if (style === 2) { const bun = mesh(new THREE.SphereGeometry(0.06, 12, 10), hairM); bun.position.set(0, 0.23, -0.06); head.add(bun); }
-    if (style === 3) { const long = mesh(new THREE.CylinderGeometry(0.12, 0.13, 0.22, 16, 1, true, Math.PI * 0.6, Math.PI * 0.8), hairM); long.position.set(0, 0.04, 0); long.rotation.y = Math.PI; head.add(long); }
-    if (role === "trader") { const hs = mesh(new THREE.TorusGeometry(0.125, 0.012, 6, 20, Math.PI), M.black); hs.position.y = 0.13; hs.rotation.z = 0; head.add(hs);
-      const mic = boxM(0.012, 0.012, 0.1, M.black, 0.1, 0.06, 0.06); mic.rotation.y = 0.5; head.add(mic); }
-    if (role === "research" && Math.random() > .4) { const gl = mesh(new THREE.TorusGeometry(0.03, 0.006, 6, 14), M.black); [-0.04, 0.04].forEach(x => { const g2 = gl.clone(); g2.position.set(x, 0.13, 0.108); head.add(g2); }); }
-    const arm = (side) => {
-      const sh = new THREE.Group(); sh.position.set(side * 0.215, 0.43, 0); torso.add(sh);
-      const cap = mesh(new THREE.SphereGeometry(0.062, 12, 10), top); cap.scale.set(1, 0.9, 0.9); sh.add(cap);
-      const upper = mesh(new THREE.CapsuleGeometry(0.048, 0.2, 4, 8), top); upper.position.y = -0.13; sh.add(upper);
-      const el = new THREE.Group(); el.position.y = -0.27; sh.add(el);
-      const fore = mesh(new THREE.CapsuleGeometry(0.042, 0.19, 4, 8), role === "research" ? top : skin); fore.position.y = -0.12; el.add(fore);
-      const hand = mesh(new THREE.SphereGeometry(0.047, 10, 8), skin); hand.position.y = -0.26; hand.scale.set(0.9, 1.15, 0.7); el.add(hand);
-      sh.rotation.z = side * 0.08; return {sh, el, hand};
-    };
-    this.armL = arm(1); this.armR = arm(-1);
-    // hand props (right hand): coffee cup, phone, tablet
-    const cupM = new THREE.MeshStandardMaterial({color: pick([0xffffff, 0xe66767, 0x3987e5, 0xfab219]), roughness: 0.4});
-    const cup = mesh(new THREE.CylinderGeometry(0.036, 0.03, 0.085, 14), cupM); cup.position.set(0, -0.3, 0.045);
-    const phone = rbox(0.055, 0.11, 0.012, 0.008, M.black); phone.position.set(0, -0.3, 0.035); phone.rotation.x = 0.2;
-    const tablet = new THREE.Group(); tablet.add(rbox(0.22, 0.3, 0.014, 0.015, M.black));
-    const tScr = mesh(new THREE.PlaneGeometry(0.19, 0.26), new THREE.MeshBasicMaterial({color: 0x3987e5, toneMapped: false}), false, false); tScr.position.z = 0.008; tablet.add(tScr);
-    tablet.position.set(0.02, -0.34, 0.08); tablet.rotation.set(-1.2, 0, 0);
-    this.props = {cup, phone, tablet}; for (const o of Object.values(this.props)) { o.visible = false; this.armR.el.add(o); }
-    const leg = (side) => {
-      const hp = new THREE.Group(); hp.position.set(side * 0.09, 0, 0); hips.add(hp);
-      const thigh = mesh(new THREE.CapsuleGeometry(0.068, 0.32, 4, 8), pants); thigh.position.y = -0.21; hp.add(thigh);
-      const kn = new THREE.Group(); kn.position.y = -0.43; hp.add(kn);
-      const shin = mesh(new THREE.CapsuleGeometry(0.058, 0.32, 4, 8), pants); shin.position.y = -0.2; kn.add(shin);
-      const an = new THREE.Group(); an.position.y = -0.42; kn.add(an);
-      const shoe = rbox(0.11, 0.07, 0.25, 0.03, shoeM); shoe.position.set(0, -0.02, 0.045); an.add(shoe);
-      return {hp, kn, an};
-    };
-    this.legL = leg(1); this.legR = leg(-1);
+    this.blinkT = rand(1, 4); this.lookTarget = null; this.sitBlend = 0; this.line = "";
     const model = officeCast[name] || maleStaff || staff.find(Boolean) || XBOT;
+    const R = new THREE.Group(); this.root = R;
+    this.hitArea = new THREE.Mesh(hitShape, hitMat); this.hitArea.position.y = 0.825; R.add(this.hitArea);
+    const blob = new THREE.Mesh(poolGeo, new THREE.MeshBasicMaterial({map: softDisc, color: 0x101820, transparent: true, opacity: 0.48, depthWrite: false}));
+    blob.rotation.x = -Math.PI / 2; blob.position.y = 0.032; blob.scale.set(0.86, 0.65, 1); R.add(blob); this.blob = blob;
+    const cup = mesh(new THREE.CylinderGeometry(0.04, 0.033, 0.085, 12), M.paper);
+    const phone = rbox(0.055, 0.11, 0.014, 0.008, M.black);
+    const tablet = new THREE.Group(); tablet.add(rbox(0.16, 0.21, 0.014, 0.015, M.black));
+    const tScr = mesh(new THREE.PlaneGeometry(0.14, 0.18), M.coolLight, false, false);
+    tScr.position.z = 0.008; tablet.add(tScr);
+    this.props = {cup, phone, tablet};
+    for (const o of Object.values(this.props)) o.visible = false;
     if (model) this.attachModel(model, role, opts);
+    else {
+      const skin = new THREE.MeshStandardMaterial({color: pick(SKIN), roughness: 0.6});
+      const top = new THREE.MeshStandardMaterial({color: pick(OUTFIT[role] || [0xdddddd]), roughness: 0.75});
+      const pants = new THREE.MeshStandardMaterial({color: pick(PANTS), roughness: 0.8});
+      const hairM = new THREE.MeshStandardMaterial({color: pick(HAIR), roughness: 0.7});
+      const shoeM = new THREE.MeshStandardMaterial({color: 0x1a1a1c, roughness: 0.5});
+      const hips = new THREE.Group(); hips.position.y = 0.92; R.add(hips); this.hips = hips;
+      { const pelvis = mesh(new THREE.CapsuleGeometry(0.13, 0.12, 4, 10), pants); pelvis.scale.set(1.25, 1, 0.8); hips.add(pelvis); }
+      const torso = new THREE.Group(); torso.position.y = 0.08; hips.add(torso); this.torso = torso;
+      const chest = mesh(new THREE.CapsuleGeometry(0.17, 0.3, 4, 12), top); chest.scale.set(1.15, 1, 0.72); chest.position.y = 0.27; torso.add(chest);
+      const collar = mesh(new THREE.TorusGeometry(0.068, 0.02, 6, 18), new THREE.MeshStandardMaterial({color: new THREE.Color(top.color).multiplyScalar(0.82), roughness: 0.7}));
+      collar.rotation.x = Math.PI / 2; collar.position.y = 0.515; collar.scale.set(1, 0.8, 1); torso.add(collar);
+      const belt = mesh(new THREE.CylinderGeometry(0.168, 0.168, 0.045, 18), new THREE.MeshStandardMaterial({color: 0x2a2320, roughness: 0.5})); belt.scale.z = 0.78; belt.position.y = 0.075; hips.add(belt);
+      const buckle = boxM(0.04, 0.03, 0.01, M.metal, 0, 0.075, 0.132); hips.add(buckle);
+      if (role === "research") { const coat = mesh(new THREE.CylinderGeometry(0.21, 0.25, 0.62, 14, 1, true), new THREE.MeshStandardMaterial({color: 0xfdfdfb, roughness: 0.8, side: THREE.DoubleSide})); coat.position.y = 0.12; coat.scale.z = 0.75; torso.add(coat); }
+      if (role === "ceo" || role === "risk") { const tie = boxM(0.045, 0.24, 0.02, new THREE.MeshStandardMaterial({color: role === "ceo" ? 0xd55181 : 0xeda100}), 0, 0.33, 0.125); torso.add(tie); }
+      if (opts.badge) { const b = boxM(0.06, 0.08, 0.01, new THREE.MeshStandardMaterial({color: 0x3987e5, emissive: 0x3987e5, emissiveIntensity: .4}), 0.09, 0.36, 0.126); torso.add(b); }
+      const neck = mesh(new THREE.CylinderGeometry(0.05, 0.055, 0.09, 10), skin); neck.position.y = 0.55; torso.add(neck);
+      const head = new THREE.Group(); head.position.y = 0.6; torso.add(head); this.head = head;
+      const skull = mesh(new THREE.SphereGeometry(0.115, 20, 16), skin); skull.scale.set(0.95, 1.1, 1.0); skull.position.y = 0.11; head.add(skull);
+      const nose = mesh(new THREE.SphereGeometry(0.02, 8, 6), skin); nose.position.set(0, 0.1, 0.11); head.add(nose);
+      const white = new THREE.MeshStandardMaterial({color: 0xf7f5f0, roughness: 0.35});
+      const eyeM = new THREE.MeshStandardMaterial({color: 0x1b1a1f, roughness: 0.2});
+      this.eyes = [-0.042, 0.042].map(x => { const g = new THREE.Group(); g.position.set(x, 0.135, 0.097);
+        const w = mesh(new THREE.SphereGeometry(0.019, 12, 8), white, false); w.scale.set(1, 0.85, 0.55); g.add(w);
+        const pu = mesh(new THREE.SphereGeometry(0.0105, 10, 8), eyeM, false); pu.position.z = 0.0085; g.add(pu); g.userData.pupil = pu; head.add(g); return g; });
+      this.brows = [-0.043, 0.043].map((x, i) => { const b = boxM(0.042, 0.009, 0.012, hairM, x, 0.172, 0.104); b.castShadow = false; b.userData.side = i ? -1 : 1; head.add(b); return b; });
+      this.mouth = new THREE.Group(); this.mouth.position.set(0, 0.06, 0.104); head.add(this.mouth);
+      this.smile = mesh(new THREE.TorusGeometry(0.021, 0.0048, 6, 14, Math.PI), new THREE.MeshStandardMaterial({color: 0x8a3f37, roughness: 0.6}), false);
+      this.smile.rotation.z = Math.PI; this.mouth.add(this.smile);
+      this.mouthOpen = mesh(new THREE.SphereGeometry(0.016, 10, 8), new THREE.MeshStandardMaterial({color: 0x3a1512}), false);
+      this.mouthOpen.scale.set(1.15, 0.15, 0.4); this.mouthOpen.position.y = 0.002; this.mouth.add(this.mouthOpen);
+      [-1, 1].forEach(sd => { const e = mesh(new THREE.SphereGeometry(0.027, 10, 8), skin); e.scale.set(0.45, 1, 0.8); e.position.set(sd * 0.111, 0.118, -0.005); head.add(e); });
+      const style = opts.hair ?? Math.floor(Math.random() * 4);
+      const cap = mesh(new THREE.SphereGeometry(0.122, 20, 12, 0, Math.PI * 2, 0, Math.PI * 0.55), hairM); cap.position.y = 0.125; cap.scale.set(1, 1.1, 1.05); head.add(cap);
+      if (style === 1) { const pony = mesh(new THREE.CapsuleGeometry(0.04, 0.14, 4, 8), hairM); pony.position.set(0, 0.08, -0.12); pony.rotation.x = 0.4; head.add(pony); }
+      if (style === 2) { const bun = mesh(new THREE.SphereGeometry(0.06, 12, 10), hairM); bun.position.set(0, 0.23, -0.06); head.add(bun); }
+      if (style === 3) { const long = mesh(new THREE.CylinderGeometry(0.12, 0.13, 0.22, 16, 1, true, Math.PI * 0.6, Math.PI * 0.8), hairM); long.position.set(0, 0.04, 0); long.rotation.y = Math.PI; head.add(long); }
+      if (role === "trader") { const hs = mesh(new THREE.TorusGeometry(0.125, 0.012, 6, 20, Math.PI), M.black); hs.position.y = 0.13; hs.rotation.z = 0; head.add(hs);
+        const mic = boxM(0.012, 0.012, 0.1, M.black, 0.1, 0.06, 0.06); mic.rotation.y = 0.5; head.add(mic); }
+      if (role === "research" && Math.random() > .4) { const gl = mesh(new THREE.TorusGeometry(0.03, 0.006, 6, 14), M.black); [-0.04, 0.04].forEach(x => { const g2 = gl.clone(); g2.position.set(x, 0.13, 0.108); head.add(g2); }); }
+      const arm = (side) => {
+        const sh = new THREE.Group(); sh.position.set(side * 0.215, 0.43, 0); torso.add(sh);
+        const cap = mesh(new THREE.SphereGeometry(0.062, 12, 10), top); cap.scale.set(1, 0.9, 0.9); sh.add(cap);
+        const upper = mesh(new THREE.CapsuleGeometry(0.048, 0.2, 4, 8), top); upper.position.y = -0.13; sh.add(upper);
+        const el = new THREE.Group(); el.position.y = -0.27; sh.add(el);
+        const fore = mesh(new THREE.CapsuleGeometry(0.042, 0.19, 4, 8), role === "research" ? top : skin); fore.position.y = -0.12; el.add(fore);
+        const hand = mesh(new THREE.SphereGeometry(0.047, 10, 8), skin); hand.position.y = -0.26; hand.scale.set(0.9, 1.15, 0.7); el.add(hand);
+        sh.rotation.z = side * 0.08; return {sh, el, hand};
+      };
+      this.armL = arm(1); this.armR = arm(-1);
+      for (const o of Object.values(this.props)) { o.position.set(0, -0.3, 0.04); this.armR.el.add(o); }
+      const leg = (side) => {
+        const hp = new THREE.Group(); hp.position.set(side * 0.09, 0, 0); hips.add(hp);
+        const thigh = mesh(new THREE.CapsuleGeometry(0.068, 0.32, 4, 8), pants); thigh.position.y = -0.21; hp.add(thigh);
+        const kn = new THREE.Group(); kn.position.y = -0.43; hp.add(kn);
+        const shin = mesh(new THREE.CapsuleGeometry(0.058, 0.32, 4, 8), pants); shin.position.y = -0.2; kn.add(shin);
+        const an = new THREE.Group(); an.position.y = -0.42; kn.add(an);
+        const shoe = rbox(0.11, 0.07, 0.25, 0.03, shoeM); shoe.position.set(0, -0.02, 0.045); an.add(shoe);
+        return {hp, kn, an};
+      };
+      this.legL = leg(1); this.legR = leg(-1);
+    }
     this.pos = (home?.approach || home?.pos || new THREE.Vector3()).clone();
     R.position.copy(this.pos); this.yaw = 0; scene.add(R);
-    R.traverse(o => { o.userData.person = this; });
+    this.hitArea.userData.person = this;
     // DOM: bubble + nametag
     this.bubble = document.createElement("div"); this.bubble.className = "bubble"; $("#labels").appendChild(this.bubble);
     this.tagEl = document.createElement("div"); this.tagEl.className = "nametag"; this.tagEl.textContent = `${name} · ${roleName(role)}`; $("#labels").appendChild(this.tagEl);
     this.bubbleUntil = 0; chars.push(this);
   }
   attachModel(asset, role, opts) {
-    this.root.remove(this.hips);
     const m = SkeletonUtils.clone(asset.scene);
     const detailed = asset !== XBOT;
     this.detailedModel = detailed;
@@ -842,12 +941,30 @@ class Person {
       longHair: (opts.hair ?? 0) % 4 === 3 || (opts.hair ?? 0) % 4 === 1, bald: (opts.hair ?? 0) === 0 && Math.random() < 0.25};
     let bodyGeo = null;
     if (!detailed) m.traverse(o => { if (o.isMesh && !/joint/i.test(o.material?.name || o.name)) bodyGeo = o.geometry; });
+    m.updateWorldMatrix(true,true);
     m.traverse(o => {
       if (o.isMesh) {
         o.castShadow = !detailed || /base|suit|ponytail|short/i.test(o.name);
-        o.receiveShadow = true; o.frustumCulled = false;
+        o.receiveShadow = true;
+        if (o.isSkinnedMesh) {
+          const scale = o.getWorldScale(new THREE.Vector3());
+          const center = o.worldToLocal(new THREE.Vector3(0,0.91,0));
+          o.boundingSphere = new THREE.Sphere(center,1.5 / Math.min(scale.x,scale.y,scale.z));
+        }
         if (!detailed) {
           o.material = outfitMaterial(bodyGeo || o.geometry, look);
+        } else if (/original top|full-length top/i.test(o.material.name) && garmentColors[this.name]) {
+          o.material = o.material.clone();
+          o.material.color.setHex(garmentColors[this.name]); o.material.roughness = 0.78;
+          // Keep the folds and weave in the source texture while varying the fabric dye.
+          o.material.onBeforeCompile = shader => {
+            shader.fragmentShader = shader.fragmentShader.replace("#include <map_fragment>", `
+              #ifdef USE_MAP
+                vec4 fabric = texture2D(map, vMapUv);
+                float weave = clamp(dot(fabric.rgb, vec3(0.26, 0.54, 0.20)) * 5.8, 0.13, 1.28);
+                diffuseColor *= vec4(vec3(weave), fabric.a);
+              #endif`);
+          };
         } else if (/casualsuit|elegantsuit/i.test(o.name)) {
           o.material = o.material.clone();
           o.material.color.multiply(new THREE.Color(suitTints[role] ?? 0xdfdfdf)).multiplyScalar(0.88 + (this.phase % 1) * 0.26);
@@ -861,11 +978,13 @@ class Person {
     const clip = n => asset.animations.find(a => a.name === n);
     this.act = {};
     const idle = clip(detailed ? "Idle_Standing" : "idle"), walk = clip(detailed ? "Walk_Relaxed" : "walk");
-    for (const [name, animation] of [["idle", idle], ["walk", walk], ["sit", asset.sitPose]]) {
+    for (const [name, animation] of [["idle", idle], ["walk", walk], ["sit", asset.sitPose], ["dock", detailed && clip("Sit_Stand")]]) {
       if (!animation) continue;
       this.act[name] = this.mixer.clipAction(animation).play().setEffectiveWeight(name === "idle" ? 1 : 0);
     }
     for (const n of ["agree", "headShake", "sad_pose"]) { const c = clip(n); if (!c) continue; const a = this.mixer.clipAction(c); a.blendMode = THREE.AdditiveAnimationBlending; a.play(); a.setEffectiveWeight(0); this.act[n] = a; }
+    if (this.act.dock) this.act.dock.paused = true;
+    if (this.act.sit) this.act.sit.time = this.phase % this.act.sit.getClip().duration;
     this.act.idle.time = rand(0, 3); this.act.walk.time = rand(0, 1);
     this.w = {walk: 0, agree: 0, headShake: 0, sad_pose: 0};
     m.updateMatrixWorld(true);
@@ -878,36 +997,47 @@ class Person {
     if (!detailed && head && role === "trader") attach(head, mesh(new THREE.TorusGeometry(0.1, 0.011, 8, 24, Math.PI), M.black), 0, 0.1, 0);
     if (!detailed && head && (role === "research" || opts.glasses)) { const gl = new THREE.Group(); [-1, 1].forEach(sd => { const r = mesh(new THREE.TorusGeometry(0.025, 0.004, 6, 16), M.black, false); r.position.set(sd * 0.033, 0, 0); gl.add(r); }); gl.add(boxM(0.02, 0.004, 0.004, M.black)); attach(head, gl, 0, 0.09, 0.095); }
     if (hand) for (const o of Object.values(this.props)) {
-      this.armR.el.remove(o); o.rotation.set(0, 0, 0);
+      o.rotation.set(0, 0, 0);
       attach(hand, o, 0, detailed ? 0.047 : 0.09, 0.03);
     }
-    this.restQ = {}; for (const [k, bn] of Object.entries(this.bones)) if (bn) this.restQ[k] = bn.quaternion.clone();
+    this.layerBones = ["LeftUpLeg", "RightUpLeg", "LeftLeg", "RightLeg", "Spine1", "RightArm", "RightForeArm", "LeftArm", "LeftForeArm", "Neck", "Head"]
+      .map(k => this.bones[k]).filter(Boolean);
+    this.baseQ = this.layerBones.map(bone => bone.quaternion.clone());
   }
   animateModel(dt, t, walking) {
     const R = this.root, seated = !!this.seat && !walking, b = this.bones;
-    if (!seated) this.sitBlend = damp(this.sitBlend, 0, 6, dt); else this.sitBlend = damp(this.sitBlend, 1, 6, dt);
+
     R.position.set(this.pos.x, 0, this.pos.z); R.rotation.y = this.yaw;
-    const pose = walking ? "walk" : this.pose, sb = this.sitBlend;
+    const pose = walking ? "walk" : t < this.reactionUntil ? this.reaction : this.pose, sb = this.sitBlend;
     // clip weights: walk vs idle; additive nod / head-shake / slump layered on top
-    this.w.walk = damp(this.w.walk, walking ? 1 : 0, 8, dt);
-    const sitWeight = this.act.sit ? sb * (1 - this.w.walk) : 0;
-    this.act.walk.setEffectiveWeight(this.w.walk); this.act.idle.setEffectiveWeight(1 - this.w.walk - sitWeight);
+    this.w.walk = damp(this.w.walk, walking ? Math.min(1, this.gaitSpeed / this.speed) : 0, 10, dt);
+    const dockWeight = this.act.dock ? THREE.MathUtils.smoothstep(sb, 0, 0.2) * (1 - this.w.walk) : 0;
+    const sitWeight = this.act.sit ? dockWeight * this.workReach : 0;
+    this.act.walk.setEffectiveWeight(this.w.walk);
+    this.act.idle.setEffectiveWeight(1 - this.w.walk - dockWeight);
     this.act.sit?.setEffectiveWeight(sitWeight);
-    this.act.walk.timeScale = this.speed / (this.detailedModel ? 1.3 : 1.25);
+    if (this.act.dock) {
+      this.act.dock.setEffectiveWeight(dockWeight - sitWeight);
+      this.act.dock.time = 0.68 + 1.65 * sb;
+      this.act.sit.timeScale = this.typingFast ? 1.14 : 0.98;
+    }
+    this.act.walk.timeScale = Math.max(0.45, this.gaitSpeed) / (this.detailedModel ? 1.30 : 1.25);
     const listening = pose === "talk" && !this.speaking;
     const tgt = {agree: listening && Math.sin(t * 0.7 + this.phase) > 0.2 ? 1 : 0, headShake: pose === "facepalm" ? 1 : 0, sad_pose: this.mood < -0.4 && !walking ? 0.7 : 0};
     for (const k of ["agree", "headShake", "sad_pose"]) if (this.act[k]) { this.w[k] = damp(this.w[k], tgt[k], 4, dt); this.act[k].setEffectiveWeight(this.w[k]); }
-    for (const k of ["LeftUpLeg", "RightUpLeg", "LeftLeg", "RightLeg", "Spine1", "RightArm", "RightForeArm", "LeftArm", "LeftForeArm", "Neck", "Head"])
-      if (b[k]) b[k].quaternion.copy(this.restQ[k]); // clips overwrite; reset guards against drift
+    // Three skips writes for unchanged mixer tracks. Restore the previous mixed
+    // pose, advance it, then retain that exact result before layering gestures.
+    this.layerBones.forEach((bone, i) => bone.quaternion.copy(this.baseQ[i]));
     this.mixer.update(dt);
-    this.model.position.y = this.act.sit ? 0.018 * sb : -sb * (this.hipH - 0.56);
-    this.model.position.z = (this.act.sit ? -0.04 : -0.12) * sb;
-    this.model.updateMatrixWorld(true);
+    this.layerBones.forEach((bone, i) => this.baseQ[i].copy(bone.quaternion));
+    this.model.position.y = this.detailedModel ? deskLayout.floorY : -sb * (this.hipH - 0.56);
+    this.model.position.z = this.detailedModel ? 0 : (deskLayout.seatZ - deskLayout.feetZ) * sb;
+    R.updateWorldMatrix(true, false);
     // procedural layer (world-axis rotations, rig independent)
     const f = _v1.set(Math.sin(this.yaw), 0, Math.cos(this.yaw)), right = _v2.set(-Math.cos(this.yaw), 0, Math.sin(this.yaw));
     const P = this.pose3, ks = 1 - Math.exp(-10 * dt);
     const want = {thigh: this.act.sit ? 0 : 1.5 * sb, knee: this.act.sit ? 0 : -1.55 * sb, uarm: 0, farm: 0, uarmL: 0, farmL: 0, inR: 0, inL: 0, spine: 0, headY: 0, headX: 0};
-    if (seated) {
+    if (seated && !this.act.sit) {
       const shift = Math.sin(t * 0.72 + this.phase);
       const type = (this.typingFast ? 1.7 : 1) * t;
       const reach = 0.5 + Math.sin(t * 0.47 + this.phase) * 0.5;
@@ -916,12 +1046,8 @@ class Person {
       want.farmL = 0.85 + Math.sin(type * 12 + this.phase * 1.62) * 0.048;
       want.inR = 0.34 - reach * 0.10; want.inL = -0.33;
       want.spine = 0.094 + shift * 0.024;
-      if (this.act.sit) {
-        want.uarm *= 0.50; want.uarmL *= 0.45;
-        want.farm *= 0.64; want.farmL *= 0.64;
-      }
     }
-    if (pose === "talk" && this.speaking) { const g = Math.sin(t * 3.1 + this.phase), g2 = Math.sin(t * 2.2 + this.phase * 1.7); want.uarm = 0.45 + Math.max(0, g) * 0.5; want.farm = 1.0 + g * 0.35; want.inR = 0.25; want.uarmL = 0.2 + Math.max(0, g2) * 0.4; want.farmL = 0.8 + Math.max(0, g2) * 0.4; want.inL = -0.2; }
+    if (pose === "talk" && this.speaking) { const g = Math.sin(t * 1.9 + this.phase), g2 = Math.sin(t * 1.3 + this.phase * 1.7); want.uarm = 0.26 + Math.max(0, g) * 0.32; want.farm = 0.86 + g * 0.18; want.inR = 0.25; want.uarmL = 0.14 + Math.max(0, g2) * 0.13; want.farmL = 0.4 + Math.max(0, g2) * 0.13; want.inL = -0.2; }
     if (pose === "coffee") { want.uarm = 0.55; want.farm = 1.9 + Math.max(0, Math.sin(t * 0.8 + this.phase)) * 0.35; want.inR = 0.3; }
     if (pose === "phone") { want.uarm = 0.35; want.farm = 2.35; want.inR = 0.8; want.headY = 0.15; }
     if (pose === "cheer") { want.uarm = want.uarmL = 2.9 + Math.sin(t * 9) * 0.1; want.farm = want.farmL = 0.15; }
@@ -932,11 +1058,17 @@ class Person {
     if (pose === "point") { want.uarm = 1.45; want.farm = 0.05; want.inR = 0.15; }
     if (pose === "present") { want.uarm = 1.2 + Math.sin(t * 1.3) * 0.12; want.farm = 0.25; want.inR = -0.3; want.uarmL = 0.4; want.farmL = 0.9; }
     if (pose === "write") { const w = t * 5 + this.phase; want.uarm = 1.75 + Math.sin(w) * 0.12; want.farm = 0.6 + Math.cos(w * 1.3) * 0.15; want.inR = 0.2 + Math.sin(w * 0.7) * 0.1; }
-    if (this.carryObj || this.carryTablet) { want.uarm = want.uarmL = 0.6; want.farm = want.farmL = 1.0; want.inR = 0.4; want.inL = -0.4; }
+    if (pose === "handoff") {
+      want.uarm = 1.06; want.farm = 0.53; want.inR = 0.28;
+      want.uarmL = 0.27; want.farmL = 0.58; want.inL = -0.18;
+    } else if (this.carryTablet) {
+      want.uarm = 0.32; want.farm = 1.12; want.inR = 0.18;
+      if (!walking) { want.uarmL = 0.25; want.farmL = 0.86; want.inL = -0.18; }
+    }
     if (this.lookTarget) { const lt = this.lookTarget.pos || this.lookTarget; want.headY = clamp(angDiff(this.yaw, Math.atan2(lt.x - this.pos.x, lt.z - this.pos.z)), -1.0, 1.0); }
     else if (seated) want.headY = Math.sin(t * 0.52 + this.phase) * 0.13 + Math.sin(t * 0.19 + this.phase * 1.3) * 0.16;
     else if (!walking && !seated && pose === "stand") want.headY = Math.sin(t * 0.5 + this.phase) * 0.4;
-    if (seated) want.headX += 0.10 + Math.sin(t * 0.78 + this.phase) * 0.055;
+    if (seated && !this.act.sit) want.headX += 0.09;
     for (const k in want) P[k] = (P[k] ?? 0) + (want[k] - (P[k] ?? 0)) * ks;
     // legs (sitting): thighs forward, shins down
     rotWorld(b.LeftUpLeg, right, P.thigh); rotWorld(b.RightUpLeg, right, P.thigh);
@@ -948,66 +1080,138 @@ class Person {
     rotWorld(b.LeftArm, right, P.uarmL); rotWorld(b.LeftArm, UP, P.inL);
     rotWorld(b.LeftForeArm, right, P.farmL);
     rotWorld(b.Neck, UP, P.headY * 0.5); rotWorld(b.Head, UP, P.headY * 0.5); rotWorld(b.Head, right, -P.headX);
-    if (this.speaking) rotWorld(b.Head, f, Math.sin(t * 2.6 + this.phase) * 0.05);
-    this.props.cup.visible = pose === "coffee"; this.props.phone.visible = pose === "phone"; this.props.tablet.visible = !!this.carryTablet;
-    if (this.carryObj) this.carryObj.position.set(0, 1.08, 0.32);
+    if (this.speaking && !walking) rotWorld(b.Head, f, Math.sin(t * 2.6 + this.phase) * 0.05);
+    this.props.cup.visible = pose === "coffee"; this.props.phone.visible = pose === "phone"; this.props.tablet.visible = !!this.carryTablet && !this.interaction?.pass && this.sitBlend < 0.18;
+
   }
   // ---- task queue
   do(task) { this.queue.push(task); return this; }
   clear() { this.queue = []; this.task = null; return this; }
-  busy() { return !!this.task || this.queue.length > 0 || this.locked; }
+  busy() { return !!this.task || this.queue.length > 0 || !!this.interaction; }
   say(text, ms = 5000) {
-    this.line = text; clearTimeout(this._sayT);
+    this.line = text; this.lineAt = officeTime + 0.30;
     this.bubble.innerHTML = `<span class="who">${esc(this.name)}</span><span class="dots"><i></i><i></i><i></i></span>`;
-    this.bubble.classList.add("on"); this.speaking = false; this.bubbleUntil = performance.now() + ms + 600;
-    this._sayT = setTimeout(() => { this.bubble.innerHTML = `<span class="who">${esc(this.name)}</span>${esc(text)}`; this.speaking = true; }, 600);
+    this.bubble.classList.add("on"); this.speaking = false; this.bubbleUntil = this.lineAt + ms / 1000;
+  }
+  updateSpeech(t) {
+    if (!this.bubbleUntil) return;
+    if (t >= this.bubbleUntil) {
+      this.bubble.classList.remove("on"); this.speaking = false; this.bubbleUntil = 0;
+    } else if (this.lineAt && t >= this.lineAt) {
+      this.bubble.innerHTML = `<span class="who">${esc(this.name)}</span>${esc(this.line)}`;
+      this.speaking = true; this.lineAt = 0;
+    }
   }
   emote(sym, ms = 2800) {
     if (!this.emoteEl) { this.emoteEl = document.createElement("div"); this.emoteEl.className = "emote"; $("#labels").appendChild(this.emoteEl); }
     this.emoteEl.textContent = sym; this.emoteEl.classList.remove("on"); void this.emoteEl.offsetWidth; this.emoteEl.classList.add("on");
     this.emoteUntil = performance.now() + ms;
   }
+  resetAtDesk() {
+    this.clear(); this.seat = this.homeSeat; this.seat.taken = this;
+    this.seat.chair.position.z = deskLayout.seatZ; this.pos.copy(this.seat.pos); this.yaw = this.seat.face;
+    this.gaitSpeed = 0; this.workReach = 1; this.sitBlend = 1; this.pose = "work";
+    this.lookTarget = null; this.carryTablet = false; this.speaking = false;
+    this.bubbleUntil = 0; this.lineAt = 0; this.bubble.classList.remove("on");
+    this.animate(0,0,false);
+  }
+  react(pose, seconds = 2.5) { this.reaction = pose; this.reactionUntil = officeTime + seconds; }
   feel(m) { this.mood = clamp(m, -1, 1); }
   goTo(p) { return this.do({type: "walk", to: p.clone()}); }
-  sitAt(seat) { return this.do({type: "walk", to: seat.approach}).do({type: "sit", seat}); }
+  sitAt(seat) {
+    if (this.seat === seat && !this.queue.some(k => k.type === "walk") && this.task?.type !== "leave") return this;
+    return this.goTo(seat.approach).do({type: "walk", to: seat.dock, direct: true})
+      .face(seat.desk.position).do({type: "sit", seat});
+  }
   wait(ms, pose = "stand") { return this.do({type: "wait", ms, pose}); }
   face(target) { return this.do({type: "face", target}); }
-  // ---- update
+  stepAlong(k, dt) {
+    if (!k.path) k.path = k.direct ? [k.to.clone()] : findPath(this.pos, k.to);
+    const target = k.path[0];
+    if (!target) { this.task = null; return false; }
+    const dx = target.x - this.pos.x, dz = target.z - this.pos.z, dist = Math.hypot(dx, dz);
+    if (dist < 0.021) {
+      this.pos.copy(target); k.path.shift(); if (!k.path.length) this.task = null;
+      return false;
+    }
+    const desired = Math.atan2(dx, dz), diff = Math.abs(angDiff(this.yaw, desired));
+    this.turnTo(desired, dt, 8);
+    const turning = clamp(1 - diff / 1.75, 0, 1);
+    const arrival = k.path.length === 1 ? clamp(dist / 0.35, 0.24, 1) : 1;
+    const pace = this.speed * turning * arrival;
+    this.gaitSpeed = damp(this.gaitSpeed, pace, pace < this.gaitSpeed ? 11 : 6, dt);
+    const step = Math.min(dist, this.gaitSpeed * dt);
+    let ux = dx / dist, uz = dz / dist;
+    if (!k.direct && dist > 0.58) {
+      // Pass on the right when two people approach each other in an aisle.
+      for (const other of chars) {
+        if (other === this || !other.root.visible || other.seat) continue;
+        const x = other.pos.x - this.pos.x, z = other.pos.z - this.pos.z;
+        const ahead = x*ux + z*uz, lateral = x*uz-z*ux;
+        if (ahead <= 0 || ahead > 1.05 || Math.abs(lateral) > 0.49) continue;
+        const sidestep = (1 - ahead/1.1) * (1 - Math.abs(lateral)/0.5) * 1.65;
+        const side = Math.abs(lateral) < 0.12 ? -1 : -Math.sign(lateral);
+        const vx = ux + uz * sidestep * side, vz = uz - ux * sidestep * side;
+        const [cx,cz] = toCell(this.pos.x + vx * 0.38, this.pos.z + vz * 0.38);
+        if (!blocked[cz*GX+cx]) { const length=Math.hypot(vx,vz); ux=vx/length; uz=vz/length; }
+        break;
+      }
+    }
+    let x = this.pos.x + ux * step, z = this.pos.z + uz * step;
+    if (!k.direct && !freeStep(this.pos,x,z)) {
+      x = this.pos.x + dx / dist * step; z = this.pos.z + dz / dist * step;
+      if (!freeStep(this.pos,x,z)) { k.path = findPath(this.pos,k.to); return false; }
+    }
+    this.pos.x = x; this.pos.z = z;
+    return step > 0.0002;
+  }
+  chairMotion(k, dt) {
+    const seat = k.seat, entering = k.type === "sit";
+    if (seat.taken && seat.taken !== this) { this.task = null; return; }
+    seat.taken = this; this.seat = seat;
+    k.elapsed = Math.min(2.75, (k.elapsed || 0) + dt);
+    const sequence = entering ? k.elapsed : 2.75 - k.elapsed;
+    // Bend with planted feet, roll the occupied chair in, then reach for the keys.
+    this.sitBlend = clamp(sequence / 1.45, 0, 1);
+    const tucked = THREE.MathUtils.smoothstep(sequence, 1.45, 2.20);
+    this.workReach = THREE.MathUtils.smoothstep(sequence, 2.02, 2.75);
+    seat.chair.position.z = deskLayout.seatZ - deskLayout.pullback * (1 - tucked);
+    this.pos.lerpVectors(seat.dock, seat.pos, tucked);
+    this.yaw = seat.face;
+    if (k.elapsed >= 2.75) {
+      this.task = null; this.pose = entering ? "work" : "stand";
+      if (!entering) { this.seat = null; seat.taken = null; }
+    }
+  }
+  startTask(k) {
+    if (k.type === "walk" && this.seat) {
+      this.queue.unshift({type:"walk", to:this.seat.approach, direct:true}, k);
+      k = {type:"leave", seat:this.seat};
+    }
+    this.task = k;
+    if (k.type === "wait") { k.left = k.ms; this.pose = k.pose; }
+    if (k.type === "walk" || k.type === "leave" || k.type === "sit") this.pose = "stand";
+  }
   update(dt, t) {
+    this.updateSpeech(t);
     if (!this.task && this.queue.length) this.startTask(this.queue.shift());
     const k = this.task;
     let walking = false;
-    if (k) {
-      if (k.type === "walk") {
-        if (!k.path) { this.standUp(); k.path = findPath(this.pos, k.to); }
-        const tgt = k.path[0];
-        if (!tgt) { this.task = null; }
-        else {
-          const d = new THREE.Vector3(tgt.x - this.pos.x, 0, tgt.z - this.pos.z), dist = d.length();
-          if (dist < 0.06) { k.path.shift(); if (!k.path.length) this.task = null; }
-          else { d.normalize(); this.pos.addScaledVector(d, Math.min(dist, this.speed * dt)); this.turnTo(Math.atan2(d.x, d.z), dt, 10); walking = true; }
-        }
-      } else if (k.type === "sit") {
-        const s = k.seat; if (s.taken && s.taken !== this) { this.task = null; }
-        else { s.taken = this; this.seat = s; this.pos.lerp(s.pos, 1 - Math.exp(-8 * dt)); this.turnTo(s.face, dt, 8); this.sitBlend = damp(this.sitBlend, 1, 6, dt);
-          if (this.sitBlend > 0.97 && this.pos.distanceTo(s.pos) < 0.03) this.task = null; }
-      } else if (k.type === "wait") {
-        k.left -= dt * 1000; if (k.left <= 0) this.task = null;
-      } else if (k.type === "face") {
-        const tp = k.target.pos ? k.target.pos : k.target; const a = Math.atan2(tp.x - this.pos.x, tp.z - this.pos.z);
-        this.turnTo(a, dt, 8); if (Math.abs(angDiff(this.yaw, a)) < 0.05) this.task = null;
-      } else if (k.type === "call") { k.fn(this); this.task = null; }
-    }
+    if (k?.type === "walk") walking = this.stepAlong(k, dt);
+    else if (k?.type === "leave" || k?.type === "sit") this.chairMotion(k, dt);
+    else if (k?.type === "wait") { k.left -= dt * 1000; if (k.left <= 0) this.task = null; }
+    else if (k?.type === "face") {
+      const p = k.target.pos || k.target, angle = Math.atan2(p.x-this.pos.x, p.z-this.pos.z);
+      this.turnTo(angle,dt,8); if (Math.abs(angDiff(this.yaw,angle)) < 0.04) this.task = null;
+    } else if (k?.type === "call") { this.task = null; k.fn(this); }
+    if (!walking) this.gaitSpeed = damp(this.gaitSpeed, 0, 11, dt);
     this.animate(dt, t, walking);
   }
-  startTask(k) { this.task = k; if (k.type === "wait") k.left = k.ms; this.pose = k.type === "wait" ? k.pose : this.pose; }
-  standUp() { if (this.seat) { this.seat.taken = null; this.seat = null; } }
   turnTo(a, dt, rate) { this.yaw += angDiff(this.yaw, a) * (1 - Math.exp(-rate * dt)); }
   animate(dt, t, walking) {
     if (this.model) return this.animateModel(dt, t, walking);
     const R = this.root, seated = !!this.seat && !walking;
-    if (!seated) this.sitBlend = damp(this.sitBlend, 0, 6, dt);
-    const sb = this.sitBlend, pose = walking ? "walk" : this.pose;
+    const sb = this.sitBlend, pose = walking ? "walk" : t < this.reactionUntil ? this.reaction : this.pose;
     R.position.set(this.pos.x, 0, this.pos.z);
     const prevYaw = R.rotation.y; R.rotation.y = this.yaw;
     const turnRate = Math.abs(angDiff(prevYaw, this.yaw)) / Math.max(dt, 1e-3);
@@ -1023,7 +1227,7 @@ class Person {
     this.legL.an.rotation.x = walking ? -Math.sin(p + 0.9) * 0.35 : -0.15 * sb;
     this.legR.an.rotation.x = walking ? Math.sin(p + 0.9) * 0.35 : -0.15 * sb;
     this.hips.position.y = lerp(0.92 + (walking ? Math.abs(sw2) * 0.035 : 0) - (walking ? 0.012 : 0), 0.52, sb);
-    this.hips.position.z = lerp(0, -0.05, sb);
+    this.hips.position.z = (deskLayout.seatZ - deskLayout.feetZ) * sb;
     this.hips.position.x = idleShift * 0.018;
     this.hips.rotation.z = idleShift * 0.035; this.hips.rotation.y = walking ? sw * 0.12 : 0;
     // torso: breathing, counter-rotation, lean
@@ -1064,7 +1268,7 @@ class Person {
     L.sh.rotation.x += (lSh - L.sh.rotation.x) * ks; L.el.rotation.x += (lEl - L.el.rotation.x) * ks; L.sh.rotation.z += (lZ - L.sh.rotation.z) * ks;
     Rr.sh.rotation.x += (rSh - Rr.sh.rotation.x) * ks; Rr.el.rotation.x += (rEl - Rr.el.rotation.x) * ks; Rr.sh.rotation.z += (rZ - Rr.sh.rotation.z) * ks;
     // props
-    this.props.cup.visible = pose === "coffee"; this.props.phone.visible = pose === "phone"; this.props.tablet.visible = !!this.carryTablet;
+    this.props.cup.visible = pose === "coffee"; this.props.phone.visible = pose === "phone"; this.props.tablet.visible = !!this.carryTablet && !this.interaction?.pass && this.sitBlend < 0.18;
     // head: look at partner / screen, nod while listening, head shake when upset, glance around when idle
     let hy = 0, hx = seated ? 0.14 : 0;
     if (this.lookTarget) { const lt = this.lookTarget.pos || this.lookTarget; const a = Math.atan2(lt.x - this.pos.x, lt.z - this.pos.z); hy = clamp(angDiff(this.yaw, a), -1.1, 1.1); hx = -0.05; }
@@ -1087,7 +1291,7 @@ class Person {
     this.blinkT -= dt; const blink = this.blinkT < 0.12; if (this.blinkT < 0) this.blinkT = rand(2, 5);
     const dart = Math.sin(t * 0.7 + this.phase * 5) > 0.8 ? 0.004 : 0;
     this.eyes.forEach(e => { e.scale.y = blink ? 0.1 : 1; e.userData.pupil.position.x = dart; });
-    if (this.carryObj) { this.carryObj.position.set(0, 1.08, 0.32); }
+
   }
 }
 function angDiff(a, b) { let d = b - a; while (d > Math.PI) d -= 2 * Math.PI; while (d < -Math.PI) d += 2 * Math.PI; return d; }
@@ -1103,7 +1307,31 @@ const analyst = new Person("Noor", "learn", learnSeat, {hair: 3});
 const sre = new Person("Sam", "ops", opsSeat, {hair: 0});
 const traderNames = ["Jonas", "Priya", "Marco", "Sofia", "Eli", "Hana", "Tom", "Zara"];
 const traders = traderNames.map((n, i) => new Person(n, "trader", tradeSeats[i], {hair: i % 4}));
-for (const c of chars) { c.pos.copy(c.homeSeat.approach); c.sitAt(c.homeSeat); }
+for (const c of chars) c.resetAtDesk();
+
+const footStamp = new THREE.Object3D(), footPosition = new THREE.Vector3();
+const footShadows = new THREE.InstancedMesh(poolGeo, new THREE.MeshBasicMaterial({
+  map:softDisc, color:0x111820, opacity:0.64, transparent:true, depthWrite:false,
+}), chars.length * 2);
+footShadows.frustumCulled = false;
+footStamp.rotation.order = "YXZ";
+footStamp.rotation.x = -Math.PI / 2;
+scene.add(footShadows);
+for (const c of chars) c.soles = c.detailedModel ? ["ball_l","ball_r"].map(n => c.model.getObjectByName(n)) : [];
+function drawFootShadows() {
+  let count = 0;
+  for (const c of chars) if (c.root.visible) {
+    for (const sole of c.soles) {
+      sole.getWorldPosition(footPosition);
+      const lift = clamp((footPosition.y - 0.035) * 4.4, 0, 0.68);
+      footStamp.position.set(footPosition.x - 0.055*Math.sin(c.yaw), 0.031, footPosition.z - 0.055*Math.cos(c.yaw));
+      footStamp.rotation.y = c.yaw;
+      footStamp.scale.set(0.20*(1-lift),0.33*(1-lift),1);
+      footStamp.updateMatrix(); footShadows.setMatrixAt(count++,footStamp.matrix);
+    }
+  }
+  footShadows.count = count; footShadows.instanceMatrix.needsUpdate = true;
+}
 
 // ============================================================== director (behaviour from data)
 const feedEl = $("#feed");
@@ -1113,61 +1341,163 @@ function feed(who, text) {
   feedEl.insertBefore(d, feedEl.children[1] || null);
   while (feedEl.children.length > 9) feedEl.removeChild(feedEl.lastChild);
 }
-function conversation(a, b, lines, at = null, after = null) {
-  // a walks to b (or both to a spot), they face each other, exchange lines, return to desks
-  if (a.busy() || b.busy()) { feed(lines[0][0].name, lines[0][1]); return false; }
-  const meet = at || b.pos.clone().add(new THREE.Vector3(Math.sin(b.yaw), 0, Math.cos(b.yaw)).multiplyScalar(1.0));
-  const bSpot = at ? at.clone().add(new THREE.Vector3(0.9, 0, 0)) : null;
-  a.goTo(at ? at : meet).face(b);
-  if (bSpot) b.goTo(bSpot); b.face(a);
-  let delay = 0;
-  const speak = (who, other, text, ms) => {
-    who.do({type: "call", fn: () => { who.pose = "talk"; who.lookTarget = other; who.say(text, ms); feed(who.name, text); }}).wait(ms, "talk");
-    other.wait(ms, "talk");
-  };
-  // synchronise: both wait until a has arrived
-  b.do({type: "call", fn: () => { b.pose = "talk"; b.lookTarget = a; }});
-  for (const [who, text] of lines) { const other = who === a ? b : a; const ms = clamp(1800 + text.length * 45, 2500, 7000); speak(who, other, text, ms); delay += ms; }
-  for (const p of [a, b]) p.do({type: "call", fn: () => { p.pose = "stand"; p.lookTarget = null; p.speaking = false; }}).sitAt(p.homeSeat);
-  if (after) a.do({type: "call", fn: after});
-  return true;
+const point = (x,z) => new THREE.Vector3(x,0,z);
+const roomAisles = {
+  trader: point(0,-7.45), research: point(-16,-8.52), scanner: point(-15.4,6.9),
+  risk: point(0.1,3.65), learn: point(13.3,9.45), ops: point(14.6,-9.65), ceo: point(4.25,-0.7),
+};
+const exchanges = new Set(), pendingEncounters = [];
+let officeTime = 0;
+function beginExchange(people, places, lines, options = {}) {
+  if (people.some(p => !p?.root.visible || p.busy()) || !lines.length) return false;
+  const group = {people, places, lines, ...options, next: 0, remaining: 0, arrived: new Set()};
+  people.forEach((p,i) => {
+    p.interaction = group; p.lastOut = officeTime;
+    // Stand at separate marks, then turn towards the mark that the partner will occupy.
+    p.goTo(places[i]).face(options.center || places[1-i]).do({type:"call", fn: () => {
+      group.arrived.add(p); p.pose = "stand";
+    }});
+  });
+  if (options.document) people[0].carryTablet = true;
+  exchanges.add(group); return true;
 }
-function deliverDoc(from, to, text) {
-  if (from.busy()) return;
-  const doc = boxM(0.24, 0.02, 0.32, M.paper); from.root.add(doc); from.carryObj = doc;
-  conversation(from, to, [[from, text[0]], [to, text[1]]]);
-  from.queue.splice(2, 0, {type: "call", fn: () => { from.root.remove(doc); from.carryObj = null; }});
+function finishExchange(group) {
+  if (group.pass) group.pass.mesh.removeFromParent();
+  exchanges.delete(group);
+  for (const p of group.people) {
+    p.interaction = null; p.carryTablet = false; p.locked = false; p.lookTarget = null;
+    p.speaking = false; p.pose = "stand"; p.sitAt(p.homeSeat);
+  }
+  group.after?.();
+}
+function passTablet(group, dt) {
+  const [giver,receiver] = group.people;
+  if (!group.pass) {
+    const tablet = giver.props.tablet.clone(); tablet.visible = true; scene.add(tablet);
+    group.pass = {mesh:tablet, age:0};
+    for (const p of group.people) {
+      p.props.tablet.visible = false; p.pose = "handoff";
+      p.lookTarget = p === giver ? receiver : giver;
+    }
+  }
+  const pass = group.pass;
+  pass.age += dt;
+  const blend = THREE.MathUtils.smoothstep(pass.age,0.52,1.04);
+  const source = giver.props.tablet, target = receiver.props.tablet, q = new THREE.Quaternion();
+  source.getWorldPosition(pass.mesh.position); pass.mesh.position.lerp(target.getWorldPosition(_v1),blend);
+  source.getWorldQuaternion(pass.mesh.quaternion); pass.mesh.quaternion.slerp(target.getWorldQuaternion(q),blend);
+  source.getWorldScale(pass.mesh.scale);
+  if (pass.age >= 1.37) {
+    pass.mesh.removeFromParent(); group.pass = null; group.delivered = true;
+    giver.carryTablet = false; receiver.carryTablet = true;
+  }
+}
+function updateExchanges(dt) {
+  for (const g of exchanges) {
+    if (g.people.some(p => !p.root.visible)) {
+      for (const p of g.people) if (!p.root.visible) p.resetAtDesk();
+      finishExchange(g); continue;
+    }
+    if (g.arrived.size !== g.people.length) continue;
+    g.remaining -= dt;
+    if (g.remaining > 0) continue;
+    if (g.document && g.next === 1 && !g.delivered) { passTablet(g,dt); continue; }
+    if (g.next >= g.lines.length) { finishExchange(g); continue; }
+    const [speaker, line] = g.lines[g.next];
+    const ms = clamp(1550 + line.length * 40, 2300, 7200);
+    for (const p of g.people) {
+      p.pose = g.coffee && p !== speaker ? "coffee" : "talk"; p.speaking = false;
+      p.locked = !!g.center;
+      p.lookTarget = p === speaker ? g.people[(g.people.indexOf(p) + 1) % g.people.length] : speaker;
+    }
+    speaker.say(line,ms); feed(speaker.name,line); g.next++; g.remaining = (ms + 680) / 1000;
+  }
+}
+function conversation(a,b,lines,at = null,options = {}) {
+  const center = at || roomAisles[b.role];
+  const spacing = options.document ? 0.48 : 0.64;
+  const marks = [center.clone().add(point(-spacing,-0.18)), center.clone().add(point(spacing,0.18))];
+  const started = beginExchange([a,b],marks,lines,options);
+  if (!started && !options.ambient) {
+    feed(lines[0][0].name, lines[0][1]);
+    if (a.root.visible && b.root.visible && !pendingEncounters.some(e => e.lines[0][1] === lines[0][1])) {
+      pendingEncounters.push({people:[a,b], marks, lines, options, expires:officeTime + 100});
+      if (pendingEncounters.length > 8) pendingEncounters.shift();
+    }
+  }
+  return started;
+}
+function deliverDoc(from,to,text) {
+  return conversation(from,to,[[from,text[0]],[to,text[1]]],null,{document:true});
 }
 function coffeeBreak() {
-  const idle = chars.filter(c => !c.busy() && c.role !== "ceo");
-  if (idle.length < 2) return;
-  const a = pick(idle), b = pick(idle.filter(x => x !== a));
-  const lines = pick([
-    [[a, "Coffee? The hyperopt queue isn't going anywhere."], [b, "Always. Any signals on your sleeves?"], [a, "Waiting for a clean 1h close — no forcing trades."]],
-    [[a, "Did you see the gate failures today?"], [b, "Deflated Sharpe is brutal with more trials. Good — no overfitting."]],
-    [[a, "Memory looks stable since the watchdog."], [b, "Nice. The bot has priority, research yields first."]],
-    [[a, "Stops are on the exchange, right?"], [b, "Every position — we verified it with a real demo order."]],
-  ]);
-  const spot = pick(coffeeSpots);
-  a.goTo(spot).do({type: "call", fn: () => { a.pose = "coffee"; }}).wait(4000, "coffee");
-  b.goTo(spot.clone().add(new THREE.Vector3(-0.9, 0, 0.4))).do({type: "call", fn: () => { b.pose = "coffee"; }}).wait(2500, "coffee");
-  setTimeout(() => conversation(a, b, lines, spot.clone().add(new THREE.Vector3(-0.5, 0, 0.9))), 9000);
+  const idle = eligibleStaff().filter(c => c.role !== "ceo");
+  if (idle.length < 2) return false;
+  const a = idle[0], b = idle.find(c => c !== a && c.pos.distanceTo(a.pos) < 18) || idle[1];
+  return conversation(a,b,[[a,"Coffee while we compare notes?"],[b,"Sure. Let's look at the same chart when we're back at our desks."]],
+    point(16.85,0.80), {coffee:true,ambient:true});
 }
-function wanderSomeone() {
-  const idle = chars.filter(c => !c.busy());
-  if (!idle.length) return;
-  const c = pick(idle);
-  const spots = {research: [board.mesh.position.clone().setY(0).setX(-20.6)], trader: [new THREE.Vector3(rand(-4, 4), 0, -13.3)], scanner: [dish.position.clone().add(new THREE.Vector3(1.4, 0, 0))],
-    ops: [racks[2].position.clone().add(new THREE.Vector3(0, 0, 1.2))], learn: [new THREE.Vector3(15, 0, 13.1)], risk: [lampBar.position.clone().setZ(13.2).setY(0)], ceo: [new THREE.Vector3(0, 0, -3)]}[c.role] || [];
-  if (!spots.length) return;
-  const s = pick(spots);
-  const target = {research: board.mesh.position, trader: wall.mesh.position, risk: lampBar.position, ceo: new THREE.Vector3(0, 3, 1.6)}[c.role];
-  const pose = c.role === "research" ? "write" : c.role === "ceo" ? "present" : pick(["think", "point", "stand"]);
-  if (c.role === "ceo") s.set(rand(-2, 2), 0, 3.6);
-  c.goTo(s);
-  if (target) c.face(target.clone().setY(0));
-  c.do({type: "call", fn: () => { c.pose = pose; if (pose === "write") c.say(pick(boardNotes()), 4200); }}).wait(rand(4000, 7000), pose)
-   .do({type: "call", fn: () => { c.pose = "stand"; }}).sitAt(c.homeSeat);
+function availableForRoutine(c) {
+  return c.root.visible && !c.busy() && !pendingEncounters.some(e => e.people.includes(c));
+}
+function eligibleStaff() {
+  return chars.filter(c => availableForRoutine(c) && c.seat)
+    .sort((a,b) => (a.lastOut ?? -1) - (b.lastOut ?? -1));
+}
+function wanderSomeone(preferred) {
+  const c = preferred && availableForRoutine(preferred) ? preferred : eligibleStaff()[0];
+  if (!c) return false;
+  const job = {
+    research: [point(-16.5,-13.88),board.mesh.position,"write"],
+    trader: [point(-2.1,-13.30),wall.mesh.position,"point"],
+    scanner: [point(-18.2,5.04),dish.position,"think"],
+    ops: [point(14.8,-11.85),racks[2].position,"think"],
+    learn: [point(15.2,12.85),point(15.2,13.85),"stand"],
+    risk: [point(1.25,13.15),lampBar.position,"think"],
+    ceo: [point(0.4,3.65),point(0,1.6),"present"],
+  }[c.role];
+  c.lastOut = officeTime;
+  c.goTo(job[0]).face(job[1]).do({type:"call",fn:() => {
+    if (job[2] === "write") c.say(pick(boardNotes()),3600);
+  }}).wait(rand(3700,5500),job[2]).sitAt(c.homeSeat);
+  return true;
+}
+let nextVisit = 0.55, nextWalk = 4.4, nextStandup = 76, standupPending = false, visitTurn = 0, walkTurn = 0;
+function directOffice(dt) {
+  officeTime += dt;
+  updateExchanges(dt);
+  for (let i = 0; i < pendingEncounters.length;) {
+    const e = pendingEncounters[i];
+    if (e.expires < officeTime || e.people.some(p => !p.root.visible) || beginExchange(e.people,e.marks,e.lines,e.options)) {
+      pendingEncounters.splice(i,1);
+    } else i++;
+  }
+  if (officeTime >= nextStandup && !meetingOn) {
+    if (standup()) { nextStandup = officeTime + 200; standupPending = false; }
+    else { nextStandup = officeTime + 4; standupPending = !!S.goals?.goals?.length; }
+  }
+  if (standupPending) return;
+  if (officeTime >= nextVisit && !meetingOn) {
+    const trading = traders.filter(availableForRoutine);
+    let started = false;
+    if (visitTurn % 3 === 0 && trading.length >= 2) {
+      started = conversation(trading[0],trading[1],[[trading[0],"Can we compare these two charts?"],[trading[1],"Yes. Let's start with the last closed candle."]],
+        roomAisles.trader,{ambient:true});
+    } else if (visitTurn % 3 === 1) {
+      const free = researchers.filter(availableForRoutine);
+      if (free.length >= 2) started = conversation(free[0],free[1],[[free[0],"Let's review the experiment together."],[free[1],"I'll bring the validation notes."]],
+        roomAisles.research,{ambient:true});
+    } else started = coffeeBreak();
+    if (started) { visitTurn++; nextVisit = officeTime + 19; } else { visitTurn++; nextVisit = officeTime + 3; }
+  }
+  if (officeTime >= nextWalk && !meetingOn) {
+    const movers = chars.filter(c => c.root.visible && c.busy()).length;
+    if (movers < 4) {
+      const order = [researchers[2],sre,scout,traders[2],analyst,ceo,risk];
+      wanderSomeone(order[walkTurn++ % order.length]);
+    }
+    nextWalk = officeTime + 9;
+  }
 }
 function boardNotes() {
   const rs = S.rs || {}, lab = rs.lab || {}, ex = (rs.experiments || []).find(e => e.oos);
@@ -1179,13 +1509,6 @@ function boardNotes() {
   if (lab.runs) out.push(`GitHub lab: ${lab.runs} runs so far, ${lab.experiments_total || 0} experiments imported.`);
   return out;
 }
-setInterval(() => { if (Math.random() < 0.45) wanderSomeone(); }, 7000);
-setInterval(() => { if (Math.random() < 0.5) coffeeBreak(); }, 26000);
-setInterval(() => { if (!meetingOn) standup(); }, 270000);
-setTimeout(() => standup(), 75000);
-setInterval(() => { const c = pick(chars.filter(x => x.root.visible && !x.busy() && x.role !== "trader")); if (!c) return;
-  c.do({type: "call", fn: () => { c.pose = "phone"; c.say(pick(["Yes — demo account only, no real money.", "The GitHub runner is on it, results in a couple of hours.", "Stops are always on the exchange.", "We'll know more after the forward test."]), 5000); }}).wait(6000, "phone").do({type: "call", fn: () => { c.pose = "stand"; }}).sitAt(c.homeSeat); }, 95000);
-
 // ============================================================== data → scenes
 const S = {ov: null, rs: null, hl: null, ln: null, goals: null, market: null, strats: null, candles: {}, flash: {}, lossHist: {}, lock: {}, lastEventId: null, openIds: new Set(), first: true};
 function onEvent(e) {
@@ -1200,18 +1523,19 @@ function onEvent(e) {
         : verdict === "exploratory" ? "Close, but not robust enough for incubation. Exploration lane at 0.1% risk."
         : "Rejected. I won't trade a curve-fit. Back to the lab.";
       deliverDoc(r, risk, [m.replace(/^\S+ /, "").slice(0, 130), reply]);
-      if (verdict === "rejected") setTimeout(() => { r.pose = "facepalm"; }, 200);
-    } else if (/failed/.test(m)) { r.say("Experiment crashed — watchdog will retry with a lighter load."); r.pose = "facepalm"; feed(r.name, m.slice(0, 120)); }
+      if (verdict === "rejected") r.react("facepalm");
+    } else if (/failed/.test(m)) { r.say("Experiment crashed — watchdog will retry with a lighter load."); r.react("facepalm"); feed(r.name, m.slice(0, 120)); }
     else { r.say(m.slice(0, 120)); feed(r.name, m.slice(0, 120)); }
   } else if (e.source === "lifecycle") {
     const tr = pick(traders.filter(t => !t.busy())) || traders[0];
     const to = /→ (\w+)/.exec(m)?.[1];
     conversation(ceo, tr, [[ceo, m.slice(0, 140)], [tr, to === "production" ? "Production risk it is. I'll watch it closely." : to === "retired" ? "Understood, closing it down cleanly." : "Got it — updating the sleeve."]]);
   } else if (e.source === "learner") {
-    conversation(analyst, pick(researchers), [[analyst, m.replace("new learning ", "").slice(0, 150)], [researchers[0], "Good catch. I'll A/B test that adjustment in the next experiments."]]);
+    const colleague = pick(researchers);
+    conversation(analyst, colleague, [[analyst, m.replace("new learning ", "").slice(0, 150)], [colleague, "Good catch. I'll A/B test that adjustment in the next experiments."]]);
   } else if (["selftest", "supervisor", "memory", "manager"].includes(e.source)) {
     sre.say(m.slice(0, 140), 7000); feed(sre.name, m.slice(0, 140));
-    if (/FAILED|error|stale|exited/i.test(m)) { sre.pose = "facepalm"; }
+    if (/FAILED|error|stale|exited/i.test(m)) { sre.react("facepalm"); }
   } else if (e.source === "risk") {
     conversation(risk, ceo, [[risk, m.slice(0, 140)], [ceo, "Agreed. Capital protection first."]]);
   } else if (e.source === "scanner") {
@@ -1286,26 +1610,11 @@ function narrateLab() {
 // ---- daily stand-up at the meeting table: every line is real data
 let meetingOn = false;
 function meeting(people, lines) {
-  const ps = people.filter(p => p && p.root.visible);
-  if (meetingOn || ps.some(p => p.busy())) return false;
-  meetingOn = true;
-  const center = table.position.clone();
-  const spots = [new THREE.Vector3(-4.1, 0, 8.6), new THREE.Vector3(0.5, 0, 8.6), new THREE.Vector3(-2.6, 0, 7.15), new THREE.Vector3(-1.0, 0, 7.15), new THREE.Vector3(-2.6, 0, 10.05), new THREE.Vector3(-1.0, 0, 10.05)];
-  ps.forEach((p, i) => { p.arrived = false; p.goTo(spots[i]).face(center).do({type: "call", fn: () => { p.pose = "stand"; p.arrived = true; }}); });
-  let started = false;
-  const start = () => {
-    if (started) return; started = true; ps.forEach(p => { p.locked = true; });
-    let t = 0;
-    for (const [who, text] of lines) {
-      const ms = clamp(1500 + text.length * 42, 2600, 8000);
-      setTimeout(() => { ps.forEach(p => { p.pose = "talk"; p.lookTarget = p === who ? center : who; }); who.say(text, ms); feed(who.name, text); }, t);
-      t += ms + 500;
-    }
-    setTimeout(() => { ps.forEach(p => { p.locked = false; p.pose = "stand"; p.lookTarget = null; p.speaking = false; p.sitAt(p.homeSeat); }); meetingOn = false; }, t + 400);
-  };
-  const poll = setInterval(() => { if (ps.every(p => p.arrived)) { clearInterval(poll); start(); } }, 300);
-  setTimeout(() => { clearInterval(poll); start(); }, 30000);
-  return true;
+  if (meetingOn) return false;
+  const places = [point(-3.10,7.12),point(-1.8,7.12),point(-0.48,7.12),point(-2.68,10.12),point(-1.13,10.12)];
+  const started = beginExchange(people,places,lines,{center:table.position,after:() => { meetingOn = false; }});
+  if (started) meetingOn = true;
+  return started;
 }
 function standup() {
   const G = S.goals?.goals || [], rs = S.rs || {}, hl = S.hl || {}, ln = S.ln || {};
@@ -1324,7 +1633,7 @@ function standup() {
     [sre, `Bot ${hl.bot_up ? "up" : "DOWN"}, ${mem ? mem + " MB memory headroom" : "memory fine"}, order test ${hl.exec_test?.ok ? "passing" : "pending"}. Research runs on GitHub, not here.`],
     [ceo, (g("validated").value || 0) < 1 ? "Priority unchanged: one strategy that passes every strict gate, then prove it live. Back to work." : "We have a validated strategy — now let the forward test speak. Back to work."],
   ];
-  meeting([ceo, lr, risk, analyst, sre], lines);
+  return meeting([ceo, lr, risk, analyst, sre], lines);
 }
 function lockedPnl(t) {
   const st = Number(t.stop_loss_abs), o = Number(t.open_rate), notional = Number(t.stake_amount || 0) * Number(t.leverage || 1);
@@ -1593,7 +1902,11 @@ function applyData() {
   setTag("ops", `${hl.bot_up ? "bot up" : "bot DOWN"} · order test ${hl.exec_test?.ok ? "✓" : "–"}`, !hl.bot_up || bad.length ? "crit" : "good");
   setTag("ceo", `${live.length} live sleeves · kill-switch ${ov.kill_switch ? "ON" : "off"}`, ov.kill_switch ? "crit" : "good");
   // traders: active desks for live sleeves, others away
-  traders.forEach((tr, i) => { const on = i < Math.max(live.length, 2); tr.root.visible = on; tr.bubble.style.display = on ? "" : "none"; });
+  traders.forEach((tr, i) => {
+    const on = i < Math.max(live.length, 2);
+    if (!on && tr.root.visible) tr.resetAtDesk();
+    tr.root.visible = on; tr.bubble.style.display = on ? "" : "none";
+  });
   paintBooks((ln.learnings || []).length);
   $("#track").textContent = (ov.events || []).slice().reverse().map(e => `[${e.ts.slice(11, 16)}] ${e.source}: ${e.message}`).join("     •     ") || "quiet";
   // events → scenes (skip history on first load except the latest few)
@@ -1626,7 +1939,9 @@ function renderGoals() {
 }
 
 // ---- panels
+let selectedPerson = null;
 function openPanel(key) {
+  selectedPerson = null;
   const {ov, rs, hl, ln} = S; if (!ov) return; const d = departments[key];
   let h = `<h2>${d.name}</h2><div class="sub">${esc(d.info)}</div>`;
   const staff = chars.filter(c => ({trading: "trader", research: "research", risk: "risk", learning: "learn", ops: "ops", scanner: "scanner", ceo: "ceo"})[key] === c.role && c.root.visible);
@@ -1664,13 +1979,26 @@ function openPanel(key) {
   $("#panel").style.setProperty("--panel-accent", tags[key].style.getPropertyValue("--department"));
   $("#panel").style.display = "block"; $("#goals").style.display = "none";
 }
+function refreshPersonCard() {
+  const p = selectedPerson;
+  if (!p) return;
+  const activity = p.locked ? "in the stand-up meeting" : p.task ? ({
+    walk: "walking", leave: "getting up", sit: "sitting down", face: "turning", wait: p.pose, call: "busy",
+  })[p.task.type] : p.interaction?.arrived.has(p) ? (p.speaking ? "speaking" : "listening") : p.seat ? "working at desk" : p.pose;
+  const label = $("#personActivity"), quote = $("#personQuote");
+  if (label.textContent !== activity) label.textContent = activity;
+  if (quote.dataset.line !== p.line) {
+    quote.textContent = p.line ? "“" + p.line + "”" : ""; quote.hidden = !p.line; quote.dataset.line = p.line;
+  }
+}
 function openPerson(p) {
-  const act = p.locked ? "in the stand-up meeting" : p.task ? ({walk: "walking", sit: "sitting down", wait: p.pose, call: "busy"})[p.task.type] || p.task.type : p.seat ? "working at desk" : p.pose;
-  $("#pbody").innerHTML = `<h2>${esc(p.name)}</h2><div class="sub">${roleName(p.role)}</div><div class="kv"><span>activity</span><span>${esc(act)}</span></div>${p.line ? `<p>“${esc(p.line)}”</p>` : ""}<button class="btn" id="follow">Follow ${esc(p.name)}</button>`;
+  selectedPerson = p;
+  $("#pbody").innerHTML = `<h2>${esc(p.name)}</h2><div class="sub">${roleName(p.role)}</div><div class="kv"><span>activity</span><span id="personActivity"></span></div><p id="personQuote" hidden></p><button class="btn" id="follow">Follow ${esc(p.name)}</button>`;
+  refreshPersonCard();
   $("#panel").style.removeProperty("--panel-accent");
   $("#panel").style.display = "block"; $("#follow").onclick = () => { follow = p; setTour(false); };
 }
-$("#px").onclick = () => { $("#panel").style.display = "none"; $("#goals").style.display = ""; follow = null; };
+$("#px").onclick = () => { selectedPerson = null; $("#panel").style.display = "none"; $("#goals").style.display = ""; follow = null; };
 
 // ============================================================== camera director
 let camTween = null, follow = null, tour = false, tourT = 0;
@@ -1683,12 +2011,30 @@ function flyTo(pos, tgt, ms = 1550) {
 function setTour(active) {
   tour = active; $("#bTour").classList.toggle("on", active); $("#bTour").setAttribute("aria-pressed", String(active));
 }
+function frameTradingFloor() {
+  const eye = new THREE.Vector3(0.45,0.68,0.88).normalize();
+  const right = UP.clone().cross(eye).normalize(), up = eye.clone().cross(right);
+  const center = new THREE.Vector3(0,0.92,-8.4);
+  const tanY = Math.tan(THREE.MathUtils.degToRad(camera.fov * 0.5)), tanX = tanY*camera.aspect;
+  const panel = $("#panel").getBoundingClientRect();
+  const sidebar = innerWidth > 840 ? (panel.width + 20)/innerWidth : 0;
+  const bottom = innerWidth <= 840 ? (innerHeight - panel.top)/innerHeight : 0;
+  let distance = 8;
+  for (const x of [-6.45,6.45]) for (const z of [-10.7,-4.65]) for (const y of [0,1.8]) {
+    const diff = new THREE.Vector3(x,y,z).sub(center);
+    distance = Math.max(distance, diff.dot(eye) + Math.max(
+      Math.abs(diff.dot(right)) / (tanX * (0.91-sidebar)), Math.abs(diff.dot(up)) / (tanY * (0.85-bottom))));
+  }
+  center.addScaledVector(right,sidebar * tanX*distance);
+  center.addScaledVector(up,-bottom * tanY*distance);
+  flyTo(center.clone().addScaledVector(eye,distance),center);
+}
 function focusDept(key) {
-  const d = departments[key]; follow = null; setTour(false);
+  const d = departments[key]; follow = null; setTour(false); openPanel(key);
   if (key === "cloud") flyTo(new THREE.Vector3(-14.4, 9.9, 0.8), cloud.position.clone().add(new THREE.Vector3(0.4, -0.25, 0)));
+  else if (key === "trading") frameTradingFloor();
   else if (key === "mission") flyTo(new THREE.Vector3(0, 4.5, 11), new THREE.Vector3(0, 3, 1.6));
   else flyTo(d.pos.clone().add(new THREE.Vector3(7.2, 9.2, 12.8)), d.pos.clone().setY(1.25));
-  openPanel(key);
 }
 $("#bReset").onclick = () => { follow = null; setTour(false); flyTo(homePosition(), HOME_TGT); };
 $("#bTour").onclick = () => {
@@ -1751,13 +2097,15 @@ function adjustResolution(delta, now) {
 }
 let lastScreens = 0, lastShadow = 0, pipeOffset = 0, beamOffset = 0;
 function tick() {
-  const delta = clock.getDelta(), dt = Math.min(delta, 0.05), t = clock.elapsedTime, now = performance.now();
+  const delta = clock.getDelta(), dt = document.hidden ? 0 : Math.min(delta, 0.25), now = performance.now();
+  directOffice(dt);
+  const t = officeTime;
   adjustResolution(delta, now);
   const moving = reducedMotion.matches ? 0 : dt, ambientTime = reducedMotion.matches ? 0 : t;
   // environment: day/night
   const d = new Date(), hr = d.getHours() + d.getMinutes() / 60, day = clamp(Math.sin((hr - 6.5) / 13 * Math.PI) * 1.4, 0, 1);
   scene.background.copy(SKY_NIGHT).lerp(SKY_DAY, day); scene.fog.color.copy(scene.background);
-  sun.intensity = 1.70 + 0.62 * day; hemi.intensity = 0.90 + 0.25 * day;
+  sun.intensity = 1.42 + 0.85 * day; hemi.intensity = 0.68 + 0.42 * day;
   for (const mat of cityMaterials) mat.emissiveIntensity = 0.39 - day * 0.22;
   // props
   dish.rotation.y += moving * 0.41; beacon.material.color.setHSL(0.42, 0.72, 0.57 + 0.09 * Math.sin(ambientTime * 2.3));
@@ -1790,9 +2138,11 @@ function tick() {
   for (const c of chars) {
     if (!c.root.visible) continue;
     c.update(dt, t);
+    c.hitArea.position.z = -0.32 * c.sitBlend; c.blob.position.z = -0.12 * c.sitBlend;
     c.hitArea.scale.y = 1 - c.sitBlend * 0.24; c.hitArea.position.y = 0.825 * c.hitArea.scale.y;
-    if (c.bubbleUntil && now > c.bubbleUntil) { c.bubble.classList.remove("on"); c.bubbleUntil = 0; c.speaking = false; }
+
   }
+  drawFootShadows();
   for (const door of doors) {
     const near = chars.some(c => c.root.visible && Math.hypot(c.pos.x - door.x, c.pos.z - door.z) < 1.95);
     const target = near ? 1 : 0;
@@ -1800,7 +2150,7 @@ function tick() {
     const gap = door.width * (0.25 + door.open * 0.24);
     door.panels[0].position.x = -gap; door.panels[1].position.x = gap;
   }
-  if (now - lastScreens > 700) { drawAll(t); lastScreens = now; }
+  if (now - lastScreens > 700) { drawAll(t); refreshPersonCard(); lastScreens = now; }
   // camera
   if (camTween) {
     const k = clamp((now - camTween.s) / camTween.ms, 0, 1), e = k < 0.5 ? 4 * k * k * k : 1 - Math.pow(-2 * k + 2, 3) / 2;
@@ -1825,7 +2175,7 @@ function tick() {
       else project(c.root.position, c.emoteEl, c.bubbleUntil ? 2.75 : 2.05);
     }
   }
-  if (now - lastShadow >= 130) { renderer.shadowMap.needsUpdate = true; lastShadow = now; }
+  if (now - lastShadow >= (frameTime > 0.052 ? 350 : 130)) { renderer.shadowMap.needsUpdate = true; lastShadow = now; }
   renderer.render(scene, camera); requestAnimationFrame(tick);
 }
 function resizeView() {
@@ -1844,7 +2194,7 @@ setInterval(refresh, 12000); setInterval(() => refreshSlow(), 15000);
 $("#loader").style.opacity = 0; setTimeout(() => $("#loader").remove(), 900);
 flyTo(homePosition(), HOME_TGT, 2050);
 setTimeout(() => ceo.say("Morning, team. Demo account only — we earn trust with evidence, not hope.", 6500), 2600);
-setTimeout(() => conversation(researchers[1], researchers[0], [[researchers[1], "Walk-forward fold two is running. Train on 300 days, test on the next 60."], [researchers[0], "Good. Remember: we only trust the out-of-sample numbers."]]), 9000);
+
 tick();
 window.__hq = {chars, follow: (i, instant) => { follow = chars[i]; setTour(false); camTween = null;
   if (instant) { const tp = follow.root.position.clone().setY(1.2); controls.target.copy(tp); camera.position.copy(tp.clone().add(new THREE.Vector3(2.6, 1.9, 3.3))); } }};
