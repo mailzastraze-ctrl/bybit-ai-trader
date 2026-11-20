@@ -20,7 +20,7 @@ from freqtrade.persistence import Trade
 from freqtrade.strategy import DecimalParameter, IntParameter, IStrategy, stoploss_from_absolute
 
 from aitrader import indicators as ta
-from aitrader.families import EXIT_PARAMS, get_family
+from aitrader.families import EXIT_PARAMS, NEEDS_FUNDING, get_family
 from aitrader.manifest import ManifestWatcher, Sleeve
 from aitrader.riskcore import EntryContext, bars_held, signal_row, size_multiplier, stake_for_risk
 
@@ -44,7 +44,8 @@ class AIBase(IStrategy):
     exit_profit_only = False
     ignore_roi_if_entry_signal = False
     process_only_new_candles = True
-    startup_candle_count = 300
+    # 30 days of 1h warm-up: long-lookback families (time-series momentum, funding z-scores)
+    startup_candle_count = 720
 
     # ------------------------------------------------------------------ hooks for subclasses
     def sleeve_for_pair(self, pair: str) -> Sleeve | None:  # entry owner
@@ -55,6 +56,40 @@ class AIBase(IStrategy):
 
     def entries_paused(self) -> bool:
         return False
+
+    def families_in_use(self) -> set[str]:
+        return set()
+
+    # ------------------------------------------------------------------ funding data
+    def _funding_tf(self) -> str:
+        try:
+            return self.dp._exchange.get_option("funding_fee_timeframe") or "8h"
+        except Exception:  # noqa: BLE001
+            return "8h"
+
+    def _needs_funding(self) -> bool:
+        return self.config.get("trading_mode") == "futures" and bool(self.families_in_use() & NEEDS_FUNDING)
+
+    def informative_pairs(self):
+        if not self._needs_funding() or not self.dp:
+            return []
+        tf = self._funding_tf()
+        return [(p, tf, "funding_rate") for p in self.dp.current_whitelist()]
+
+    def _merge_funding(self, dataframe: pd.DataFrame, pair: str) -> pd.DataFrame:
+        """Last known funding rate at each candle (backward as-of join: no look-ahead)."""
+        try:
+            fr = self.dp.get_pair_dataframe(pair, self._funding_tf(), candle_type="funding_rate")
+            if fr is None or fr.empty:
+                dataframe["funding"] = float("nan")
+                return dataframe
+            fr = fr[["date", "open"]].rename(columns={"open": "funding"}).sort_values("date")
+            out = pd.merge_asof(dataframe.sort_values("date"), fr, on="date", direction="backward")
+            dataframe["funding"] = out["funding"].values
+        except Exception as e:  # noqa: BLE001 – missing funding data must never break trading
+            logger.warning("funding data unavailable for %s: %s", pair, e)
+            dataframe["funding"] = float("nan")
+        return dataframe
 
     # ------------------------------------------------------------------ safety
     def bot_start(self, **kwargs) -> None:
@@ -69,6 +104,8 @@ class AIBase(IStrategy):
     # ------------------------------------------------------------------ signals
     def populate_indicators(self, dataframe: pd.DataFrame, metadata: dict) -> pd.DataFrame:
         dataframe["atr"] = ta.atr(dataframe, 14)
+        if self._needs_funding():
+            dataframe = self._merge_funding(dataframe, metadata["pair"])
         return dataframe
 
     def populate_entry_trend(self, dataframe: pd.DataFrame, metadata: dict) -> pd.DataFrame:
@@ -78,7 +115,8 @@ class AIBase(IStrategy):
         if sleeve is None:
             return dataframe
         fam = get_family(sleeve.family)
-        res = fam.populate(dataframe[["date", "open", "high", "low", "close", "volume"]], sleeve.params)
+        cols = ["date", "open", "high", "low", "close", "volume"] + (["funding"] if "funding" in dataframe else [])
+        res = fam.populate(dataframe[cols], sleeve.params)
         for col in ("long_sig", "short_sig", "exit_long_sig", "exit_short_sig", "conviction"):
             dataframe[col] = res[col].values
         if self.entries_paused():
@@ -262,6 +300,9 @@ class ResearchBase(AIBase):
     def sleeve_for_trade(self, trade: Trade) -> Sleeve | None:
         return self._current_sleeve()
 
+    def families_in_use(self) -> set[str]:
+        return {self.family_name}
+
 
 # ---------------------------------------------------------------------------- portfolio
 class PortfolioBase(AIBase):
@@ -285,6 +326,9 @@ class PortfolioBase(AIBase):
 
     def entries_paused(self) -> bool:
         return self._watcher().manifest.entries_paused
+
+    def families_in_use(self) -> set[str]:
+        return {s.family for s in self._watcher().manifest.sleeves}
 
     def sleeve_for_pair(self, pair: str) -> Sleeve | None:
         return self._watcher().manifest.owner_of(pair)

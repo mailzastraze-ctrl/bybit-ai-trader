@@ -100,7 +100,7 @@ class Pipeline:
 
         # 1) data -----------------------------------------------------------
         self._progress(eid, "download")
-        data_start = folds[0].train_start - timedelta(days=20)  # + indicator warm-up
+        data_start = folds[0].train_start - timedelta(days=35)  # + 720-candle indicator warm-up
         self.ft.download(job, base_cfg, pairs, f"{data_start:%Y%m%d}-")
 
         # 2) walk-forward ---------------------------------------------------

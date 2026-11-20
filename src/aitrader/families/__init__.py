@@ -150,7 +150,94 @@ SQUEEZE = Family(
 )
 
 
-FAMILIES: dict[str, Family] = {f.name: f for f in (TREND_EMA, MEANREV_BB, DONCHIAN, SQUEEZE)}
+# ------------------------------------------------------- time-series momentum (TSMOM)
+def _tsmom(df: pd.DataFrame, p: dict) -> pd.DataFrame:
+    """Classic time-series momentum (Moskowitz/Ooi/Pedersen), vol-normalised: the L-hour
+    return measured in units of its own volatility. One of the best-documented effects in
+    futures markets, including crypto perps."""
+    L = int(p["lookback"])
+    ret = np.log(df["close"]).diff()
+    vol = ret.rolling(int(p["vol_len"]), min_periods=48).std()
+    z = np.log(df["close"] / df["close"].shift(L)) / (vol * np.sqrt(L)).replace(0, np.nan)
+    k, ex = p["z_entry"], p["z_exit"]
+    fast = ta.ema(df["close"], int(p["confirm_len"]))
+    up_x = ta.crossed_above(df["close"], fast)
+    dn_x = ta.crossed_below(df["close"], fast)
+    long_sig = ((z > k) & (z.shift(1) <= k)) | ((z > k) & up_x)
+    short_sig = ((z < -k) & (z.shift(1) >= -k)) | ((z < -k) & dn_x)
+    return pd.DataFrame(
+        {
+            "long_sig": long_sig,
+            "short_sig": short_sig,
+            "exit_long_sig": z < ex,
+            "exit_short_sig": z > -ex,
+            "conviction": 0.5 + z.abs() / (k + 1.0),
+        }
+    )
+
+
+TSMOM = Family(
+    name="tsmom",
+    title="Time-series momentum (vol-scaled)",
+    description="Trades the sign of the multi-day return measured in volatility units (3–21 day lookbacks), "
+                "re-entering on short-term confirmation; exits when momentum fades.",
+    entry_params=(
+        Param("lookback", "int", 72, 504, 240, "buy"),
+        Param("vol_len", "int", 72, 336, 168, "buy"),
+        Param("z_entry", "float", 0.3, 2.0, 0.8, "buy", 2),
+        Param("z_exit", "float", -0.5, 0.6, 0.0, "buy", 2),
+        Param("confirm_len", "int", 6, 48, 20, "buy"),
+    ),
+    signal_fn=_tsmom,
+    affinity="trend",
+)
+
+
+# -------------------------------------------------- funding-rate crowding (contrarian)
+def _funding_reversal(df: pd.DataFrame, p: dict) -> pd.DataFrame:
+    """Perpetual funding as a crowding gauge: when funding is extreme versus its own
+    history, the paying side is crowded. Fade it once price confirms (EMA cross).
+    Needs a 'funding' column (merged by the strategy); without it there are no signals."""
+    if "funding" not in df or df["funding"].isna().all():
+        f = pd.Series(False, index=df.index)
+        return pd.DataFrame({"long_sig": f, "short_sig": f, "exit_long_sig": f, "exit_short_sig": f,
+                             "conviction": pd.Series(1.0, index=df.index)})
+    fr = df["funding"].astype(float).ffill()
+    w = int(p["fund_window"])
+    z = (fr - fr.rolling(w, min_periods=w // 3).mean()) / fr.rolling(w, min_periods=w // 3).std().replace(0, np.nan)
+    k = p["fund_z"]
+    fast = ta.ema(df["close"], int(p["confirm_len"]))
+    crowd_long, crowd_short = z > k, z < -k
+    hot = crowd_long.rolling(int(p["memory"]), min_periods=1).max().astype(bool)
+    cold = crowd_short.rolling(int(p["memory"]), min_periods=1).max().astype(bool)
+    return pd.DataFrame(
+        {
+            "long_sig": cold & ta.crossed_above(df["close"], fast),
+            "short_sig": hot & ta.crossed_below(df["close"], fast),
+            "exit_long_sig": z > k / 2,
+            "exit_short_sig": z < -k / 2,
+            "conviction": 0.5 + z.abs() / (k + 1.0),
+        }
+    )
+
+
+FUNDING = Family(
+    name="funding_reversal",
+    title="Funding-rate crowding reversal",
+    description="Fades extreme perpetual funding (crowded longs/shorts) after an EMA price confirmation.",
+    entry_params=(
+        Param("fund_window", "int", 168, 1440, 720, "buy"),
+        Param("fund_z", "float", 1.0, 3.0, 1.8, "buy", 2),
+        Param("memory", "int", 4, 48, 16, "buy"),
+        Param("confirm_len", "int", 6, 48, 20, "buy"),
+    ),
+    signal_fn=_funding_reversal,
+    affinity="revert",
+)
+
+
+FAMILIES: dict[str, Family] = {f.name: f for f in (TREND_EMA, MEANREV_BB, DONCHIAN, SQUEEZE, TSMOM, FUNDING)}
+NEEDS_FUNDING = {"funding_reversal"}
 
 # Freqtrade strategy class name used for hyperopting each family.
 RESEARCH_CLASS: dict[str, str] = {
@@ -158,6 +245,8 @@ RESEARCH_CLASS: dict[str, str] = {
     "meanrev_bb": "FamMeanRevBB",
     "donchian_breakout": "FamDonchian",
     "squeeze_momentum": "FamSqueeze",
+    "tsmom": "FamTsmom",
+    "funding_reversal": "FamFunding",
 }
 
 
@@ -168,4 +257,4 @@ def get_family(name: str) -> Family:
         raise ValueError(f"unknown family {name!r}; known: {sorted(FAMILIES)}") from e
 
 
-__all__ = ["EXIT_PARAMS", "FAMILIES", "RESEARCH_CLASS", "Family", "Param", "get_family"]
+__all__ = ["EXIT_PARAMS", "FAMILIES", "NEEDS_FUNDING", "RESEARCH_CLASS", "Family", "Param", "get_family"]

@@ -49,10 +49,34 @@ def test_family_signals_have_no_lookahead(name):
 @pytest.mark.parametrize("name", list(FAMILIES))
 def test_family_produces_signals_and_bounded_conviction(name):
     fam = get_family(name)
-    out = fam.populate(ohlcv(3000, seed=5, vol=0.012), fam.defaults())
+    df = ohlcv(3000, seed=5, vol=0.012)
+    if name == "funding_reversal":  # synthetic 8h funding that swings between crowded regimes
+        import numpy as np
+        f = 0.0001 + 0.0006 * np.sin(np.arange(len(df)) / 90.0) + np.random.default_rng(3).normal(0, 0.0001, len(df))
+        df["funding"] = np.where(np.arange(len(df)) % 8 == 0, f, np.nan)
+    out = fam.populate(df, fam.defaults())
     assert out["long_sig"].sum() + out["short_sig"].sum() > 0
     assert out["conviction"].between(0.5, 1.5).all()
     assert not out.loc[out["atr"].isna(), ["long_sig", "short_sig"]].any().any()
+
+
+def test_funding_family_is_silent_without_funding_data():
+    fam = get_family("funding_reversal")
+    out = fam.populate(ohlcv(1500, seed=2), fam.defaults())
+    assert out["long_sig"].sum() + out["short_sig"].sum() == 0
+
+
+def test_tsmom_follows_persistent_trend():
+    import numpy as np
+    import pandas as pd
+    fam = get_family("tsmom")
+    n = 2000
+    close = 100 * np.exp(np.cumsum(np.r_[np.full(1000, 0.002), np.full(1000, -0.002)] + np.random.default_rng(1).normal(0, 0.004, n)))
+    df = pd.DataFrame({"date": pd.date_range("2025-01-01", periods=n, freq="1h", tz="UTC"), "open": close, "high": close * 1.002,
+                       "low": close * 0.998, "close": close, "volume": 1000.0})
+    out = fam.populate(df, fam.defaults())
+    assert out["long_sig"][:1000].sum() > out["short_sig"][:1000].sum()
+    assert out["short_sig"][1300:].sum() > out["long_sig"][1300:].sum()
 
 
 def test_family_normalize_and_perturb_stay_in_bounds():

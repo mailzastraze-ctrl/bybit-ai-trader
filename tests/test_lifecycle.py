@@ -269,7 +269,8 @@ def test_batch_run_merge_and_import(env, tmp_path, monkeypatch):
         batch.cmd_run(tmp_path / f"job{job}", job, 2, uni)
     m = batch.merge([tmp_path], "b1")
     assert m["n_completed"] == 4 and m["n_trials_for_dsr"] == 4
-    assert {e["family"] for e in m["experiments"]} == set(batch.FAMILIES)
+    fams = {e["family"] for e in m["experiments"]}
+    assert len(fams) == 4 and fams <= set(batch.FAMILIES)
     assert m["candidates"] and all(c["stage"] in ("validated", "exploratory") for c in m["candidates"])
     md = batch.report_md(m)
     assert "Research batch b1" in md and "| Experiment |" in md

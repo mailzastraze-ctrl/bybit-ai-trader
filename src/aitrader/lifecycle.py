@@ -44,7 +44,7 @@ class Lifecycle:
         if self.reg.kv_get("bootstrapped"):
             return
         now = iso()
-        for i, fam in enumerate(FAMILIES.values()):
+        for i, fam in enumerate(list(FAMILIES.values())[:4]):  # day-0 placeholders, 2 pairs each
             sid = f"boot-{fam.name}"
             self.reg.upsert("strategies", {
                 "id": sid, "experiment_id": "", "family": fam.name, "params": fam.defaults(),

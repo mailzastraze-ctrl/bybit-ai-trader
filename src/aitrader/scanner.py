@@ -80,7 +80,7 @@ class Scanner:
         liquid = liquid[: self.s.research.universe_size]
 
         rs = self.s.research
-        start = utcnow() - timedelta(days=rs.train_days + rs.holdout_days + 30)
+        start = utcnow() - timedelta(days=rs.train_days + rs.holdout_days + 45)
         dl_cfg = self.ft.write_config(job, "download.json", research_config(self.s, liquid))
         try:
             self.ft.download(job, dl_cfg, liquid, f"{start:%Y%m%d}-")
