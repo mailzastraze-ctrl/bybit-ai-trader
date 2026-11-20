@@ -272,8 +272,7 @@ class Lifecycle:
         import random
         uni = (self.reg.kv_get("universe") or {}).get("pairs") or BOOT_PAIRS
         rng = random.Random()
-        for _ in range(2):
-            fam = rng.choice(list(FAMILIES.values()))
+        for fam in rng.sample(list(FAMILIES.values()), k=2):
             params = fam.perturb(fam.defaults(), 0.25, rng)
             pairs = rng.sample(uni, k=min(3, len(uni)))
             sid = f"rnd-{fam.name[:5]}-{rng.randrange(16**6):06x}"

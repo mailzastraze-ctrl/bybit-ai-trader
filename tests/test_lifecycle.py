@@ -330,6 +330,7 @@ def test_always_on_exploration_near_miss_and_random_explorer(env):
     life.evaluate(10_000)
     rnd = [r for r in reg.strategies(("exploration",)) if r["id"].startswith("rnd-")]
     assert len(rnd) == 2 and all(r["pairs"] for r in rnd)
+    assert len({r["family"] for r in rnd}) == 2
     # a profitable near-miss gets an exploration slot
     _strategy(reg, "near", "rejected", ["SOL/USDT:USDT"])
     reg.update("strategies", "near", {"created": iso(), "oos": {"trades": 20, "total_return": 0.03,
