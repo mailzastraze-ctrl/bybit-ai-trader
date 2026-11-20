@@ -23,6 +23,7 @@ from aitrader import indicators as ta
 from aitrader.families import EXIT_PARAMS, NEEDS_FUNDING, get_family
 from aitrader.manifest import ManifestWatcher, Sleeve
 from aitrader.riskcore import EntryContext, bars_held, signal_row, size_multiplier, stake_for_risk
+from aitrader.settings import MAX_LEVERAGE
 
 logger = logging.getLogger(__name__)
 
@@ -260,6 +261,40 @@ class AIBase(IStrategy):
         crossing = current_order_rate >= px / 1.0005 if long else current_order_rate <= px / 0.9995
         return current_order_rate if crossing else px
 
+    MAKER_EXIT_WAIT_S = 90   # exits rest passively this long, then cross
+    URGENT_EXITS = ("managed_stop", "stop_loss", "stoploss", "emergency_exit", "liquidation", "force_exit")
+
+    def _cross_price(self, pair: str, closing_long: bool) -> float | None:
+        try:
+            ob = self.dp.orderbook(pair, 1)
+            return float(ob["bids"][0][0]) * 0.9995 if closing_long else float(ob["asks"][0][0]) * 1.0005
+        except Exception:  # noqa: BLE001
+            return None
+
+    def custom_exit_price(self, pair: str, trade: Trade, current_time: datetime, proposed_rate: float,
+                          current_profit: float, exit_tag: str | None, **kwargs) -> float:
+        """Lower fees: planned exits (take profit, signal, time) rest on our side of the book
+        as maker orders (0.02% vs 0.055% taker); a stop-type exit crosses immediately."""
+        if self.config.get("runmode") not in (RunMode.LIVE, RunMode.DRY_RUN):
+            return proposed_rate
+        if (exit_tag or "") in self.URGENT_EXITS:
+            return self._cross_price(pair, not trade.is_short) or proposed_rate
+        return proposed_rate
+
+    def adjust_exit_price(self, trade: Trade, order, pair: str, current_time: datetime,
+                          proposed_rate: float, current_order_rate: float, entry_tag: str | None,
+                          side: str, **kwargs) -> float | None:
+        if self.config.get("runmode") not in (RunMode.LIVE, RunMode.DRY_RUN):
+            return current_order_rate
+        placed = getattr(order, "order_date_utc", None) if order is not None else None
+        age = (current_time - placed).total_seconds() if placed else 0.0
+        if age < self.MAKER_EXIT_WAIT_S:
+            if proposed_rate and current_order_rate and abs(proposed_rate / current_order_rate - 1) > 0.0005:
+                return proposed_rate  # follow the touch, stay passive
+            return current_order_rate
+        px = self._cross_price(pair, not trade.is_short)
+        return px or current_order_rate
+
     # ------------------------------------------------------------------ portfolio limits
     def confirm_trade_entry(self, pair: str, order_type: str, amount: float, rate: float,
                             time_in_force: str, current_time: datetime, entry_tag: str | None,
@@ -329,11 +364,14 @@ class AIBase(IStrategy):
     def leverage(self, pair: str, current_time: datetime, current_rate: float,
                  proposed_leverage: float, max_leverage: float, entry_tag: str | None,
                  side: str, **kwargs) -> float:
+        # Owner's rule: no leverage. Every position is fully margined (1x); risk is set by the
+        # stop distance and position size, which leverage never changed anyway.
+        cap = min(float(self.config.get("aitrader", {}).get("max_leverage", MAX_LEVERAGE)), MAX_LEVERAGE)
         if entry_tag and entry_tag.startswith(EXEC_TEST_TAG):
-            return float(max(1.0, min(2.0, max_leverage)))
+            return 1.0
         sleeve = self.sleeve_by_tag(pair, entry_tag)
         lev = sleeve.leverage if sleeve else 1.0
-        return float(max(1.0, min(lev, max_leverage)))
+        return float(max(1.0, min(lev, max_leverage, cap)))
 
 
 # ---------------------------------------------------------------------------- research
@@ -385,7 +423,7 @@ class ResearchBase(AIBase):
             pairs=[],
             stage="exploration",
             risk=float(cfg.get("risk", 0.01)),
-            leverage=float(cfg.get("leverage", 3.0)),
+            leverage=float(cfg.get("leverage", 1.0)),
             sides=list(cfg.get("sides", ["long", "short"])),
         )
 

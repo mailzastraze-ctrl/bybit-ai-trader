@@ -25,7 +25,7 @@ class Sleeve:
     pairs: list[str]
     stage: str = "exploration"  # production | incubation | exploration | closing
     risk: float = 0.001
-    leverage: float = 3.0
+    leverage: float = 1.0
     sides: list[str] = field(default_factory=lambda: ["long", "short"])
     score: float = 0.0
     note: str = ""

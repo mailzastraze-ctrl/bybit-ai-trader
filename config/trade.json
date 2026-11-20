@@ -5,7 +5,7 @@
   "trading_mode": "futures",
   "margin_mode": "isolated",
   "dry_run": false,
-  "max_open_trades": 12,
+  "max_open_trades": 40,
   "stake_currency": "USDT",
   "stake_amount": "unlimited",
   "tradable_balance_ratio": 0.9,
@@ -17,9 +17,9 @@
   "unfilledtimeout": {"entry": 12, "exit": 10, "exit_timeout_count": 0, "unit": "minutes"},
   "entry_pricing": {"price_side": "same", "use_order_book": true, "order_book_top": 1,
                     "price_last_balance": 0.0, "check_depth_of_market": {"enabled": false, "bids_to_ask_delta": 1}},
-  "exit_pricing": {"price_side": "other", "use_order_book": true, "order_book_top": 1},
+  "exit_pricing": {"price_side": "same", "use_order_book": true, "order_book_top": 1},
   "order_types": {
-    "entry": "limit", "exit": "market", "emergency_exit": "market",
+    "entry": "limit", "exit": "limit", "emergency_exit": "market",
     "force_entry": "market", "force_exit": "market", "stoploss": "market",
     "stoploss_on_exchange": true, "stoploss_on_exchange_interval": 60
   },
@@ -51,5 +51,5 @@
     "password": ""
   },
   "internals": {"process_throttle_secs": 5, "heartbeat_interval": 300},
-  "aitrader": {"manifest_path": "/data/aitrader/manifest.json", "max_open_risk": 0.03, "max_same_side": 7}
+  "aitrader": {"manifest_path": "/data/aitrader/manifest.json", "max_open_risk": 0.08, "max_same_side": 25, "max_leverage": 1}
 }

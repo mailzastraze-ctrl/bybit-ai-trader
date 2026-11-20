@@ -354,6 +354,7 @@ def test_revalidation_spec_targets_stale_live_strategy(env):
 def test_research_candidates_displace_bootstrap_placeholders(env):
     s, reg = env
     s.lifecycle.max_exploration = 5  # a full lane forces displacement
+    s.lifecycle.max_family_sleeves = 2
     life = Lifecycle(s, reg)
     life.bootstrap()  # 4 unvalidated exploration sleeves (more than max_exploration)
     _strategy(reg, "cand1", "exploratory", ["SOL/USDT:USDT"], score=0.8)

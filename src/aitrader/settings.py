@@ -6,6 +6,8 @@ import os
 from dataclasses import dataclass, field
 from pathlib import Path
 
+MAX_LEVERAGE = 1.0  # owner's rule (2026-11-20): never trade with leverage
+
 
 def _env(name: str, default: str) -> str:
     return os.environ.get(name, default)
@@ -47,13 +49,17 @@ class Lifecycle:
     risk_production: float = 0.0075  # fraction of equity risked per trade (at stop)
     risk_incubation: float = 0.0025
     risk_exploration: float = 0.001
-    max_production: int = 4
-    max_incubation: int = 3
-    max_exploration: int = 8
+    # Demo account → evidence first (owner, 2026-11-20): run every promising strategy at
+    # tiny risk in parallel so trade statistics accumulate fast; capital-at-risk is bounded
+    # by the per-trade risk (0.1% exploration) and the portfolio open-risk cap, not by slots.
+    max_production: int = 6
+    max_incubation: int = 8
+    max_exploration: int = 24
+    max_family_sleeves: int = 6    # deployed sleeves per strategy family
     max_pairs_per_sleeve: int = 8
-    max_sleeves_per_pair: int = 3  # independent strategies that may trade the same pair
-    max_whitelist: int = 30        # pairs the bot follows (memory on the 1 GB server)
-    leverage: float = 3.0
+    max_sleeves_per_pair: int = 4  # independent strategies that may trade the same pair
+    max_whitelist: int = 45        # pairs the bot follows (Hobby plan memory)
+    leverage: float = 1.0  # owner's rule: no leverage (fees scale with position size, not leverage)
     incubation_min_trades: int = 15
     incubation_min_days: float = 7.0
     incubation_max_days: float = 30.0
@@ -125,7 +131,7 @@ class Settings:
         lite = os.environ.get("AITRADER_PROFILE", "").lower() == "lite"
         r.mode = _env("RESEARCH_MODE", "remote" if lite else r.mode).lower()
         lc = self.lifecycle
-        lc.leverage = _f("AITRADER_LEVERAGE", lc.leverage)
+        lc.leverage = min(_f("AITRADER_LEVERAGE", lc.leverage), MAX_LEVERAGE)
         lc.risk_production = _f("RISK_PRODUCTION", lc.risk_production)
         lc.risk_incubation = _f("RISK_INCUBATION", lc.risk_incubation)
         lc.risk_exploration = _f("RISK_EXPLORATION", lc.risk_exploration)

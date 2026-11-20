@@ -260,8 +260,9 @@ class Lifecycle:
         research + forward test until a bot for that timeframe runs (needs more memory)."""
         return ((st.get("oos") or {}).get("timeframe") or "1h") == "1h"
 
-    def _family_full(self, family: str, cap: int = 2) -> bool:
-        """Diversification: at most `cap` deployed sleeves per strategy family."""
+    def _family_full(self, family: str, cap: int | None = None) -> bool:
+        """Diversification: at most `max_family_sleeves` deployed sleeves per strategy family."""
+        cap = cap or self.lc.max_family_sleeves
         return sum(1 for r in self.reg.strategies(DEPLOYED)
                    if r["family"] == family and not str(r["id"]).startswith(("boot-", "rnd-"))) >= cap
 

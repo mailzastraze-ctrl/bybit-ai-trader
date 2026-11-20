@@ -80,6 +80,10 @@ class Proc:
 
 
 def main() -> None:
+    # glibc gives every thread its own malloc arena; freqtrade (async + threads) and uvicorn
+    # then hold far more RSS than they use. Two arenas cut resident memory noticeably.
+    os.environ.setdefault("MALLOC_ARENA_MAX", "2")
+    os.environ.setdefault("PYTHONDONTWRITEBYTECODE", "1")
     s = get_settings()
     s.ensure_dirs()
     reg = Registry(s.registry_path)

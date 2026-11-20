@@ -85,7 +85,7 @@ def test_portfolio_stoploss_tp_time_and_stake(portfolio):
     last = df.iloc[-1]
     loss = stake * 3.0 * (2.0 * last["atr"] / entry)
     assert 50 <= loss <= 150  # 1% of 10k scaled by conviction ∈ [0.75, 1.25] (conv_w=0.5)
-    assert portfolio.leverage(tr.pair, tr.open_date_utc, entry, 1.0, 10.0, "s1", "long") == 3.0
+    assert portfolio.leverage(tr.pair, tr.open_date_utc, entry, 1.0, 10.0, "s1", "long") == 1.0  # owner: never leverage, even if a sleeve asks for 3x
 
 
 def test_exit_signal_blocked_when_trade_sleeve_no_longer_runs_the_pair(portfolio, tmp_path):
@@ -133,7 +133,7 @@ def test_exec_test_entries_bypass_sleeve_sizing(portfolio):
     t = df["date"].iloc[-1].to_pydatetime()
     assert portfolio.custom_stake_amount("XRP/USDT:USDT", t, 1.0, 30.0, 5.0, 1000.0, 2.0, "exec-test-1", "long") == 30.0
     assert portfolio.custom_stake_amount("XRP/USDT:USDT", t, 1.0, 30.0, 5.0, 1000.0, 2.0, "random", "long") == 0.0
-    assert portfolio.leverage("XRP/USDT:USDT", t, 1.0, 1.0, 10.0, "exec-test-1", "long") == 2.0
+    assert portfolio.leverage("XRP/USDT:USDT", t, 1.0, 1.0, 10.0, "exec-test-1", "long") == 1.0
 
 
 
@@ -172,6 +172,23 @@ def test_maker_first_entry_then_cross(portfolio):
     assert adj(200, 100.1, 100.1, "short") == pytest.approx(99.9 * 0.9995)
     portfolio.config["runmode"] = "backtest"
     assert adj(200, 99.9, 99.0) == 99.0           # no repricing in backtests
+
+
+def test_maker_first_exit_and_urgent_cross(portfolio):
+    from datetime import datetime, timezone
+    portfolio.config["runmode"] = "live"
+    portfolio.dp = SimpleNamespace(orderbook=lambda pair, n: {"bids": [[99.9, 1]], "asks": [[100.1, 1]]})
+    t0 = datetime(2026, 1, 1, tzinfo=timezone.utc)
+    long_tr, short_tr = SimpleNamespace(is_short=False), SimpleNamespace(is_short=True)
+    px = lambda tr, tag: portfolio.custom_exit_price("BTC/USDT:USDT", tr, t0, 100.1, 0.01, tag)  # noqa: E731
+    assert px(long_tr, "take_profit") == 100.1                       # resting at the ask (maker)
+    assert px(long_tr, "managed_stop") == pytest.approx(99.9 * 0.9995)  # stop-type exit crosses
+    assert px(short_tr, "managed_stop") == pytest.approx(100.1 * 1.0005)
+    order = SimpleNamespace(order_date_utc=t0)
+    adj = lambda secs, prop, cur: portfolio.adjust_exit_price(  # noqa: E731
+        long_tr, order, "BTC/USDT:USDT", t0 + timedelta(seconds=secs), prop, cur, "s1", "long")
+    assert adj(30, 100.1, 100.1) == 100.1
+    assert adj(120, 100.1, 100.1) == pytest.approx(99.9 * 0.9995)    # crosses after 90 s
 
 
 
