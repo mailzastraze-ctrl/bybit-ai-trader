@@ -45,3 +45,34 @@ def test_execution_test_full_path():
 def test_execution_test_flags_missing_exchange_stop():
     res = execution_test(FakeFt(place_sl=False), sleep=lambda s: None, timeout_s=1)
     assert not res["ok"] and not res["steps"]["stoploss_on_exchange"]["ok"]
+
+
+def test_execution_test_survives_connection_reset_and_cleans_up():
+    import requests
+    ft = FakeFt()
+    orig = ft.status
+    n = {"i": 0}
+
+    def flaky():
+        n["i"] += 1
+        if n["i"] in (3, 4):
+            raise requests.ConnectionError("Connection reset by peer")
+        return orig()
+    ft.status = flaky
+    res = execution_test(ft, sleep=lambda s: None, timeout_s=5)
+    assert res["ok"], res
+
+
+def test_leftover_test_trade_is_closed_first():
+    ft = FakeFt()
+    exits = []
+    ft.forceexit = lambda tid: exits.append(tid)
+    leftover = [{"trade_id": 1, "pair": "XRP/USDT:USDT", "enter_tag": "exec-test-1"}]
+    calls = {"n": 0}
+
+    def status():
+        calls["n"] += 1
+        return leftover if calls["n"] == 1 else []
+    ft.status = status
+    res = execution_test(ft, sleep=lambda s: None, timeout_s=1)
+    assert exits[0] == 1 and res["steps"]["cleanup_previous"]["detail"]["closed_trade_ids"] == [1]

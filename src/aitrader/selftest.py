@@ -72,18 +72,55 @@ def _find(trades: list[dict], tag: str) -> dict | None:
     return None
 
 
+def _retry(fn, attempts: int = 5, sleep=time.sleep):
+    for i in range(attempts):
+        try:
+            return fn()
+        except Exception:  # noqa: BLE001
+            if i == attempts - 1:
+                raise
+            sleep(2)
+
+
+def cleanup_test_trades(ft: FtClient, sleep=time.sleep) -> list[int]:
+    """Close any leftover execution-test positions (e.g. from an interrupted run)."""
+    closed = []
+    for t in _retry(ft.status, sleep=sleep) or []:
+        if (t.get("enter_tag") or "").startswith(EXEC_TAG):
+            _retry(lambda tid=t["trade_id"]: ft.forceexit(tid), attempts=2, sleep=sleep)
+            closed.append(t["trade_id"])
+    return closed
+
+
 def execution_test(ft: FtClient, stake: float = 30.0, sleep=time.sleep, timeout_s: int = 240) -> dict:
     """End-to-end order test on Bybit Demo: market entry → fill → stop-loss order on the
     exchange → market exit. Proves the full execution path, not just connectivity."""
     steps: dict[str, dict] = {}
     res = {"ts": iso(), "ok": False, "steps": steps}
-    wl = ft.whitelist().get("whitelist", [])
-    open_pairs = {t["pair"] for t in ft.status()}
+    leftovers = cleanup_test_trades(ft, sleep=sleep)
+    if leftovers:
+        steps["cleanup_previous"] = {"ok": True, "detail": {"closed_trade_ids": leftovers}}
+        sleep(10)
+    tag = f"{EXEC_TAG}-{int(time.time())}"
+    try:
+        return _execution_test(ft, stake, sleep, timeout_s, steps, res, tag)
+    except Exception as e:  # noqa: BLE001 – never leave a test position behind
+        steps["error"] = {"ok": False, "detail": str(e)[:300]}
+        try:
+            cleanup_test_trades(ft, sleep=sleep)
+        except Exception:  # noqa: BLE001
+            pass
+        return res
+
+
+def _execution_test(ft, stake, sleep, timeout_s, steps, res, tag) -> dict:
+    status = lambda: _retry(ft.status, sleep=sleep)  # noqa: E731
+    wl = _retry(ft.whitelist, sleep=sleep).get("whitelist", [])
+    open_pairs = {t["pair"] for t in status()}
     pair = next((p for p in EXEC_PAIRS if p in wl and p not in open_pairs), None)
     if pair is None:
         steps["pick_pair"] = {"ok": False, "detail": "no free pair for the test"}
         return res
-    tag = f"{EXEC_TAG}-{int(time.time())}"
     try:
         ft.forceenter(pair, "long", stake, tag)
         steps["entry_submitted"] = {"ok": True, "detail": {"pair": pair, "stake": stake}}
@@ -92,7 +129,7 @@ def execution_test(ft: FtClient, stake: float = 30.0, sleep=time.sleep, timeout_
         return res
     trade, deadline = None, time.time() + timeout_s
     while time.time() < deadline:
-        trade = _find(ft.status(), tag)
+        trade = _find(status(), tag)
         if trade and not trade.get("has_open_orders") and trade.get("amount"):
             break
         sleep(5)
@@ -103,7 +140,7 @@ def execution_test(ft: FtClient, stake: float = 30.0, sleep=time.sleep, timeout_
                                                     "amount": trade.get("amount"), "leverage": trade.get("leverage")}}
     sl = None
     while time.time() < deadline:
-        trade = _find(ft.status(), tag) or trade
+        trade = _find(status(), tag) or trade
         sl = next((o for o in trade.get("orders", []) if o.get("ft_order_side") == "stoploss"
                    and o.get("status") in ("open", "new", None)), None)
         if sl:
@@ -119,15 +156,16 @@ def execution_test(ft: FtClient, stake: float = 30.0, sleep=time.sleep, timeout_
         return res
     closed = None
     while time.time() < deadline + 120:
-        if _find(ft.status(), tag) is None:
-            closed = next((t for t in ft.trades(limit=50).get("trades", []) if t.get("enter_tag") == tag), None)
+        if _find(status(), tag) is None:
+            closed = next((t for t in _retry(lambda: ft.trades(limit=50), sleep=sleep).get("trades", [])
+                           if t.get("enter_tag") == tag), None)
             break
         sleep(5)
     steps["exit"] = {"ok": closed is not None,
                      "detail": {"close_rate": (closed or {}).get("close_rate"),
                                 "profit_abs": (closed or {}).get("profit_abs"),
                                 "exit_reason": (closed or {}).get("exit_reason")}}
-    res["ok"] = all(v["ok"] for v in steps.values())
+    res["ok"] = all(v["ok"] for k, v in steps.items() if k != "cleanup_previous")
     return res
 
 

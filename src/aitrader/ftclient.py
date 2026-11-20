@@ -5,6 +5,8 @@ from __future__ import annotations
 from typing import Any
 
 import requests
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
 
 
 class FtClient:
@@ -13,6 +15,12 @@ class FtClient:
         self.auth = (user, password)
         self.timeout = timeout
         self.session = requests.Session()
+        # The API server drops idle keep-alive connections ("connection reset by peer"):
+        # retry idempotent GETs; POSTs are never retried automatically.
+        retry = Retry(total=3, connect=3, read=2, status=0, backoff_factor=0.5,
+                      allowed_methods=frozenset({"GET"}), raise_on_status=False)
+        self.session.mount("http://", HTTPAdapter(max_retries=retry))
+        self.session.mount("https://", HTTPAdapter(max_retries=retry))
 
     def _get(self, path: str, **params) -> Any:
         r = self.session.get(f"{self.url}/{path}", auth=self.auth, params=params or None,
