@@ -5,7 +5,9 @@ const esc = (v) => String(v ?? "").replace(/[&<>"']/g, (c) => ({"&": "&amp;", "<
 const api = async (p) => { const r = await fetch(p, {cache: "no-store"}); if (!r.ok) throw new Error(`${p} → ${r.status}`); return r.json(); };
 const S = {eqHours: 168};
 const FAM = {trend_ema: "Trend EMA", meanrev_bb: "Mean reversion BB", donchian_breakout: "Donchian breakout",
-  squeeze_momentum: "Squeeze momentum", tsmom: "Time-series momentum", funding_reversal: "Funding reversal"};
+  squeeze_momentum: "Squeeze momentum", tsmom: "Time-series momentum", funding_reversal: "Funding reversal",
+  zscore_revert: "Z-score reversion", supertrend: "SuperTrend", macd_cross: "MACD cross", adx_di: "ADX + DI",
+  hull_turn: "Hull MA turn", rsi_revert: "RSI reversion", stoch_cross: "Stochastic"};
 const famName = (f) => FAM[f] || f || "—";
 const pair = (p) => String(p || "").replace("/USDT:USDT", "");
 const usd = (v, d = 2) => (v == null || isNaN(v)) ? "—" : (v < 0 ? "−$" : "$") + Math.abs(v).toLocaleString("en-US", {minimumFractionDigits: d, maximumFractionDigits: d});

@@ -188,3 +188,21 @@ def test_genes_filter_signals_without_lookahead(name):
     part = fam.populate(df.iloc[:2000].copy(), p)
     assert (gened["long_sig"].iloc[:2000].values == part["long_sig"].values).all()
     assert fam.variant(p) == f"{name} +HTF-trend(150) +low-vol"
+
+
+def test_ported_strategy_lab_families_signal_and_stay_causal():
+    import numpy as np
+    import pandas as pd
+
+    from aitrader.families import FAMILIES
+    rng = np.random.default_rng(3)
+    n = 1500
+    c = 100 * np.exp(np.cumsum(rng.normal(0, 0.01, n)) + 0.3 * np.sin(np.arange(n) / 60))
+    df = pd.DataFrame({"open": c, "high": c * 1.004, "low": c * 0.996, "close": c, "volume": 1.0})
+    for name in ("supertrend", "macd_cross", "adx_di", "hull_turn", "rsi_revert", "stoch_cross", "zscore_revert"):
+        fam = FAMILIES[name]
+        prm = fam.defaults() | ({"z_entry": 2.0} if name == "zscore_revert" else {})
+        full = fam.populate(df, prm)
+        assert full["long_sig"].sum() > 0 and full["short_sig"].sum() > 0, name
+        cut = fam.populate(df.iloc[:1000], prm)  # no look-ahead: past signals don't change
+        assert (cut["long_sig"].to_numpy() == full["long_sig"].iloc[:1000].to_numpy()).all(), name

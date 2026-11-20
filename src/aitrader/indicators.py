@@ -92,3 +92,62 @@ def efficiency_ratio(close: pd.Series, n: int = 20) -> pd.Series:
     change = (close - close.shift(n)).abs()
     vol = close.diff().abs().rolling(n, min_periods=n).sum()
     return change / vol.replace(0.0, np.nan)
+
+
+# ---- ported from the owner's Bybit Strategy Lab engine (same definitions) ----
+def wma(s: pd.Series, n: int) -> pd.Series:
+    n = max(1, int(n))
+    w = np.arange(1, n + 1, dtype=float)
+    x = s.to_numpy(dtype=float)
+    out = np.full(len(x), np.nan)
+    if len(x) >= n:
+        out[n - 1:] = np.convolve(x, w[::-1], mode="valid") / w.sum()  # NaN inside a window → NaN
+    return pd.Series(out, index=s.index)
+
+
+def hma(s: pd.Series, n: int) -> pd.Series:
+    n = max(1, int(n))
+    diff = 2.0 * wma(s, max(1, n // 2)) - wma(s, n)
+    return wma(diff, max(1, int(round(np.sqrt(n)))))
+
+
+def macd(close: pd.Series, fast: int, slow: int, signal: int) -> pd.DataFrame:
+    m = ema(close, fast) - ema(close, slow)
+    sg = ema(m, signal)
+    return pd.DataFrame({"macd": m, "signal": sg, "hist": m - sg})
+
+
+def stoch(df: pd.DataFrame, k_len: int, k_smooth: int = 3, d_len: int = 3) -> pd.DataFrame:
+    hh = df["high"].rolling(int(k_len), min_periods=int(k_len)).max()
+    ll = df["low"].rolling(int(k_len), min_periods=int(k_len)).min()
+    rng = (hh - ll)
+    raw = (100.0 * (df["close"] - ll) / rng.replace(0.0, np.nan)).where(rng > 0, 50.0).where(hh.notna())
+    k = sma(raw, max(1, int(k_smooth)))
+    return pd.DataFrame({"k": k, "d": sma(k, max(1, int(d_len)))})
+
+
+def supertrend(df: pd.DataFrame, n: int = 10, mult: float = 3.0) -> pd.DataFrame:
+    """ATR band flip indicator; dir = 1 (up) / -1 (down)."""
+    a = atr(df, int(n)).to_numpy()
+    h, lo, c = df["high"].to_numpy(float), df["low"].to_numpy(float), df["close"].to_numpy(float)
+    m = len(c)
+    line, dirs = np.full(m, np.nan), np.zeros(m, dtype=int)
+    fu = fl = np.nan
+    d = 1
+    for i in range(m):
+        if not np.isfinite(a[i]):
+            continue
+        mid = (h[i] + lo[i]) / 2
+        bu, bl = mid + mult * a[i], mid - mult * a[i]
+        pc = c[i - 1] if i > 0 else c[i]
+        nfu = bu if (not np.isfinite(fu) or bu < fu or pc > fu) else fu
+        nfl = bl if (not np.isfinite(fl) or bl > fl or pc < fl) else fl
+        if np.isfinite(fu):
+            if d == -1 and c[i] > nfu:
+                d = 1
+            elif d == 1 and c[i] < nfl:
+                d = -1
+        fu, fl = nfu, nfl
+        dirs[i] = d
+        line[i] = fl if d == 1 else fu
+    return pd.DataFrame({"st_line": line, "st_dir": dirs}, index=df.index)

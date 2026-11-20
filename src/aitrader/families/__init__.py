@@ -272,9 +272,112 @@ ZSCORE = Family(
 )
 
 
-FAMILIES: dict[str, Family] = {f.name: f for f in (TREND_EMA, MEANREV_BB, DONCHIAN, SQUEEZE, TSMOM, FUNDING, ZSCORE)}
+# ------------------- families ported from the owner's Bybit Strategy Lab (same logic)
+def _sig(long_sig, short_sig, exit_long, exit_short, conviction=None, index=None) -> pd.DataFrame:
+    return pd.DataFrame({"long_sig": long_sig, "short_sig": short_sig, "exit_long_sig": exit_long,
+                         "exit_short_sig": exit_short,
+                         "conviction": conviction if conviction is not None else pd.Series(1.0, index=index)})
+
+
+def _supertrend(df: pd.DataFrame, p: dict) -> pd.DataFrame:
+    st = ta.supertrend(df, int(p["st_len"]), p["st_mult"])["st_dir"]
+    up = (st == 1) & (st.shift(1) == -1)
+    dn = (st == -1) & (st.shift(1) == 1)
+    return _sig(up, dn, dn, up, index=df.index)
+
+
+SUPERTREND = Family(
+    name="supertrend", title="SuperTrend flip",
+    description="Trend following: enters when the ATR-band SuperTrend flips direction, exits on the opposite flip.",
+    entry_params=(Param("st_len", "int", 5, 50, 10, "buy"), Param("st_mult", "float", 1.0, 6.0, 3.0, "buy", 2)),
+    signal_fn=_supertrend, affinity="trend")
+
+
+def _macd_cross(df: pd.DataFrame, p: dict) -> pd.DataFrame:
+    fast = int(p["macd_fast"])
+    m = ta.macd(df["close"], fast, fast + int(p["macd_gap"]), int(p["macd_signal"]))
+    up, dn = ta.crossed_above(m["macd"], m["signal"]), ta.crossed_below(m["macd"], m["signal"])
+    zero = int(p["macd_zero"]) == 1
+    return _sig(up & ((m["macd"] > 0) | (not zero)), dn & ((m["macd"] < 0) | (not zero)), dn, up,
+                0.75 + (m["hist"].abs() / df["close"] * 200).clip(0, 0.75), index=df.index)
+
+
+MACD = Family(
+    name="macd_cross", title="MACD signal cross",
+    description="MACD line crossing its signal line; optional zero-line filter (longs only above zero).",
+    entry_params=(Param("macd_fast", "int", 4, 30, 12, "buy"), Param("macd_gap", "int", 6, 60, 14, "buy"),
+                  Param("macd_signal", "int", 3, 20, 9, "buy"), Param("macd_zero", "int", 0, 1, 0, "buy")),
+    signal_fn=_macd_cross, affinity="trend")
+
+
+def _adx_di(df: pd.DataFrame, p: dict) -> pd.DataFrame:
+    a = ta.adx(df, int(p["di_len"]))
+    up, dn = ta.crossed_above(a["plus_di"], a["minus_di"]), ta.crossed_below(a["plus_di"], a["minus_di"])
+    strong = a["adx"] > p["adx_thr"]
+    return _sig(up & strong, dn & strong, dn, up, a["adx"] / (p["adx_thr"] * 1.5), index=df.index)
+
+
+ADX_DI = Family(
+    name="adx_di", title="ADX + DI trend strength",
+    description="+DI/-DI crossovers taken only when ADX shows a strong enough trend; exit on the opposite cross.",
+    entry_params=(Param("di_len", "int", 7, 30, 14, "buy"), Param("adx_thr", "float", 10.0, 40.0, 25.0, "buy", 1)),
+    signal_fn=_adx_di, affinity="trend")
+
+
+def _hull_turn(df: pd.DataFrame, p: dict) -> pd.DataFrame:
+    h = ta.hma(df["close"], int(p["hma_len"]))
+    up = (h > h.shift(1)) & (h.shift(1) <= h.shift(2))
+    dn = (h < h.shift(1)) & (h.shift(1) >= h.shift(2))
+    return _sig(up, dn, dn, up, index=df.index)
+
+
+HULL = Family(
+    name="hull_turn", title="Hull MA turn",
+    description="Fast, low-lag trend following: long when the Hull moving average turns up, short when it turns down.",
+    entry_params=(Param("hma_len", "int", 10, 200, 55, "buy"),),
+    signal_fn=_hull_turn, affinity="trend")
+
+
+def _rsi_revert(df: pd.DataFrame, p: dict) -> pd.DataFrame:
+    x = ta.rsi(df["close"], int(p["rsi_len"]))
+    lo, hi = p["rsi_lower"], 100.0 - p["rsi_lower"]
+    trend = int(p["rsi_trend"])
+    tr = ta.sma(df["close"], trend) if trend >= 20 else None
+    ok_l = (df["close"] > tr) if tr is not None else True
+    ok_s = (df["close"] < tr) if tr is not None else True
+    return _sig(ta.crossed_above(x, lo) & ok_l, ta.crossed_below(x, hi) & ok_s,
+                x >= 50 + p["rsi_exit"], x <= 50 - p["rsi_exit"], index=df.index)
+
+
+RSI_REVERT = Family(
+    name="rsi_revert", title="RSI reversion",
+    description="Long when RSI leaves the oversold zone upwards, exit at the exit level; shorts mirrored. "
+                "Optional SMA trend filter (0 = off).",
+    entry_params=(Param("rsi_len", "int", 2, 40, 14, "buy"), Param("rsi_lower", "float", 10.0, 45.0, 30.0, "buy", 1),
+                  Param("rsi_exit", "float", -10.0, 30.0, 5.0, "buy", 1), Param("rsi_trend", "int", 0, 400, 0, "buy")),
+    signal_fn=_rsi_revert, affinity="revert")
+
+
+def _stoch_cross(df: pd.DataFrame, p: dict) -> pd.DataFrame:
+    s = ta.stoch(df, int(p["stoch_k"]), int(p["stoch_smooth"]), int(p["stoch_d"]))
+    up, dn = ta.crossed_above(s["k"], s["d"]), ta.crossed_below(s["k"], s["d"])
+    lo = p["stoch_lo"]
+    return _sig(up & (s["k"] < lo + 10), dn & (s["k"] > 100 - lo - 10), dn, up, index=df.index)
+
+
+STOCH = Family(
+    name="stoch_cross", title="Stochastic reversal",
+    description="%K crossing %D inside the oversold (long) / overbought (short) zone; exit on the opposite cross.",
+    entry_params=(Param("stoch_k", "int", 5, 30, 14, "buy"), Param("stoch_smooth", "int", 1, 5, 3, "buy"),
+                  Param("stoch_d", "int", 2, 6, 3, "buy"), Param("stoch_lo", "float", 10.0, 35.0, 20.0, "buy", 1)),
+    signal_fn=_stoch_cross, affinity="revert")
+
+
+FAMILIES: dict[str, Family] = {f.name: f for f in (TREND_EMA, MEANREV_BB, DONCHIAN, SQUEEZE, TSMOM, FUNDING, ZSCORE,
+                                                   SUPERTREND, MACD, ADX_DI, HULL, RSI_REVERT, STOCH)}
 # families researched on 15m as well as 1h (short-horizon ideas; funding needs 1h alignment)
-MULTI_TF = {"zscore_revert", "meanrev_bb", "squeeze_momentum"}
+MULTI_TF = {"zscore_revert", "meanrev_bb", "squeeze_momentum", "supertrend", "macd_cross", "adx_di", "hull_turn",
+            "rsi_revert", "stoch_cross"}
 NEEDS_FUNDING = {"funding_reversal"}
 
 # Freqtrade strategy class name used for hyperopting each family.
@@ -286,6 +389,12 @@ RESEARCH_CLASS: dict[str, str] = {
     "tsmom": "FamTsmom",
     "funding_reversal": "FamFunding",
     "zscore_revert": "FamZscore",
+    "supertrend": "FamSupertrend",
+    "macd_cross": "FamMacd",
+    "adx_di": "FamAdxDi",
+    "hull_turn": "FamHull",
+    "rsi_revert": "FamRsiRevert",
+    "stoch_cross": "FamStoch",
 }
 
 
