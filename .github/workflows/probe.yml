@@ -1,0 +1,14 @@
+name: probe-data-sources
+on: workflow_dispatch
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    steps:
+      - run: |
+          for u in https://api.bybit.com/v5/market/time https://api-demo.bybit.com/v5/market/time \
+                   https://api.bytick.com/v5/market/time https://public.bybit.com/ \
+                   https://fapi.binance.com/fapi/v1/time https://data.binance.vision/ \
+                   https://www.okx.com/api/v5/public/time; do
+            code=$(curl -s -o /tmp/b -w "%{http_code}" -m 15 "$u"); echo "$code $u $(head -c 120 /tmp/b | tr -d '\n')"
+          done
+          nproc; free -g | head -2
