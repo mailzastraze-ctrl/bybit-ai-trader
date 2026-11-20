@@ -1,42 +1,55 @@
 "use strict";
-// Control room: the company at a glance, from real data only (no placeholders, no fake numbers).
+// Пульт управления: вся компания на одном экране, только реальные данные.
 const $ = (s) => document.querySelector(s);
 const esc = (v) => String(v ?? "").replace(/[&<>"']/g, (c) => ({"&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"}[c]));
 const api = async (p) => { const r = await fetch(p, {cache: "no-store"}); if (!r.ok) throw new Error(`${p} → ${r.status}`); return r.json(); };
-const S = {eqHours: 168};
-const FAM = {trend_ema: "Trend EMA", meanrev_bb: "Mean reversion BB", donchian_breakout: "Donchian breakout",
-  squeeze_momentum: "Squeeze momentum", tsmom: "Time-series momentum", funding_reversal: "Funding reversal",
-  zscore_revert: "Z-score reversion", ema_cross: "EMA cross", bb_revert: "Bollinger reversion", turtle: "Turtle breakout", supertrend: "SuperTrend", macd_cross: "MACD cross", adx_di: "ADX + DI",
-  hull_turn: "Hull MA turn", rsi_revert: "RSI reversion", stoch_cross: "Stochastic"};
+const S = {eqHours: 168, filter: "all", tab: "overview"};
+const FAM = {trend_ema: "EMA-тренд + откат", meanrev_bb: "Боллинджер (с фильтрами)", donchian_breakout: "Пробой канала",
+  squeeze_momentum: "Сжатие → импульс", tsmom: "Импульс за дни", funding_reversal: "Перекос фандинга",
+  zscore_revert: "Z-score: возврат", supertrend: "SuperTrend", macd_cross: "MACD", adx_di: "ADX + DI",
+  hull_turn: "Разворот Hull MA", rsi_revert: "RSI: возврат", stoch_cross: "Стохастик", ema_cross: "Пересечение EMA",
+  bb_revert: "Боллинджер: возврат", turtle: "Черепахи (Дончиан)"};
 const famName = (f) => FAM[f] || f || "—";
 const pair = (p) => String(p || "").replace("/USDT:USDT", "");
-const usd = (v, d = 2) => (v == null || isNaN(v)) ? "—" : (v < 0 ? "−$" : "$") + Math.abs(v).toLocaleString("en-US", {minimumFractionDigits: d, maximumFractionDigits: d});
+const nf = (v, d = 2) => (+v).toLocaleString("ru-RU", {minimumFractionDigits: d, maximumFractionDigits: d});
+const usd = (v, d = 2) => (v == null || isNaN(v)) ? "—" : (v < 0 ? "−" : "") + nf(Math.abs(v), d) + " $";
 const sgnUsd = (v) => (v > 0 ? "+" : "") + usd(v);
-const pct = (v, d = 2) => (v == null || isNaN(v)) ? "—" : (v > 0 ? "+" : v < 0 ? "−" : "") + Math.abs(v * 100).toFixed(d) + "%";
+const pct = (v, d = 2) => (v == null || isNaN(v)) ? "—" : (v > 0 ? "+" : v < 0 ? "−" : "") + nf(Math.abs(v * 100), d) + "%";
 const cls = (v) => v > 0 ? "pos" : v < 0 ? "neg" : "";
 const ago = (ts) => {
   if (!ts) return "—"; const s = (Date.now() - new Date(ts).getTime()) / 1000;
-  if (s < 60) return `${Math.max(0, Math.round(s))}s ago`; if (s < 3600) return `${Math.round(s / 60)} min ago`;
-  if (s < 86400) return `${(s / 3600).toFixed(1)} h ago`; return `${(s / 86400).toFixed(1)} d ago`;
+  if (s < 60) return "только что"; if (s < 3600) return `${Math.round(s / 60)} мин назад`;
+  if (s < 86400) return `${nf(s / 3600, 1)} ч назад`; return `${nf(s / 86400, 1)} дн назад`;
 };
-const dur = (ts) => { if (!ts) return "—"; const m = (Date.now() - new Date(ts).getTime()) / 60000; return m < 60 ? `${Math.round(m)}m` : m < 1440 ? `${Math.floor(m / 60)}h ${Math.round(m % 60)}m` : `${(m / 1440).toFixed(1)}d`; };
+const dur = (ts) => { if (!ts) return "—"; const m = (Date.now() - new Date(ts).getTime()) / 60000; return m < 60 ? `${Math.round(m)} мин` : m < 1440 ? `${Math.floor(m / 60)} ч ${Math.round(m % 60)} мин` : `${nf(m / 1440, 1)} дн`; };
 const tip = $("#tip");
 function showTip(e, html) { tip.innerHTML = html; tip.style.display = "block"; const x = Math.min(e.clientX + 14, innerWidth - tip.offsetWidth - 8); tip.style.left = x + "px"; tip.style.top = (e.clientY + 14) + "px"; }
 const hideTip = () => { tip.style.display = "none"; };
 function chip(id, state, text) { const c = $(id); c.className = "chip " + (state || ""); c.querySelector("span").textContent = text; }
 const pill = (t, k = "") => `<span class="pill ${k}">${esc(t)}</span>`;
-const stagePill = (st) => pill(st, {production: "good", eligible: "good", incubation: "blue", exploration: "warn", exploratory: "warn", validated: "blue", closing: "", rejected: "crit", retired: ""}[st] || "");
+const STAGE = {production: ["основная", "good"], eligible: ["доказала себя", "good"], incubation: ["испытание", "blue"], exploration: ["разведка", "warn"],
+  exploratory: ["кандидат", "warn"], validated: ["прошла проверки", "blue"], closing: ["закрывает", ""], rejected: ["отсеяна", "crit"], retired: ["снята", ""]};
+const stagePill = (st) => pill(...(STAGE[st] || [st, ""]));
+const labActive = () => { const lab = S.rs?.lab || {}; return lab.status && lab.status !== "end" && Date.now() - new Date(lab.ts || 0).getTime() < 4 * 3600e3; };
 
-// ---------------------------------------------------------------------------- header + KPIs
+// ---------------------------------------------------------------------------- вкладки
+function setTab(t) {
+  S.tab = t; document.body.className = "t-" + t;
+  document.querySelectorAll("#tabs button").forEach((b) => b.classList.toggle("on", b.dataset.t === t));
+  try { history.replaceState(null, "", "#" + t); } catch (e) { /* ignore */ }
+  renderAll();
+}
+document.querySelectorAll("#tabs button").forEach((b) => b.onclick = () => setTab(b.dataset.t));
+
+// ---------------------------------------------------------------------------- шапка + KPI
 function renderHeader() {
-  const ov = S.ov || {}, rs = S.rs || {}, lab = rs.lab || {};
-  chip("#chBot", ov.bot_up ? "good live" : "crit", ov.bot_up ? "Bot trading · Bybit Demo" : "Bot offline");
-  const labOn = lab.status && lab.status !== "end" && Date.now() - new Date(lab.ts || 0).getTime() < 4 * 3600e3;
+  const ov = S.ov || {}, rs = S.rs || {};
+  chip("#chBot", ov.bot_up ? "good live" : "crit", ov.bot_up ? "Бот торгует · Bybit Demo" : "Бот не отвечает");
   const running = (rs.experiments || []).filter((e) => e.status === "running" && e.progress?.stage !== "evaluated").length;
-  chip("#chLab", labOn ? "good live" : rs.paused ? "warn" : "", labOn ? `Lab running · ${running} experiments` : rs.paused ? "Lab paused" : "Lab between runs");
+  chip("#chLab", labActive() ? "good live" : rs.paused ? "warn" : "", labActive() ? `Лаборатория: идёт ${running} опытов` : rs.paused ? "Лаборатория на паузе" : "Лаборатория между прогонами");
   const ks = ov.kill_switch, paused = ov.entries_paused;
-  chip("#chRisk", ks ? "crit" : paused ? "warn" : "good", ks ? "Kill switch active" : paused ? "Entries paused" : "Risk limits OK");
-  $("#chUpd span").textContent = "updated " + new Date().toLocaleTimeString([], {hour: "2-digit", minute: "2-digit", second: "2-digit"});
+  chip("#chRisk", ks ? "crit" : paused ? "warn" : "good", ks ? "Аварийный стоп" : paused ? "Входы на паузе" : "Риск в норме");
+  $("#chUpd span").textContent = "обновлено " + new Date().toLocaleTimeString("ru-RU");
 }
 function kpi(label, value, sub, k = "") { return `<div class="kpi"><div class="l">${esc(label)}</div><div class="v num ${k}">${value}</div><div class="s">${sub}</div></div>`; }
 function renderKpis() {
@@ -44,230 +57,301 @@ function renderKpis() {
   const now = eq.at(-1)?.equity, dayAgo = eq.find((r) => new Date(r.ts).getTime() >= Date.now() - 864e5)?.equity;
   const ch = now && dayAgo ? now / dayAgo - 1 : null;
   const open = ov.open_trades || [], upnl = open.reduce((a, t) => a + (+t.profit_abs || 0), 0);
-  const tr = S.trades?.closed || [], real = (S.goals?.goals || []).find((g) => g.id === "evidence");
-  const rd = S.ready || {}, fw = S.fw || {}, rsg = (G.goals || []).find((g) => g.id === "research");
-  const fwTop = fw.top || {};
-  const fwLabel = {works: "Works", not_working: "Not working", inconclusive: "Unclear", early_positive: "Leaning +", early_negative: "Leaning −", too_early: "Collecting"}[fw.verdict] || "Collecting";
+  const fw = S.fw || {}, rd = S.ready || {}, rsg = (G.goals || []).find((g) => g.id === "research");
+  const nTrading = (ov.manifest?.sleeves || []).filter((s) => s.stage !== "closing").length;
+  const fwLabel = {works: "Работает", not_working: "Не работает", inconclusive: "Неясно", early_positive: "Скорее +", early_negative: "Скорее −", too_early: "Сбор данных"}[fw.verdict] || "Сбор данных";
   $("#kpis").innerHTML = [
-    kpi("Trading capital (USDT)", usd(now, 0), ch == null ? "collecting snapshots" : `<span class="${cls(ch)}">${pct(ch)}</span> in 24h`),
-    kpi("Open positions", `${open.length}`, open.length ? `unrealized <span class="${cls(upnl)}">${sgnUsd(upnl)}</span>` : "no open risk"),
-    kpi("Closed P&L (demo)", `<span class="${cls(ov.closed_pnl)}">${sgnUsd(ov.closed_pnl)}</span>`, `${ov.closed_count ?? tr.length} trades · ${real ? real.value + "/" + real.target + " evidence" : ""}`),
-    kpi("Forward test", fwLabel, `${fwTop.trades || 0} unseen-data trades · ${fw.book_size ?? 0} strategies`, {works: "pos", not_working: "neg"}[fw.verdict] || ""),
-    kpi("Research · 7 days", `${rsg?.value ?? 0}`, `walk-forward experiments (target ${rsg?.target ?? "—"})`),
-    kpi("Real-money readiness", `${rd.passed ?? 0}/${rd.total ?? 8}`, rd.ready ? "all checks passed" : "checks passed · advisory only"),
+    kpi("Торговый капитал", usd(now, 0), ch == null ? "копим снимки" : `<span class="${cls(ch)}">${pct(ch)}</span> за 24ч`),
+    kpi("Стратегий торгует", `${nTrading}`, `${open.length} открытых позиций · <span class="${cls(upnl)}">${sgnUsd(upnl)}</span>`),
+    kpi("Закрытый P&L (демо)", `<span class="${cls(ov.closed_pnl)}">${sgnUsd(ov.closed_pnl)}</span>`, `${ov.closed_count ?? 0} сделок`),
+    kpi("Форвард-тест", fwLabel, `${fw.top?.trades || 0} сделок на новых данных · ${fw.book_size ?? 0} стратегий`, {works: "pos", not_working: "neg"}[fw.verdict] || ""),
+    kpi("Исследования · 7 дней", `${rsg?.value ?? 0}`, `строгих проверок (цель ${rsg?.target ?? "—"})`),
+    kpi("Готовность к реалу", `${rd.passed ?? 0}/${rd.total ?? 8}`, rd.ready ? "все проверки пройдены" : "проверок пройдено · только совет"),
   ].join("");
-  $("#mission").textContent = G.mission || "";
-  const gs = G.goals || []; $("#goalsDone").textContent = gs.length ? `${gs.filter((g) => g.progress >= 1).length} of ${gs.length} goals reached` : "";
+  $("#mission").textContent = "Миссия: найти, доказать и масштабировать реальные торговые преимущества на Bybit Demo — без подгонки и без выдуманных результатов.";
+  const gs = G.goals || []; $("#goalsDone").textContent = gs.length ? `${gs.filter((g) => g.progress >= 1).length} из ${gs.length} целей достигнуто` : "";
+}
+function renderPipeline() {
+  const sc = S.scr || {}, rs = S.rs || {}, st = S.strats?.strategies || [], fw = S.fw || {};
+  const c = (s) => st.filter((x) => x.stage === s).length;
+  const steps = [
+    ["1", "Скринер", sc.evaluated ? `${nf(sc.evaluated, 0)} вариантов → выжило ${sc.n_survivors}` : "первый запуск с ближайшим прогоном"],
+    ["2", "Строгая проверка", `${rs.counts?.done || 0} проверено · ${c("exploratory") + c("validated")} кандидатов`],
+    ["3", "Форвард-тест", `${fw.book_size ?? 0} стратегий · ${fw.top?.trades || 0} сделок`],
+    ["4", "Демо-торговля", `${(S.ov?.manifest?.sleeves || []).filter((s) => s.stage !== "closing").length} стратегий торгуют`],
+    ["5", "Реальный счёт", `${S.ready?.passed ?? 0}/${S.ready?.total ?? 8} проверок · решаете вы`],
+  ];
+  $("#pipeline").innerHTML = steps.map(([n, t, d]) => `<div class="fstep"><span>шаг ${n}</span><b style="font-size:15px">${t}</b><span>${esc(d)}</span></div>`).join("");
 }
 
-// ---------------------------------------------------------------------------- equity chart
-function renderEquity() {
-  const el = $("#eqChart"), all = (S.ov?.equity || []).filter((r) => r.equity > 0);
-  const since = S.eqHours ? Date.now() - S.eqHours * 3600e3 : 0;
-  const pts = all.filter((r) => new Date(r.ts).getTime() >= since).map((r) => ({t: new Date(r.ts).getTime(), v: +r.equity}));
-  if (pts.length < 2) { el.innerHTML = `<div class="empty">Collecting equity snapshots (every 10 minutes).</div>`; return; }
-  const W = el.clientWidth || 700, H = el.clientHeight || 260, L = 64, R = 12, T = 10, B = 26;
+// ---------------------------------------------------------------------------- графики
+function lineChart(el, pts, fmtV, fmtT, label) {
+  if (pts.length < 2) { el.innerHTML = `<div class="empty">${esc(label)}</div>`; return; }
+  const W = el.clientWidth || 700, H = el.clientHeight || 260, L = 70, R = 12, T = 10, B = 26;
   let lo = Math.min(...pts.map((p) => p.v)), hi = Math.max(...pts.map((p) => p.v));
-  const pad = Math.max((hi - lo) * 0.15, hi * 0.0005); lo -= pad; hi += pad;
+  const pad = Math.max((hi - lo) * 0.15, Math.abs(hi) * 0.0005 || 0.001); lo -= pad; hi += pad;
   const t0 = pts[0].t, t1 = pts.at(-1).t;
   const X = (t) => L + (t - t0) / Math.max(t1 - t0, 1) * (W - L - R), Y = (v) => T + (hi - v) / (hi - lo) * (H - T - B);
   const line = pts.map((p, i) => `${i ? "L" : "M"}${X(p.t).toFixed(1)},${Y(p.v).toFixed(1)}`).join("");
   const area = `${line}L${X(t1).toFixed(1)},${H - B}L${X(t0).toFixed(1)},${H - B}Z`;
+  const col = "#3987e5", gid = "g" + Math.random().toString(36).slice(2, 7);
   const ticks = [0, 1, 2, 3].map((k) => lo + (hi - lo) * (k + 0.5) / 4);
-  const fmtT = (t) => { const d = new Date(t); return (t1 - t0 > 2 * 864e5) ? d.toLocaleDateString([], {month: "short", day: "numeric"}) : d.toLocaleTimeString([], {hour: "2-digit", minute: "2-digit"}); };
   const xt = [0, 0.25, 0.5, 0.75, 1].map((f) => t0 + (t1 - t0) * f);
-  el.innerHTML = `<svg width="${W}" height="${H}" role="img" aria-label="Trading capital over time">
-    <defs><linearGradient id="eqg" x1="0" x2="0" y1="0" y2="1"><stop offset="0" stop-color="#3987e5" stop-opacity=".28"/><stop offset="1" stop-color="#3987e5" stop-opacity="0"/></linearGradient></defs>
-    ${ticks.map((v) => `<line x1="${L}" x2="${W - R}" y1="${Y(v)}" y2="${Y(v)}" stroke="#2c2c2a"/><text x="${L - 8}" y="${Y(v) + 4}" text-anchor="end" class="num">${Math.round(v).toLocaleString("en-US")}</text>`).join("")}
-    ${xt.map((t, i) => `<text x="${X(t)}" y="${H - 6}" text-anchor="${i === 0 ? "start" : i === 4 ? "end" : "middle"}">${fmtT(t)}</text>`).join("")}
-    <path d="${area}" fill="url(#eqg)"/><path d="${line}" fill="none" stroke="#3987e5" stroke-width="2" stroke-linejoin="round"/>
-    <line id="eqX" y1="${T}" y2="${H - B}" stroke="#8f8e86" stroke-dasharray="3 3" visibility="hidden"/>
-    <circle id="eqDot" r="4.5" fill="#3987e5" stroke="#1a1a19" stroke-width="2" visibility="hidden"/>
-    <rect x="${L}" y="${T}" width="${W - L - R}" height="${H - T - B}" fill="transparent" id="eqHit"/></svg>`;
-  const hit = el.querySelector("#eqHit"), vx = el.querySelector("#eqX"), dot = el.querySelector("#eqDot");
+  el.innerHTML = `<svg width="${W}" height="${H}" role="img" aria-label="${esc(label)}">
+    <defs><linearGradient id="${gid}" x1="0" x2="0" y1="0" y2="1"><stop offset="0" stop-color="${col}" stop-opacity=".28"/><stop offset="1" stop-color="${col}" stop-opacity="0"/></linearGradient></defs>
+    ${ticks.map((v) => `<line x1="${L}" x2="${W - R}" y1="${Y(v)}" y2="${Y(v)}" stroke="#2c2c2a"/><text x="${L - 8}" y="${Y(v) + 4}" text-anchor="end" class="num">${fmtV(v)}</text>`).join("")}
+    ${xt.map((t, i) => `<text x="${X(t)}" y="${H - 6}" text-anchor="${i === 0 ? "start" : i === 4 ? "end" : "middle"}">${fmtT(t, t1 - t0)}</text>`).join("")}
+    <path d="${area}" fill="url(#${gid})"/><path d="${line}" fill="none" stroke="${col}" stroke-width="2" stroke-linejoin="round"/>
+    <line class="vx" y1="${T}" y2="${H - B}" stroke="#8f8e86" stroke-dasharray="3 3" visibility="hidden"/>
+    <circle class="dot" r="4.5" fill="${col}" stroke="#1a1a19" stroke-width="2" visibility="hidden"/>
+    <rect x="${L}" y="${T}" width="${W - L - R}" height="${H - T - B}" fill="transparent" class="hit"/></svg>`;
+  const svg = el.querySelector("svg"), vx = svg.querySelector(".vx"), dot = svg.querySelector(".dot"), hit = svg.querySelector(".hit");
   hit.addEventListener("mousemove", (e) => {
-    const bx = el.querySelector("svg").getBoundingClientRect(), t = t0 + (e.clientX - bx.left - L) / (W - L - R) * (t1 - t0);
+    const t = t0 + (e.clientX - svg.getBoundingClientRect().left - L) / (W - L - R) * (t1 - t0);
     let best = pts[0]; for (const p of pts) if (Math.abs(p.t - t) < Math.abs(best.t - t)) best = p;
     vx.setAttribute("x1", X(best.t)); vx.setAttribute("x2", X(best.t)); vx.setAttribute("visibility", "visible");
     dot.setAttribute("cx", X(best.t)); dot.setAttribute("cy", Y(best.v)); dot.setAttribute("visibility", "visible");
-    const d0 = best.v / pts[0].v - 1;
-    showTip(e, `<b class="num">${usd(best.v)}</b><br><span class="dim">${new Date(best.t).toLocaleString()}</span><br><span class="${cls(d0)}">${pct(d0)}</span> <span class="dim">vs range start</span>`);
+    showTip(e, `<b class="num">${fmtV(best.v)}</b><br><span class="dim">${new Date(best.t).toLocaleString("ru-RU")}</span>`);
   });
   hit.addEventListener("mouseleave", () => { hideTip(); vx.setAttribute("visibility", "hidden"); dot.setAttribute("visibility", "hidden"); });
+}
+const fmtDate = (t, span) => { const d = new Date(t); return span > 2 * 864e5 ? d.toLocaleDateString("ru-RU", {day: "numeric", month: "short"}) : d.toLocaleTimeString("ru-RU", {hour: "2-digit", minute: "2-digit"}); };
+function renderEquity() {
+  if (S.tab !== "overview") return;
+  const all = (S.ov?.equity || []).filter((r) => r.equity > 0), since = S.eqHours ? Date.now() - S.eqHours * 3600e3 : 0;
+  const pts = all.filter((r) => new Date(r.ts).getTime() >= since).map((r) => ({t: new Date(r.ts).getTime(), v: +r.equity}));
+  lineChart($("#eqChart"), pts, (v) => nf(v, 0), fmtDate, "Копим снимки капитала (каждые 10 минут).");
 }
 document.querySelectorAll("#eqRange button").forEach((b) => b.onclick = () => {
   document.querySelectorAll("#eqRange button").forEach((x) => x.classList.toggle("on", x === b)); S.eqHours = +b.dataset.h; renderEquity();
 });
 
-// ---------------------------------------------------------------------------- positions
+// ---------------------------------------------------------------------------- позиции
 function sleeveOf(tag) { return (S.ov?.manifest?.sleeves || []).find((s) => s.id === tag) || (S.strats?.strategies || []).find((s) => s.id === tag); }
 function renderPositions() {
+  if (S.tab !== "overview" && S.tab !== "trades") return;
   const open = S.ov?.open_trades || [];
-  $("#posSub").textContent = open.length ? `${open.length} open · stops on every position` : "";
-  if (!open.length) { $("#positions").innerHTML = `<div class="empty">No open positions. Strategies are waiting for their entry conditions on ${(S.ov?.manifest?.sleeves || []).filter((s) => s.stage !== "closing").length} sleeves.</div>`; return; }
-  $("#positions").innerHTML = `<table><thead><tr><th>Pair</th><th>Strategy</th><th class="r">P&L</th><th>Protection</th><th class="r">Age</th></tr></thead><tbody>${open.map((t) => {
+  $("#posSub").textContent = open.length ? `${open.length} открыто · стоп у каждой позиции` : "";
+  if (!open.length) { $("#positions").innerHTML = `<div class="empty">Открытых позиций нет. ${(S.ov?.manifest?.sleeves || []).filter((s) => s.stage !== "closing").length} стратегий ждут своих условий входа.</div>`; return; }
+  $("#positions").innerHTML = `<table><thead><tr><th>Монета</th><th>Стратегия</th><th class="r">P&L</th><th>Защита</th><th class="r">В сделке</th></tr></thead><tbody>${open.map((t) => {
     const sl = sleeveOf(t.enter_tag), short = !!t.is_short, entry = +t.open_rate, stop = +t.stop_loss_abs, amt = +t.amount || 0;
     const locked = stop && (short ? stop <= entry : stop >= entry);
     const atStop = stop ? (short ? entry - stop : stop - entry) * amt : null;
-    const prot = !stop ? pill("no stop data", "warn") : locked ? pill(`profit locked ${sgnUsd(atStop)}`, "good") : pill(`risk to stop ${usd(Math.abs(atStop))}`, "");
-    const pr = +(t.profit_ratio ?? t.profit_pct / 100 ?? 0);
-    return `<tr><td><b>${esc(pair(t.pair))}</b> ${pill(short ? "short" : "long", short ? "crit" : "good")}<div class="dim mono">${(+t.leverage || 1).toFixed(0)}× · in ${entry}</div></td>
+    const prot = !stop ? pill("нет данных о стопе", "warn") : locked ? pill(`прибыль зафиксирована ${sgnUsd(atStop)}`, "good") : pill(`риск до стопа ${usd(Math.abs(atStop))}`, "");
+    const pr = +(t.profit_ratio ?? 0);
+    return `<tr><td><b>${esc(pair(t.pair))}</b> ${pill(short ? "шорт" : "лонг", short ? "crit" : "good")}<div class="dim mono">вход ${entry}</div></td>
       <td>${esc(famName(sl?.family))}<div class="dim mono">${esc(t.enter_tag || "")}</div></td>
       <td class="r num"><span class="${cls(t.profit_abs)}">${sgnUsd(+t.profit_abs)}</span><div class="dim">${pct(pr)}</div></td>
-      <td>${prot}<div class="dim mono">stop ${stop || "—"}</div></td><td class="r num">${dur(t.open_date)}</td></tr>`;
+      <td>${prot}<div class="dim mono">стоп ${stop || "—"}</div></td><td class="r num">${dur(t.open_date)}</td></tr>`;
   }).join("")}</tbody></table>`;
 }
 
-// ---------------------------------------------------------------------------- research lab
+// ---------------------------------------------------------------------------- стратегии (карточки)
+const KIND = {trading: "Торгуют на демо", candidate: "Кандидаты", screen: "Нашёл скринер", rejected: "Отсеяны"};
+const curvePts = (curve) => (curve || []).map(([t, v]) => ({t: typeof t === "number" ? t : new Date(t).getTime(), v: +v})).filter((p) => isFinite(p.t) && isFinite(p.v));
+function spark(curve) {
+  const pts = curvePts(curve);
+  if (pts.length < 2) return `<div class="spark dim" style="display:grid;place-items:center;font-size:11.5px">график появится после строгой проверки</div>`;
+  const W = 300, H = 46, lo = Math.min(...pts.map((p) => p.v)), hi = Math.max(...pts.map((p) => p.v)), t0 = pts[0].t, t1 = pts.at(-1).t;
+  const X = (t) => (t - t0) / Math.max(t1 - t0, 1) * W, Y = (v) => 3 + (hi - v) / Math.max(hi - lo, 1e-9) * (H - 6);
+  const d = pts.map((p, i) => `${i ? "L" : "M"}${X(p.t).toFixed(1)},${Y(p.v).toFixed(1)}`).join("");
+  const col = pts.at(-1).v >= pts[0].v ? "#3fc23f" : "#e66767";
+  return `<svg class="spark" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" width="100%"><path d="${d}" fill="none" stroke="${col}" stroke-width="1.8" vector-effect="non-scaling-stroke"/></svg>`;
+}
+const met = (l, v, k = "") => `<div><span>${l}</span><b class="num ${k}">${v}</b></div>`;
+function renderCards() {
+  if (S.tab !== "strategies") return;
+  const cs = S.cards?.cards || [], counts = S.cards?.counts || {};
+  $("#filters").innerHTML = [["all", `Все · ${cs.length}`], ...Object.entries(KIND).map(([k, l]) => [k, `${l} · ${counts[k] || 0}`])]
+    .map(([k, l]) => `<button data-f="${k}" class="${S.filter === k ? "on" : ""}">${esc(l)}</button>`).join("");
+  document.querySelectorAll("#filters button").forEach((b) => b.onclick = () => { S.filter = b.dataset.f; renderCards(); });
+  const list = cs.filter((c) => S.filter === "all" || c.kind === S.filter);
+  if (!list.length) { $("#cards").innerHTML = `<div class="card empty">${S.filter === "screen" ? "Скринер запустится с ближайшим прогоном лаборатории и покажет здесь выживших." : "Пока пусто."}</div>`; return; }
+  $("#cards").innerHTML = list.map((c) => {
+    const o = c.oos || {};
+    return `<div class="scard" data-i="${cs.indexOf(c)}">
+      <div class="top"><div><div class="nm">${esc(c.title)}</div><div class="sub">${esc(c.pairs.slice(0, 4).map(pair).join(", "))}${c.pairs.length > 4 ? " +" + (c.pairs.length - 4) : ""} · ${esc(c.timeframe)}${c.external ? " · ваша" : ""}</div></div>${stagePill(c.kind === "screen" ? "exploratory" : c.stage)}</div>
+      <div class="idea">${esc(c.idea)}</div>
+      ${spark(c.curve)}
+      <div class="mets">${met("Сделок", o.trades ?? "—")}${met("PF", o.profit_factor ?? "—", (o.profit_factor || 0) >= 1 ? "pos" : "neg")}${met("Доходность", o.total_return != null ? pct(o.total_return, 1) : "—", cls(o.total_return))}${met("Ровность", o.curve_r2 != null ? nf(o.curve_r2, 2) : "—")}</div>
+      <div class="sub">${c.kind === "trading" ? `на демо: ${c.live?.trades ?? 0} сделок · ${c.live?.pnl != null ? sgnUsd(c.live.pnl) : "—"}` : c.why_not?.length ? "не прошла: " + esc(c.why_not.slice(0, 2).join("; ")) : esc(c.status)}</div>
+    </div>`;
+  }).join("");
+  document.querySelectorAll(".scard").forEach((el) => el.onclick = () => openCard(cs[+el.dataset.i]));
+}
+function openCard(c) {
+  const o = c.oos || {}, cl = c.claimed;
+  $("#dbody").innerHTML = `<h3>${esc(c.title)}</h3><div class="dim">${esc(c.pairs.map(pair).join(", "))} · ${esc(c.timeframe)} · ${stagePill(c.kind === "screen" ? "exploratory" : c.stage)} ${esc(c.status)}</div>
+    <div class="box"><b>Суть стратегии.</b> ${esc(c.idea)}<br><b>Выходы и риск:</b> ${esc(c.exits)}; без плеча, риск на сделку на демо 0,1% капитала.</div>
+    <h2 style="margin:14px 0 6px">Капитал на данных, которых подбор не видел</h2><div id="dChart" style="height:240px"></div>
+    <div class="kv2">${[["Сделок", o.trades ?? "—"], ["Profit factor", o.profit_factor ?? "—"], ["Доходность", o.total_return != null ? pct(o.total_return, 1) : "—"],
+      ["Макс. просадка", o.max_drawdown != null ? nf(o.max_drawdown * 100, 1) + "%" : "—"], ["Прибыльных сделок", o.win_rate != null ? nf(o.win_rate * 100, 0) + "%" : "—"],
+      ["Шарп", o.sharpe ?? "—"], ["Ровность кривой (R²)", o.curve_r2 ?? "—"], ["Последние 3 мес.", o.last90_return != null ? pct(o.last90_return, 1) : "—"]]
+      .map(([k, v]) => `<div><span>${k}</span><b class="num">${v}</b></div>`).join("")}</div>
+    ${c.folds?.length ? `<h2 style="margin:14px 0 6px">Окна проверки (по 90 дней)</h2><div>${c.folds.map((f) => `<span class="pill ${f.ret > 0 ? "good" : "crit"}" style="margin:0 6px 6px 0">${esc(f.test || "")}: ${pct(f.ret, 1)} · ${f.trades ?? 0} сд.</span>`).join("")}</div>` : ""}
+    ${c.why_not?.length ? `<div class="box" style="border-left-color:var(--crit)"><b>Почему не допущена к капиталу:</b> ${esc(c.why_not.join("; "))}.</div>` : ""}
+    ${c.kind === "trading" ? `<div class="box" style="border-left-color:var(--good)"><b>На демо-счёте:</b> ${c.live?.trades ?? 0} сделок, P&L ${c.live?.pnl != null ? sgnUsd(c.live.pnl) : "—"}, PF ${c.live?.profit_factor ?? "—"}.</div>` : ""}
+    ${cl ? `<div class="box" style="border-left-color:var(--warn)"><b>Ваш анализатор показывал:</b> ${pct(cl.total_return, 0)} за ${esc(cl.period)}, PF ${cl.profit_factor}, ${cl.trades} сделок, просадка ${nf(cl.max_drawdown * 100, 1)}% (плечо ${cl.leverage}×). Здесь — честная проверка той же логики без плеча.</div>` : ""}
+    <h2 style="margin:14px 0 6px">Параметры входа</h2><div class="kv2">${Object.entries(c.params || {}).map(([k, v]) => `<div><span>${esc(k)}</span><b class="num">${esc(v)}</b></div>`).join("")}</div>
+    <p class="howto">Как читать: «доходность» и «PF» — только по периоду, который подбор параметров не видел, после комиссий Bybit. Ровность 1,0 — идеально ровная линия вверх. На демо стратегия торгует, если прошла строгую проверку; на реальный счёт — только после форвард-теста и всех проверок готовности, и только по вашему решению.</p>`;
+  $("#drawer").classList.add("open");
+  lineChart($("#dChart"), curvePts(c.curve), (v) => pct(v - 1, 1), fmtDate, "График появится после строгой проверки этой стратегии.");
+}
+$("#dx").onclick = () => $("#drawer").classList.remove("open");
+addEventListener("keydown", (e) => { if (e.key === "Escape") $("#drawer").classList.remove("open"); });
+
+// ---------------------------------------------------------------------------- лаборатория
 const STEPS = ["download", "hyperopt fold 1", "oos fold 1", "hyperopt fold 2", "oos fold 2", "hyperopt fold 3", "oos fold 3", "hyperopt fold 4", "oos fold 4", "robustness", "evaluated"];
 function stepIndex(stage) { stage = String(stage || ""); const i = STEPS.findIndex((s) => stage.startsWith(s)); return i < 0 ? 0 : i; }
 function stageText(p) {
   const st = String(p.stage || "");
-  if (st.startsWith("hyperopt")) return `Optimizing on the past (${st.replace("hyperopt ", "")})${p.epoch ? ` · epoch ${p.epoch}/${p.epochs || "?"}` : ""}`;
-  if (st.startsWith("oos")) return `Testing on unseen months (${st.replace("oos ", "")})`;
-  return {download: "Loading Bybit history", robustness: "Stress & parameter robustness", evaluated: "Done · waiting for batch merge"}[st] || st;
+  if (st.startsWith("hyperopt")) return `Подбор параметров на прошлом (окно ${st.replace("hyperopt fold ", "")})${p.epoch ? ` · эпоха ${p.epoch}/${p.epochs || "?"}` : ""}`;
+  if (st.startsWith("oos")) return `Проверка на невиданных месяцах (окно ${st.replace("oos fold ", "")})`;
+  return {download: "Загрузка истории Bybit", robustness: "Стресс-тест и устойчивость", evaluated: "Готово · ждёт сводки", failed: "Ошибка"}[st] || st;
 }
 function renderLab() {
+  if (S.tab !== "lab") return;
   const rs = S.rs || {}, lab = rs.lab || {}, exps = rs.experiments || [];
   const run = exps.filter((e) => e.status === "running" && e.progress?.remote && (!lab.run_id || e.progress.run_id == lab.run_id));
-  const labOn = lab.status && lab.status !== "end" && Date.now() - new Date(lab.ts || 0).getTime() < 4 * 3600e3;
   const byJob = {}; for (const e of run) { const j = e.progress?.job ?? 0; if (!byJob[j] || e.created > byJob[j].created) byJob[j] = e; }
   const doneRun = run.filter((e) => e.progress?.stage === "evaluated").length;
-  $("#labSub").textContent = labOn ? `GitHub run ${lab.run_id || ""} · started ${ago(lab.started)} · ${doneRun} finished this run · budget ${lab.budget_min || "?"} min per runner`
-    : `last run ${ago(lab.ts)} · ${lab.runs || 0} runs total · ${lab.experiments_total || 0} experiments imported`;
-  const lanes = [0, 1, 2, 3].map((j) => {
+  $("#labSub").textContent = labActive() ? `прогон ${lab.run_id || ""} · начат ${ago(lab.started)} · готово опытов: ${doneRun} · бюджет ${lab.budget_min || "?"} мин на вычислитель`
+    : `последний прогон ${ago(lab.ts)} · всего прогонов ${lab.runs || 0} · опытов ${lab.experiments_total || 0}`;
+  $("#lanes").innerHTML = [0, 1, 2, 3].map((j) => {
     const e = byJob[j];
-    if (!e || !labOn) return `<div class="lane idle"><div>Runner ${j + 1}</div><div class="dim">${labOn ? "starting…" : "idle"}</div></div>`;
+    if (!e || !labActive()) return `<div class="lane idle"><div>Вычислитель ${j + 1}</div><div class="dim">${labActive() ? "запускается…" : "ждёт прогона"}</div></div>`;
     const p = e.progress || {}, k = stepIndex(p.stage), info = e.info || {};
-    const why = info.revalidates ? `re-checking ${info.revalidates}` : info.refines ? `refining ${info.refines}` : "new search";
-    return `<div class="lane"><div class="hd"><span>Runner ${j + 1}</span><span class="mono">${esc(e.id)}</span></div>
-      <div class="fam">${esc(famName(e.family))}</div><div class="meta">${e.pairs} pairs · ${esc(why)}</div>
+    const why = info.screen ? "выживший из скринера" : info.external ? "ваша стратегия" : info.revalidates ? `перепроверка ${info.revalidates}` : info.refines ? `доработка ${info.refines}` : "новый поиск";
+    return `<div class="lane"><div class="hd"><span>Вычислитель ${j + 1}</span><span class="mono">${esc(e.id)}</span></div>
+      <div class="fam">${esc(famName(e.family))}</div><div class="meta">${e.pairs} монет · ${esc(why)}</div>
       <div class="steps">${STEPS.map((_, i) => `<i class="${i < k ? "d" : i === k ? "c" : ""}"></i>`).join("")}</div>
       <div class="stage">${esc(stageText(p))}</div>
       ${p.epochs && String(p.stage).startsWith("hyperopt") ? `<div class="bar"><i style="width:${Math.min(100, (p.epoch || 0) / p.epochs * 100)}%"></i></div>` : ""}
-      <div class="best">${p.best_trades ? `best so far: ${p.best_trades} trades, ${pct(p.best_profit)} in-sample` : ""}${p.budget_left_min != null ? ` · ${Math.round(p.budget_left_min)} min left` : ""}</div></div>`;
-  });
-  $("#lanes").innerHTML = lanes.join("");
+      <div class="best">${p.best_trades ? `лучший пока: ${p.best_trades} сделок, ${pct(p.best_profit)} на обучении` : ""}${p.budget_left_min != null ? ` · осталось ${Math.round(p.budget_left_min)} мин` : ""}</div></div>`;
+  }).join("");
+  [renderScreen, renderResults, renderFamilies, renderReadiness, renderLearn].forEach(safe);
+}
+function renderScreen() {
+  const sc = S.scr || {}, top = sc.top || [];
+  const tested = new Map((S.rs?.experiments || []).filter((e) => e.info?.screen).map((e) => [e.info.screen, e]));
+  $("#scrSub").textContent = sc.evaluated ? `${nf(sc.evaluated, 0)} вариантов на ${sc.series} рядах «монета × таймфрейм» · выжило ${sc.n_survivors} · ${ago(sc.ts || sc.created)}` : "ваш движок Strategy Lab · первый запуск с ближайшим прогоном";
+  if (!top.length) { $("#screen").innerHTML = `<div class="empty">${sc.evaluated ? "Ни один вариант не удержал прибыль с ровной кривой на невиданных данных." : "Скринер ещё не запускался. Он переберёт тысячи вариантов 10 стратегий вашего анализатора на 30 монетах (15m и 1h) и покажет здесь выживших."}</div>`; return; }
+  const ex = (x) => `стоп ${x.sl}×ATR · ${x.tp ? "тейк " + x.tp + "R" : "без тейка"} · ${x.tr ? "трейлинг " + x.tr + "×ATR" : "без трейлинга"}`;
+  $("#screen").innerHTML = `<table><thead><tr><th>Стратегия</th><th>Монета · ТФ</th><th class="r">Сделок</th><th class="r">PF</th><th class="r">Доходн.</th><th class="r">Просадка</th><th class="r">Ровность</th><th class="r">3 мес.</th><th>Строгая проверка</th></tr></thead><tbody>${top.map((x) => {
+    const e = tested.get(x.id), v = e?.summary?.verdict;
+    const wf = !e ? pill("в очереди", "") : e.status === "running" ? pill("идёт", "blue") : pill(`${{validated: "прошла", exploratory: "кандидат", rejected: "отсеяна"}[v] || v} · PF ${e.oos?.profit_factor ?? "—"}`, {validated: "good", exploratory: "warn", rejected: "crit"}[v] || "");
+    return `<tr><td>${esc(x.name || famName(x.family))}<div class="dim mono">${esc(JSON.stringify(x.params))} · ${esc(ex(x.exits || {}))}</div></td>
+      <td>${esc(pair(x.pair))} · ${esc(x.timeframe)}</td><td class="r num">${x.B?.trades ?? "—"}</td><td class="r num pos">${x.B?.pf ?? "—"}</td>
+      <td class="r num ${cls(x.B?.net)}">${x.B?.net != null ? (x.B.net > 0 ? "+" : "") + nf(x.B.net, 1) + "%" : "—"}</td><td class="r num">${x.B?.dd != null ? nf(x.B.dd, 1) + "%" : "—"}</td>
+      <td class="r num">${x.r2}</td><td class="r num ${cls(x.last90)}">${x.last90 > 0 ? "+" : ""}${x.last90}%</td><td>${wf}</td></tr>`;
+  }).join("")}</tbody></table>
+  <p class="dim" style="margin:8px 0 0;font-size:12px">Цифры скринера — бэктест вашего движка без плеча на всю сумму, с комиссиями и проскальзыванием, только на невиданных 40% истории. Потом каждую проверяют строже: 4 окна по 90 дней, двойные комиссии, поправка на число попыток; затем форвард-тест и демо.</p>`;
 }
 function renderResults() {
   const done = (S.rs?.experiments || []).filter((e) => e.status === "done").slice(0, 14);
-  if (!done.length) { $("#results").innerHTML = `<div class="empty">No finished experiments yet.</div>`; return; }
-  const vp = (v) => pill(v, {validated: "good", exploratory: "warn", rejected: ""}[v] || "");
-  $("#results").innerHTML = `<table><thead><tr><th>Strategy</th><th class="r">Trades</th><th class="r">PF</th><th class="r">Sharpe</th><th class="r">Max DD</th><th class="r" title="R² of the unseen-period equity curve (1 = steady line up) · last 3 months">Steadiness</th><th>Folds</th><th>Verdict</th></tr></thead><tbody>${done.map((e) => {
+  if (!done.length) { $("#results").innerHTML = `<div class="empty">Готовых проверок пока нет.</div>`; return; }
+  const vp = (v) => pill({validated: "прошла", exploratory: "кандидат", rejected: "отсеяна"}[v] || v, {validated: "good", exploratory: "warn", rejected: ""}[v] || "");
+  $("#results").innerHTML = `<table><thead><tr><th>Стратегия</th><th class="r">Сделок</th><th class="r">PF</th><th class="r">Шарп</th><th class="r">Просадка</th><th class="r">Ровность</th><th>Окна</th><th>Итог</th></tr></thead><tbody>${done.map((e) => {
     const o = e.oos || {}, f = e.folds || [];
-    return `<tr><td>${esc(e.variant || famName(e.family))}<div class="dim">${e.pairs} pairs · ${esc(e.timeframe || "1h")} · ${ago(e.finished)}</div></td>
+    return `<tr><td>${esc(famName(e.family))}<div class="dim">${e.pairs} монет · ${esc(e.timeframe || "1h")} · ${ago(e.finished)}</div></td>
       <td class="r num">${o.trades ?? "—"}</td><td class="r num ${(o.profit_factor || 0) >= 1 ? "pos" : "neg"}">${o.profit_factor ?? "—"}</td>
-      <td class="r num">${o.sharpe ?? "—"}</td><td class="r num">${o.max_drawdown != null ? (o.max_drawdown * 100).toFixed(1) + "%" : "—"}</td>
-      <td class="r num">${o.curve_r2 != null ? `<span class="${cls(o.curve_r2)}">${o.curve_r2.toFixed(2)}</span><div class="dim">3m ${pct(o.last90_return, 1)}</div>` : "—"}</td>
-      <td title="each square = one 90-day test window">${f.map((x) => `<span class="fold ${x.ret > 0 ? "p" : x.ret < 0 ? "n" : ""}" title="${esc(x.test)}: ${pct(x.ret)}, ${x.trades ?? 0} trades"></span>`).join("")}</td>
+      <td class="r num">${o.sharpe ?? "—"}</td><td class="r num">${o.max_drawdown != null ? nf(o.max_drawdown * 100, 1) + "%" : "—"}</td>
+      <td class="r num">${o.curve_r2 != null ? nf(o.curve_r2, 2) : "—"}</td>
+      <td title="каждый квадрат — одно окно 90 дней">${f.map((x) => `<span class="fold ${x.ret > 0 ? "p" : x.ret < 0 ? "n" : ""}" title="${esc(x.test)}: ${pct(x.ret)}, ${x.trades ?? 0} сделок"></span>`).join("")}</td>
       <td>${vp(e.summary?.verdict || "—")}</td></tr>`;
   }).join("")}</tbody></table>`;
 }
+const GN = {deflated_sharpe: "может быть удачей перебора", fold_consistency: "прибыльна не во всех окнах", trades: "мало сделок", profit_factor: "низкий PF", sharpe: "низкий Шарп", max_drawdown: "большая просадка", stress_pf: "не держит двойные комиссии", wfe: "хуже на новых данных", robustness: "неустойчивые параметры", monte_carlo: "Монте-Карло"};
 function renderFamilies() {
   const fs = S.rs?.family_stats || {}, rows = Object.entries(fs);
   const m = Math.max(0.05, ...rows.map(([, v]) => Math.abs(v[1])));
   $("#families").innerHTML = rows.sort((a, b) => b[1][1] - a[1][1]).map(([f, [n, mean]]) => {
     const w = Math.abs(mean) / m * 50, left = mean >= 0 ? 50 : 50 - w;
-    return `<div class="famrow"><span class="nm">${esc(famName(f))}</span><div class="dv" title="mean reward ${mean.toFixed(3)}"><i style="left:${left}%;width:${w}%;background:${mean >= 0 ? "var(--blue)" : "var(--crit)"}"></i></div><span class="val num">${mean.toFixed(2)} · ${n}</span></div>`;
-  }).join("") || `<div class="empty">No completed experiments yet.</div>`;
+    return `<div class="famrow"><span class="nm">${esc(famName(f))}</span><div class="dv"><i style="left:${left}%;width:${w}%;background:${mean >= 0 ? "var(--blue)" : "var(--crit)"}"></i></div><span class="val num">${nf(mean, 2)} · ${n}</span></div>`;
+  }).join("");
   const gf = Object.entries(S.rs?.gate_failures || {}).sort((a, b) => b[1] - a[1]).slice(0, 5), gm = Math.max(1, ...gf.map((x) => x[1]));
-  const GN = {deflated_sharpe: "Deflated Sharpe (luck filter)", fold_consistency: "Profitable in most windows", trades: "Enough trades", profit_factor: "Profit factor", sharpe: "Sharpe", max_drawdown: "Drawdown", stress_pf: "Survives double costs", wfe: "Walk-forward efficiency", robustness: "Robust to parameter changes", monte_carlo: "Monte Carlo"};
   $("#gates").innerHTML = gf.map(([g, n]) => `<div class="famrow"><span class="nm">${esc(GN[g] || g)}</span><div class="bar"><i style="width:${n / gm * 100}%;background:#c3c2b7"></i></div><span class="val num">${n}</span></div>`).join("") || `<div class="empty">—</div>`;
-}
-
-// ---------------------------------------------------------------------------- lifecycle / sleeves
-function renderLifecycle() {
-  const st = S.strats?.strategies || [], c = (s) => st.filter((x) => x.stage === s).length;
-  const steps = [["exploratory", "Candidates", "promising, not proven"], ["validated", "Validated", "passed every gate"], ["incubation", "Incubation", "small demo capital"], ["eligible", "Eligible", "live-proven"], ["production", "Production", "full allocation"]];
-  $("#funnel").innerHTML = steps.map(([k, l, d]) => `<div class="fstep ${c(k) ? "hot" : ""}"><b class="num">${c(k)}</b>${esc(l)}<br><span>${esc(d)}</span></div>`).join("")
-    + `<div class="fstep" style="flex:.7"><b class="num dim">${c("rejected") + c("retired")}</b>Rejected<br><span>retired / failed</span></div>`;
-  const sl = (S.ov?.manifest?.sleeves || []).filter((s) => s.stage !== "closing");
-  const byId = Object.fromEntries(st.map((x) => [x.id, x]));
-  $("#slvSub").textContent = `${sl.length} sleeves · ${new Set(sl.flatMap((s) => s.pairs)).size} pairs watched`;
-  $("#sleeves").innerHTML = sl.length ? `<table><thead><tr><th>Sleeve</th><th>Stage</th><th>Pairs</th><th class="r">Risk/trade</th><th class="r">Live trades</th><th class="r">Live P&L</th></tr></thead><tbody>${sl.map((s) => {
-    const lv = byId[s.id]?.live || {};
-    return `<tr><td>${esc(byId[s.id]?.oos?.variant || famName(s.family))}<div class="dim mono">${esc(s.id)}</div></td><td>${stagePill(s.stage)}</td>
-      <td class="dim">${s.pairs.slice(0, 6).map(pair).join(", ")}${s.pairs.length > 6 ? ` +${s.pairs.length - 6}` : ""}</td>
-      <td class="r num">${(s.risk * 100).toFixed(2)}%</td><td class="r num">${lv.trades ?? 0}</td><td class="r num ${cls(lv.pnl)}">${lv.pnl != null ? sgnUsd(lv.pnl) : "—"}</td></tr>`;
-  }).join("")}</tbody></table>` : `<div class="empty">No sleeves deployed.</div>`;
-}
-
-// ---------------------------------------------------------------------------- goals / readiness / forward
-function renderGoals() {
-  const gs = S.goals?.goals || [];
-  $("#goals").innerHTML = gs.map((g) => `<div class="goal"><span class="t">${esc(g.title)}</span><b class="num">${esc(g.value)}${g.unit === "%" ? "%" : ""}<span class="dim"> / ${esc(g.target)}${g.unit === "%" ? "%" : ""}</span></b>
-    <div class="bar"><i style="width:${Math.round(Math.max(0, Math.min(1, g.progress)) * 100)}%;background:${g.progress >= 1 ? "var(--good)" : g.warning ? "var(--crit)" : "var(--blue)"}"></i></div>${g.note ? `<span class="n">${esc(g.note)}</span>` : ""}</div>`).join("");
 }
 function renderReadiness() {
   const r = S.ready || {};
-  $("#rdSub").textContent = `${r.passed ?? 0}/${r.total ?? 8} · advisory`;
-  $("#readiness").innerHTML = (r.checks || []).map((c) => `<div class="check"><span class="ic ${c.pass ? "ok" : "no"}">${c.pass ? "✓" : "·"}</span><span>${esc(c.title)}<div class="need">need ${esc(c.need)}</div></span><b class="num">${esc(c.value)}</b></div>`).join("")
-    + `<p class="dim" style="margin:8px 0 0;font-size:11.5px">${esc(r.note || "")}</p>`;
+  $("#rdSub").textContent = `${r.passed ?? 0}/${r.total ?? 8} · только рекомендация`;
+  const RU = {forward_days: "Форвард после повышения", trades: "Закрытых сделок", diversified: "Независимых стратегий", t_stat: "Статистическая значимость", profit_factor: "PF после поправки", drawdown: "Макс. просадка", stability: "Прибыльные трети периода", consistency: "Демо совпадает с проверкой"};
+  $("#readiness").innerHTML = (r.checks || []).map((c) => `<div class="check"><span class="ic ${c.pass ? "ok" : "no"}">${c.pass ? "✓" : "·"}</span><span>${esc(RU[c.id] || c.title)}<div class="need">нужно ${esc(c.need)}</div></span><b class="num">${esc(c.value)}</b></div>`).join("")
+    + `<p class="dim" style="margin:8px 0 0;font-size:11.5px">Система никогда не переключится на реальный счёт сама — только по вашему решению.</p>`;
 }
 function renderForward() {
+  if (S.tab !== "overview") return;
   const f = S.fw || {}, t = f.top || {}, rest = f.rest || {}, p = f.persistence || {};
-  const v = {works: ["Works", "good"], not_working: ["Not working", "crit"], inconclusive: ["Inconclusive", "warn"], early_positive: ["Early read: leaning positive", "blue"], early_negative: ["Early read: leaning negative", "warn"], too_early: ["Collecting evidence", ""]}[f.verdict] || ["Collecting evidence", ""];
-  const row = (l, g) => `<tr><td>${l}</td><td class="r num">${g.strategies ?? 0}</td><td class="r num">${g.trades ?? 0}</td><td class="r num ${cls(g.pnl_pct)}">${g.pnl_pct != null ? (g.pnl_pct > 0 ? "+" : "") + g.pnl_pct.toFixed(2) + "%" : "—"}</td><td class="r num">${g.pf ?? "—"}</td><td class="r num">${g.t_daily ?? "—"}</td></tr>`;
-  const pers = p.experiments ? `History check (${p.experiments} experiments): when the first half of the unseen test period was profitable, the second half was profitable <b>${p.p_second_pos_if_first_pos != null ? Math.round(p.p_second_pos_if_first_pos * 100) + "%" : "—"}</b> of the time (vs ${p.p_second_pos_if_first_neg != null ? Math.round(p.p_second_pos_if_first_neg * 100) + "%" : "—"} after a losing first half).` : "";
-  $("#forward").innerHTML = `<div style="display:flex;gap:14px;align-items:center;margin-bottom:10px">${pill(v[0], v[1])}<span>${esc(f.text || "")}</span></div>
-    <table><thead><tr><th>Group (ranked by backtest score at freeze)</th><th class="r">Strategies</th><th class="r">Forward trades</th><th class="r">Return</th><th class="r">PF</th><th class="r">Daily t</th></tr></thead>
-    <tbody>${row("Top quartile — the ones research likes most", t)}${row("Everything else (control group)", rest)}</tbody></table>
-    <p class="dim" style="margin:10px 0 0;font-size:12px">${f.book_size ?? 0} frozen strategies are re-tested every lab run on Bybit candles after their freeze time only, with fees and slippage.
-    Decision rule fixed in advance: works = top quartile ≥ ${f.rules?.final_trades ?? 200} trades over ≥ ${f.rules?.final_days ?? 14} days, PF ≥ ${f.rules?.pf_works ?? 1.15}, daily t ≥ ${f.rules?.t_works ?? 2}.
-    ${f.rank_corr != null ? `Rank correlation backtest→forward: <b>${f.rank_corr}</b>.` : ""} ${pers}</p>`;
+  const v = {works: ["Работает", "good"], not_working: ["Не работает", "crit"], inconclusive: ["Неясно", "warn"], early_positive: ["Ранний сигнал: скорее плюс", "blue"], early_negative: ["Ранний сигнал: скорее минус", "warn"], too_early: ["Копим данные", ""]}[f.verdict] || ["Копим данные", ""];
+  const n = t.trades || 0, need = f.rules?.final_trades ?? 200;
+  const row = (l, g) => `<tr><td>${l}</td><td class="r num">${g.strategies ?? 0}</td><td class="r num">${g.trades ?? 0}</td><td class="r num ${cls(g.pnl_pct)}">${g.pnl_pct != null ? (g.pnl_pct > 0 ? "+" : "") + nf(g.pnl_pct, 2) + "%" : "—"}</td><td class="r num">${g.pf ?? "—"}</td><td class="r num">${g.t_daily ?? "—"}</td></tr>`;
+  const pers = p.experiments ? `Проверка на истории (${p.experiments} опытов): если первая половина невиданного периода была в плюсе, вторая была в плюсе в <b>${p.p_second_pos_if_first_pos != null ? Math.round(p.p_second_pos_if_first_pos * 100) + "%" : "—"}</b> случаев (после минусовой — в ${p.p_second_pos_if_first_neg != null ? Math.round(p.p_second_pos_if_first_neg * 100) + "%" : "—"}).` : "";
+  $("#forward").innerHTML = `<div style="display:flex;gap:14px;align-items:center;margin-bottom:10px;flex-wrap:wrap">${pill(v[0], v[1])}<span>${n < 100 ? `Решение примем на ${need} сделках лучших стратегий (сейчас ${n}). Первая оценка — на 100 сделках и 7 днях.` : esc(f.text || "")}</span></div>
+    <div class="bar" style="margin-bottom:12px"><i style="width:${Math.min(100, n / need * 100)}%"></i></div>
+    <table><thead><tr><th>Группа (по оценке на истории)</th><th class="r">Стратегий</th><th class="r">Сделок на новых данных</th><th class="r">Доходность</th><th class="r">PF</th><th class="r">t по дням</th></tr></thead>
+    <tbody>${row("Лучшая четверть — те, что лаборатория считает лучшими", t)}${row("Все остальные (контрольная группа)", rest)}</tbody></table>
+    <p class="dim" style="margin:10px 0 0;font-size:12px">${f.book_size ?? 0} замороженных стратегий каждый прогон проверяются на свечах Bybit только после момента заморозки, с комиссиями и проскальзыванием. Правило решения записано заранее: «работает» = у лучшей четверти ≥ ${need} сделок за ≥ ${f.rules?.final_days ?? 14} дней, PF ≥ ${f.rules?.pf_works ?? 1.15}, t ≥ ${f.rules?.t_works ?? 2}. ${pers}</p>`;
 }
-
-function renderScreen() {
-  const sc = S.scr || {}, top = sc.top || [];
-  const tested = new Map((S.rs?.experiments || []).filter((e) => e.info?.screen).map((e) => [e.info.screen, e]));
-  $("#scrSub").textContent = sc.evaluated ? `${(+sc.evaluated).toLocaleString("en-US")} combinations on ${sc.series} coin/timeframe series · ${sc.n_survivors} survivors · ${ago(sc.ts || sc.created)}` : "first screening runs with the next lab run";
-  if (!top.length) { $("#screen").innerHTML = `<div class="empty">${sc.evaluated ? "No combination stayed profitable with a steady curve on unseen data this time." : "Waiting for the first screening."}</div>`; return; }
-  const ex = (x) => `stop ${x.sl}×ATR · ${x.tp ? "TP " + x.tp + "R" : "no TP"} · ${x.tr ? "trail " + x.tr + "×ATR" : "no trail"}`;
-  $("#screen").innerHTML = `<table><thead><tr><th>Strategy</th><th>Coin · TF</th><th class="r">Unseen trades</th><th class="r">PF</th><th class="r">Return</th><th class="r">Max DD</th><th class="r">Curve R²</th><th class="r">Last 3m</th><th>Walk-forward</th></tr></thead><tbody>${top.map((x) => {
-    const e = tested.get(x.id), v = e?.summary?.verdict;
-    const wf = !e ? pill("queued", "") : e.status === "running" ? pill("testing", "blue") : pill(`${v} · PF ${e.oos?.profit_factor ?? "—"}`, {validated: "good", exploratory: "warn"}[v] || "");
-    return `<tr><td>${esc(x.name || famName(x.family))}<div class="dim mono">${esc(JSON.stringify(x.params))} · ${esc(ex(x.exits || {}))}</div></td>
-      <td>${esc(pair(x.pair))} · ${esc(x.timeframe)}</td><td class="r num">${x.B?.trades ?? "—"}</td><td class="r num pos">${x.B?.pf ?? "—"}</td>
-      <td class="r num ${cls(x.B?.net)}">${x.B?.net != null ? (x.B.net > 0 ? "+" : "") + x.B.net.toFixed(1) + "%" : "—"}</td><td class="r num">${x.B?.dd != null ? x.B.dd.toFixed(1) + "%" : "—"}</td>
-      <td class="r num">${x.r2}</td><td class="r num ${cls(x.last90)}">${x.last90 > 0 ? "+" : ""}${x.last90}%</td><td>${wf}</td></tr>`;
-  }).join("")}</tbody></table>
-  <p class="dim" style="margin:8px 0 0;font-size:12px">Returns here are 1× full-capital backtests in the owner's engine (fees + slippage). Survivors then run through the freqtrade walk-forward (4 unseen 90-day windows, double costs, Deflated Sharpe) and the forward test on live data; passing ones trade on demo at 0.1% risk.</p>`;
+function renderGoals() {
+  if (S.tab !== "overview") return;
+  const RU = {forward: "Форвард-тест: лучшие стратегии в плюсе на новых данных", readiness: "Готовность к реальному счёту (все проверки)", validated: "Найти стратегию, прошедшую все строгие проверки",
+    evidence: "Набрать сделки на демо", research: "Исследования: строгих проверок за 7 дней", pf: "Profit factor на демо ≥ 1,3 (≥ 30 сделок)", production: "Стратегий в основной торговле", return: "Капитал демо +10% (просадка < 15%)"};
+  $("#goals").innerHTML = (S.goals?.goals || []).map((g) => `<div class="goal"><span class="t">${esc(RU[g.id] || g.title)}</span><b class="num">${esc(g.value)}${g.unit === "%" ? "%" : ""}<span class="dim"> / ${esc(g.target)}${g.unit === "%" ? "%" : ""}</span></b>
+    <div class="bar"><i style="width:${Math.round(Math.max(0, Math.min(1, g.progress)) * 100)}%;background:${g.progress >= 1 ? "var(--good)" : g.warning ? "var(--crit)" : "var(--blue)"}"></i></div></div>`).join("");
 }
-
-// ---------------------------------------------------------------------------- log / learnings / closed
 function renderLog() {
+  if (S.tab !== "overview" && S.tab !== "lab") return;
   const ev = S.ev?.events || S.ov?.events || [];
-  $("#log").innerHTML = ev.slice(0, 60).map((e) => `<div class="${esc(e.level)}"><time class="num">${esc((e.ts || "").slice(11, 16))}</time><span class="src">${esc(e.source)}</span><span class="msg">${esc(e.message)}</span></div>`).join("") || `<div class="empty">quiet</div>`;
-  const ln = (S.ln?.learnings || []).filter((l) => l.active).slice(0, 25);
-  $("#learn").innerHTML = ln.map((l) => `<div><time class="num">${esc((l.ts || "").slice(5, 10))}</time><span class="src">${esc(l.scope)}</span><span class="msg">${esc(l.insight)}</span></div>`).join("") || `<div class="empty">Nothing learned yet — learnings come from finished experiments and closed trades.</div>`;
+  const SRC = {research: "исследования", lifecycle: "отбор", strategy: "стратегия", manager: "менеджер", supervisor: "система", scanner: "рынок", risk: "риск", web: "пульт", learner: "обучение"};
+  $("#log").innerHTML = ev.slice(0, 60).map((e) => `<div class="${esc(e.level)}"><time class="num">${esc((e.ts || "").slice(11, 16))}</time><span class="src">${esc(SRC[e.source] || e.source)}</span><span class="msg">${esc(e.message)}</span></div>`).join("") || `<div class="empty">тихо</div>`;
 }
-function renderClosed() {
+function renderLearn() {
+  const ln = (S.ln?.learnings || []).filter((l) => l.active).slice(0, 25);
+  $("#learn").innerHTML = ln.map((l) => `<div><time class="num">${esc((l.ts || "").slice(5, 10))}</time><span class="src">${esc(l.scope)}</span><span class="msg">${esc(l.insight)}</span></div>`).join("") || `<div class="empty">Пока нет выводов — они появляются из завершённых проверок и закрытых сделок.</div>`;
+}
+
+// ---------------------------------------------------------------------------- сделки
+function renderTrades() {
+  if (S.tab !== "trades") return;
+  const sl = (S.ov?.manifest?.sleeves || []).filter((s) => s.stage !== "closing");
+  const byId = Object.fromEntries((S.strats?.strategies || []).map((x) => [x.id, x]));
+  $("#slvSub").textContent = `${sl.length} стратегий · ${new Set(sl.flatMap((s) => s.pairs)).size} монет под наблюдением`;
+  $("#sleeves").innerHTML = sl.length ? `<table><thead><tr><th>Стратегия</th><th>Стадия</th><th>ТФ</th><th>Монеты</th><th class="r">Риск/сделка</th><th class="r">Сделок</th><th class="r">P&L</th></tr></thead><tbody>${sl.map((s) => {
+    const lv = byId[s.id]?.live || {};
+    return `<tr><td>${esc(famName(s.family))}<div class="dim mono">${esc(s.id)}</div></td><td>${stagePill(s.stage)}</td><td>${esc(s.timeframe || "1h")}</td>
+      <td class="dim">${s.pairs.slice(0, 6).map(pair).join(", ")}${s.pairs.length > 6 ? ` +${s.pairs.length - 6}` : ""}</td>
+      <td class="r num">${nf(s.risk * 100, 2)}%</td><td class="r num">${lv.trades ?? 0}</td><td class="r num ${cls(lv.pnl)}">${lv.pnl != null ? sgnUsd(lv.pnl) : "—"}</td></tr>`;
+  }).join("")}</tbody></table>` : `<div class="empty">Стратегии не развёрнуты.</div>`;
   const tr = S.trades?.closed || [];
   const tot = tr.reduce((a, t) => a + (+t.profit_abs || 0), 0), wins = tr.filter((t) => +t.profit_abs > 0).length;
-  $("#closedSub").textContent = tr.length ? `${tr.length} trades · ${Math.round(wins / tr.length * 100)}% winners · ${sgnUsd(tot)} demo P&L (before slippage haircut)` : "";
-  $("#closed").innerHTML = tr.length ? `<table><thead><tr><th>Closed</th><th>Pair</th><th>Strategy</th><th class="r">Entry → exit</th><th>Exit reason</th><th class="r">P&L</th><th class="r">Return</th></tr></thead><tbody>${tr.slice(0, 40).map((t) => {
-    const sl = sleeveOf(t.sleeve_id);
-    return `<tr><td class="num">${esc((t.close_date || "").slice(5, 16).replace("T", " "))}</td><td><b>${esc(pair(t.pair))}</b> ${pill(t.is_short ? "short" : "long", t.is_short ? "crit" : "good")}</td>
-      <td>${esc(famName(sl?.family))}<div class="dim mono">${esc(t.sleeve_id)}</div></td><td class="r num">${t.open_rate} → ${t.close_rate}</td><td>${esc(t.exit_reason)}</td>
+  const RS = {stop_loss: "стоп", stoploss_on_exchange: "стоп на бирже", managed_stop: "защитный стоп", take_profit: "тейк", exit_signal: "сигнал выхода", time_exit: "по времени", custom_exit: "фиксация прибыли", force_exit: "вручную"};
+  $("#closedSub").textContent = tr.length ? `${tr.length} сделок · ${Math.round(wins / tr.length * 100)}% прибыльных · ${sgnUsd(tot)} на демо` : "";
+  $("#closed").innerHTML = tr.length ? `<table><thead><tr><th>Закрыта</th><th>Монета</th><th>Стратегия</th><th class="r">Вход → выход</th><th>Причина</th><th class="r">P&L</th><th class="r">%</th></tr></thead><tbody>${tr.slice(0, 60).map((t) => {
+    const s = sleeveOf(t.sleeve_id);
+    return `<tr><td class="num">${esc((t.close_date || "").slice(5, 16).replace("T", " "))}</td><td><b>${esc(pair(t.pair))}</b> ${pill(t.is_short ? "шорт" : "лонг", t.is_short ? "crit" : "good")}</td>
+      <td>${esc(famName(s?.family))}<div class="dim mono">${esc(t.sleeve_id)}</div></td><td class="r num">${t.open_rate} → ${t.close_rate}</td><td>${esc(RS[t.exit_reason] || t.exit_reason)}</td>
       <td class="r num ${cls(t.profit_abs)}">${sgnUsd(+t.profit_abs)}</td><td class="r num ${cls(t.profit_ratio)}">${pct(+t.profit_ratio)}</td></tr>`;
-  }).join("")}</tbody></table>` : `<div class="empty">No closed trades yet.</div>`;
+  }).join("")}</tbody></table>` : `<div class="empty">Закрытых сделок пока нет.</div>`;
 }
 
-// ---------------------------------------------------------------------------- polling
+// ---------------------------------------------------------------------------- опрос данных
 function safe(fn) { try { fn(); } catch (e) { console.warn(fn.name, e); } }
-function renderAll() { [renderHeader, renderKpis, renderEquity, renderPositions, renderLab, renderResults, renderFamilies, renderLifecycle, renderGoals, renderReadiness, renderForward, renderScreen, renderLog, renderClosed].forEach(safe); }
+function renderAll() { [renderHeader, renderKpis, renderPipeline, renderEquity, renderPositions, renderForward, renderGoals, renderLog, renderCards, renderLab, renderTrades].forEach(safe); }
 async function fast() {
   try { const [ov, rs] = await Promise.all([api("/api/overview"), api("/api/research")]); Object.assign(S, {ov, rs}); renderAll(); }
-  catch (e) { chip("#chUpd", "crit", "data error: " + e.message); }
+  catch (e) { chip("#chUpd", "crit", "ошибка данных: " + e.message); }
 }
 let lastSlow = 0;
 async function slow() {
-  if (Date.now() - lastSlow < 55000) return; lastSlow = Date.now();
+  if (Date.now() - lastSlow < 50000) return; lastSlow = Date.now();
   const get = (p) => api(p).catch(() => null);
-  const [goals, ready, strats, trades, ln, fw, ev, scr] = await Promise.all([get("/api/goals"), get("/api/readiness"), get("/api/strategies"), get("/api/trades?limit=200"), get("/api/learnings"), get("/api/forward"), get("/api/events?limit=60"), get("/api/screen")]);
-  Object.assign(S, Object.fromEntries(Object.entries({goals, ready, strats, trades, ln, fw, ev, scr}).filter(([, v]) => v)));
+  const [goals, ready, strats, trades, ln, fw, ev, scr, cards] = await Promise.all([get("/api/goals"), get("/api/readiness"), get("/api/strategies"), get("/api/trades?limit=200"),
+    get("/api/learnings"), get("/api/forward"), get("/api/events?limit=60"), get("/api/screen"), get("/api/cards")]);
+  Object.assign(S, Object.fromEntries(Object.entries({goals, ready, strats, trades, ln, fw, ev, scr, cards}).filter(([, v]) => v)));
   renderAll();
 }
 async function tick() { await fast(); await slow(); window.__ready = true; }
+const startTab = (location.hash || "").slice(1);
+if (["overview", "strategies", "lab", "trades"].includes(startTab)) setTab(startTab);
 tick(); setInterval(tick, 10000);
 addEventListener("resize", () => safe(renderEquity));

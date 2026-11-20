@@ -129,4 +129,4 @@ def summary(screen: dict, top: int = 30) -> dict:
     return {k: screen.get(k) for k in ("created", "evaluated", "series", "seconds", "rules", "engine")} | {
         "n_survivors": len(sv),
         "top": [{"id": survivor_id(x), **{k: x.get(k) for k in ("name", "family", "pair", "timeframe", "params", "exits",
-                                                                 "A", "B", "r2", "last90")}} for x in sv[:top]]}
+                                                                 "A", "B", "r2", "last90", "curve", "strategy")}} for x in sv[:top]]}

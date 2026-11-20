@@ -246,3 +246,17 @@ def robust_loss(df: pd.DataFrame, starting_balance: float, start: datetime, end:
     if s["profit_factor"] < 1.0:
         penalty += 1.0 - s["profit_factor"]
     return -s["sharpe"] * confidence + penalty
+
+
+def equity_curve(trades, starting_balance: float, start=None, end=None, points: int = 120) -> list[list]:
+    """Compact equity curve (date, equity / start) for charts – at most `points` samples."""
+    df = trades if isinstance(trades, pd.DataFrame) else trades_frame(trades)
+    if df.empty:
+        return []
+    r = daily_returns(df, starting_balance, start, end)
+    eq = (1.0 + r).cumprod()
+    step = max(1, int(np.ceil(len(eq) / points)))
+    idx = list(range(0, len(eq), step))
+    if idx[-1] != len(eq) - 1:
+        idx.append(len(eq) - 1)
+    return [[str(eq.index[i])[:10], round(float(eq.iloc[i]), 5)] for i in idx]

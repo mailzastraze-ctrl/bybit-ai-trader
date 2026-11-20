@@ -355,6 +355,13 @@ def forward_api() -> dict:
     return f
 
 
+@app.get("/api/cards", dependencies=[Depends(auth)])
+def cards_api() -> dict:
+    """Every strategy explained (Russian), with its unseen-data result and status."""
+    from aitrader.web import cards
+    return cards.build(reg())
+
+
 @app.get("/api/screen", dependencies=[Depends(auth)])
 def screen_api() -> dict:
     """Stage 1 of the lab: the owner's Strategy Lab engine screening thousands of combinations."""

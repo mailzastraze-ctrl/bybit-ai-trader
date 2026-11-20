@@ -206,6 +206,7 @@ class Pipeline:
             "pair_stats": pair_stats, "score": score(oos, dsr), "timeframe": tf,
             "epoch_sharpe_std": round(float(np.std(all_sharpes)), 4) if all_sharpes else None,
             "exit_reasons": (df["exit_reason"].value_counts().to_dict() if not df.empty else {}),
+            "curve": M.equity_curve(oos_trades, STARTING_BALANCE, oos_start, oos_end),
         }
         self._record_strategy(eid, spec, result)
         return result

@@ -164,3 +164,22 @@ def test_external_strategy_imported_frozen_and_tested_with_fixed_config(env, tmp
         {"id": "xext000001", "spec": a, "result": res, "finished": iso()}], "candidates": []})
     assert "owner-sol15m-zscore" in reg.kv_get("external_tested")
     assert not labmod.external_tests(reg)
+
+
+def test_strategy_cards_explain_every_strategy_in_russian(env):
+    from aitrader.families import FAMILIES
+    from aitrader.web import cards
+    _, reg = env
+    _exp(reg, "xcard00001", 0.5)
+    reg.kv_set("screen", {"ts": iso(), "top": [{"id": "scr-1", "strategy": "zscore", "family": "zscore_revert",
+                                                "pair": "SOL/USDT:USDT", "timeframe": "15m",
+                                                "params": {"len": 200, "entry": 3.5, "exit": 1.5},
+                                                "exits": {"sl": 3, "tp": 0, "tr": 3}, "B": {"trades": 30, "pf": 1.6, "net": 12.0},
+                                                "r2": 0.8, "last90": 4.0, "curve": [[1700000000000, 1.0], [1700100000000, 1.1]]}]})
+    out = cards.build(reg)
+    kinds = {c["kind"] for c in out["cards"]}
+    assert {"rejected", "screen"} <= kinds
+    scr = next(c for c in out["cards"] if c["kind"] == "screen")
+    assert "200 свечей" in scr["idea"] and "3.5σ" in scr["idea"] and scr["exits"].startswith("стоп 3×ATR")
+    for fam in FAMILIES:  # every family has a plain-language explanation
+        assert cards.idea(fam, FAMILIES[fam].defaults())

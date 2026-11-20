@@ -86,7 +86,10 @@ function screenSeries(job, opt) {
       const st = steadiness(r.bt.eq, bpd), mB = r.m;
       const pass = mB.trades >= opt.minTradesB && mB.pf >= 1.15 && mB.netPct > 0 && st.r2 >= 0.5 && st.last90 >= 0 && mB.maxDD < 30;
       if (!pass) continue;
-      out.push({ strategy: strat.id, family: FAMILY[strat.id], name: strat.name, pair: job.pair, timeframe: job.tf,
+      const eq = r.bt.eq, step = Math.max(1, Math.ceil(eq.length / 100)), curve = [];
+      for (let i = 0; i < eq.length; i += step) curve.push([d.t[split + i], +(eq[i] / 10000).toFixed(4)]);
+      curve.push([d.t[n - 1], +(eq[eq.length - 1] / 10000).toFixed(4)]);
+      out.push({ strategy: strat.id, family: FAMILY[strat.id], name: strat.name, pair: job.pair, timeframe: job.tf, curve,
         params: c.p, exits: c.x, A: pick(c.m), B: pick(mB), r2: +st.r2.toFixed(3), last90: +(st.last90 * 100).toFixed(2),
         holdout_from: d.t[split], holdout_to: d.t[n - 1] });
     }
