@@ -10,6 +10,7 @@ from pathlib import Path
 from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
+from fastapi.staticfiles import StaticFiles
 
 from aitrader.ftclient import FtClient
 from aitrader.manifest import Manifest
@@ -22,6 +23,7 @@ S = get_settings()
 STATIC = Path(__file__).parent / "static"
 app = FastAPI(title="aitrader terminal", docs_url=None, redoc_url=None, openapi_url=None)
 security = HTTPBasic()
+app.mount("/static", StaticFiles(directory=STATIC), name="static")
 _reg: Registry | None = None
 
 
