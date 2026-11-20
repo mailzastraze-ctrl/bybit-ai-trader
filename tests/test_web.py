@@ -26,7 +26,8 @@ def test_auth_and_endpoints(client):
     assert client.get("/api/overview").status_code == 401
     assert client.get("/api/overview", auth=("admin", "wrong")).status_code == 401
     a = ("admin", "pw")
-    assert "AI TRADER" in client.get("/", auth=a).text
+    assert "AI TRADER HQ" in client.get("/", auth=a).text
+    assert "AI TRADER" in client.get("/terminal", auth=a).text
     ov = client.get("/api/overview", auth=a).json()
     assert ov["bot_up"] is False and ov["open_trades"] == []
     for path in ("/api/trades", "/api/strategies", "/api/research", "/api/market",
