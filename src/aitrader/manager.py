@@ -6,7 +6,7 @@ from __future__ import annotations
 import time
 from datetime import timedelta
 
-from aitrader import memguard
+from aitrader import memguard, readiness
 from aitrader.ftclient import FtClient
 from aitrader.learner import Learner
 from aitrader.lifecycle import Lifecycle
@@ -77,7 +77,7 @@ def main() -> None:
     # make sure the bot has a manifest + pairlist before it starts trading
     life.write(life.build_manifest([], set(scanner.excluded_pairs()), False), [])
     reg.event("manager", "manager started")
-    last_learn = 0.0
+    last_learn = last_ready = 0.0
     while True:
         t0 = time.time()
         detail: dict = {}
@@ -103,6 +103,9 @@ def main() -> None:
             man = life.build_manifest(open_trades, set(scanner.excluded_pairs()), paused)
             life.write(man, open_trades)
             detail.update(sleeves=len(man.sleeves), paused=paused)
+            if time.time() - last_ready > 600:
+                readiness.update(reg, equity if equity > 0 else None)
+                last_ready = time.time()
             housekeeping(reg)
             memguard.release()
             h = memguard.headroom_mb()

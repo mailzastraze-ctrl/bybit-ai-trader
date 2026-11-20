@@ -163,10 +163,12 @@ class Lifecycle:
         """Live mean trade return significantly (2 SE) below the OOS expectation and negative."""
         import numpy as np
         oos_exp = (s.get("oos") or {}).get("expectancy")
-        rows = self.reg.q("SELECT profit_ratio FROM live_trades WHERE sleeve_id=?", (s["id"],))
+        rows = self.reg.q("SELECT profit_ratio, profit_abs, stake_amount, leverage FROM live_trades WHERE sleeve_id=?",
+                          (s["id"],))
         if oos_exp is None or oos_exp <= 0 or len(rows) < min_trades:
             return False
-        r = np.array([float(x["profit_ratio"] or 0) for x in rows])
+        from aitrader.realism import real_ratio
+        r = np.array([real_ratio(x) for x in rows])
         se = r.std(ddof=1) / np.sqrt(len(r)) if len(r) > 1 else 0
         return bool(r.mean() < 0 and r.mean() < oos_exp - 2 * se)
 

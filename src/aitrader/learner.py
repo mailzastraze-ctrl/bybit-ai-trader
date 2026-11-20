@@ -21,6 +21,7 @@ from datetime import timedelta
 
 import numpy as np
 
+from aitrader.realism import real_pnl, real_ratio
 from aitrader.registry import Registry
 from aitrader.research.metrics import max_drawdown_from_pnl, profit_factor
 from aitrader.settings import Settings
@@ -34,14 +35,17 @@ def _lid(*parts: str) -> str:
 
 
 def live_metrics(trades: list[dict], equity: float) -> dict:
+    """Live sleeve metrics on *realistic* PnL: demo fills haircut for slippage (realism.py),
+    so promotion/retirement decisions are not flattered by the demo's perfect fills."""
     if not trades:
         return {"trades": 0}
-    pnl = np.array([float(t.get("profit_abs") or 0) for t in trades])
-    ratios = np.array([float(t.get("profit_ratio") or 0) for t in trades])
+    pnl = np.array([real_pnl(t) for t in trades])
+    ratios = np.array([real_ratio(t) for t in trades])
     pf = profit_factor(pnl)
     return {
         "trades": len(trades),
         "pnl": round(float(pnl.sum()), 2),
+        "pnl_demo": round(float(sum(float(t.get("profit_abs") or 0) for t in trades)), 2),
         "profit_factor": round(pf, 3) if np.isfinite(pf) else 99.0,
         "win_rate": round(float((pnl > 0).mean()), 3),
         "expectancy": round(float(ratios.mean()), 5),

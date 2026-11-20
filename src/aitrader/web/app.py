@@ -273,6 +273,12 @@ def candles(pair: str, limit: int = 96) -> dict:
     return {"pair": pair, "candles": rows[-limit:]}
 
 
+@app.get("/api/readiness", dependencies=[Depends(auth)])
+def readiness_api() -> dict:
+    from aitrader import readiness
+    return readiness.evaluate(reg())
+
+
 @app.get("/api/goals", dependencies=[Depends(auth)])
 def goals() -> dict:
     return company_goals(reg())
@@ -288,8 +294,9 @@ def company_goals(r: Registry) -> dict:
     now_eq = float(eq[-1]["equity"]) if eq else 0.0
     peak = max((float(x["equity"]) for x in eq), default=0.0)
     dd = (peak - now_eq) / peak if peak else 0.0
-    trades = r.q("SELECT profit_abs FROM live_trades")
-    pnl = [float(t["profit_abs"] or 0) for t in trades]
+    from aitrader.realism import real_pnl
+    trades = r.q("SELECT profit_abs, stake_amount, leverage FROM live_trades WHERE sleeve_id NOT LIKE 'exec-test%'")
+    pnl = [real_pnl(t) for t in trades]
     gains, losses = sum(x for x in pnl if x > 0), -sum(x for x in pnl if x < 0)
     pf = gains / losses if losses else (99.0 if gains else 0.0)
     week = iso(utcnow() - timedelta(days=7))
@@ -300,14 +307,18 @@ def company_goals(r: Registry) -> dict:
     ret = (now_eq / start - 1) if start else 0.0
     lab = r.kv_get("lab") or {}
     week_target = 60 if lab.get("public") else 20
+    rd = r.kv_get("readiness") or {}
     items = [
+        {"id": "readiness", "title": "Real-money readiness (all checks, realistic fills)",
+         "value": rd.get("passed", 0), "target": rd.get("total", 8), "unit": "",
+         "progress": (rd.get("passed", 0) / rd.get("total", 8)) if rd else 0.0},
         {"id": "validated", "title": "Find a strategy that passes every strict gate",
          "value": ever_validated, "target": 1, "unit": "", "progress": min(1.0, ever_validated / 1)},
         {"id": "evidence", "title": "Collect forward-test evidence on Bybit Demo",
          "value": len(pnl), "target": 100, "unit": "trades", "progress": min(1.0, len(pnl) / 100)},
         {"id": "research", "title": "Research throughput (walk-forward experiments / 7 days)",
          "value": n_week, "target": week_target, "unit": "", "progress": min(1.0, n_week / week_target)},
-        {"id": "pf", "title": "Live profit factor ≥ 1.3",
+        {"id": "pf", "title": "Live profit factor ≥ 1.3 (after slippage haircut)",
          "value": round(pf, 2), "target": 1.3, "unit": "", "progress": min(1.0, pf / 1.3) if pnl else 0.0},
         {"id": "production", "title": "Strategies promoted to production",
          "value": n_prod, "target": 3, "unit": "", "progress": min(1.0, n_prod / 3)},
@@ -316,7 +327,7 @@ def company_goals(r: Registry) -> dict:
          "progress": max(0.0, min(1.0, ret / 0.10)), "warning": dd > 0.10},
     ]
     return {"mission": "Find, prove and scale real trading edges on Bybit Demo — no overfitting, no fake results.",
-            "goals": items, "equity": now_eq, "drawdown": round(dd, 4), "lab": lab}
+            "goals": items, "equity": now_eq, "drawdown": round(dd, 4), "lab": lab, "readiness": rd}
 
 
 @app.exception_handler(Exception)

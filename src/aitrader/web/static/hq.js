@@ -853,7 +853,7 @@ function standup() {
   const act = (ln.learnings || []).filter(l => l.active);
   const lr = researchers.find(r => !r.busy()) || researchers[0];
   const lines = [
-    [ceo, `Stand-up. Evidence: ${g("evidence").value ?? 0}/100 demo trades. Research: ${g("research").value ?? 0}/${g("research").target ?? "–"} experiments this week. Validated strategies: ${g("validated").value ?? 0}.`],
+    [ceo, `Stand-up. Real-money readiness: ${g("readiness").value ?? 0}/${g("readiness").target ?? 8} checks. Evidence: ${g("evidence").value ?? 0}/100 demo trades. Research: ${g("research").value ?? 0}/${g("research").target ?? "–"} experiments this week. Validated strategies: ${g("validated").value ?? 0}.`],
     [lr, ex ? `Latest result: ${ex.variant || ex.family} — OOS PF ${num(ex.oos.profit_factor)}, Sharpe ${num(ex.oos.sharpe)}, ${ex.summary?.verdict || ex.status}. ${running ? `GitHub run live: ${running.progress?.stage || "working"}.` : "Next GitHub run is queued."}` : "No finished experiments yet — the GitHub lab is warming up."],
     [risk, gf ? `Top failing gate: ${gf[0]} (${gf[1]}×). Deflated Sharpe counts ${ex?.summary?.n_trials ?? "all"} trials — no shortcuts.` : "No candidates to judge yet. Gates stay strict."],
     [analyst, act.length ? `${act.length} active learnings. Newest: ${act[0].insight.slice(0, 110)}` : "No lessons yet — I need closed trades and finished experiments."],
@@ -1031,8 +1031,8 @@ function drawMission(t) {
   const grd = g.createLinearGradient(0, 0, c.width, 0); grd.addColorStop(0, "#3987e522"); grd.addColorStop(1, "#d5518122"); g.fillStyle = grd; g.fillRect(0, 0, c.width, 56);
   txt(g, "MISSION", 24, 36, "#d55181", "bold 26px sans-serif");
   g.font = "18px sans-serif"; g.fillStyle = C.text; wrap(g, Gs?.mission || "loading…", 150, 34, 850, 20, 1);
-  (Gs?.goals || []).forEach((x, j) => {
-    const col = j % 2, row = Math.floor(j / 2), X = 24 + col * 500, Y = 92 + row * 88;
+  (Gs?.goals || []).slice(0, 8).forEach((x, j) => {
+    const col = j % 2, row = Math.floor(j / 2), X = 24 + col * 500, Y = 84 + row * 68;
     txt(g, x.title, X, Y, C.text, "17px sans-serif");
     bar(g, X, Y + 14, 340, 16, x.progress, x.progress >= 1 ? C.green : x.warning ? C.red : "#3987e5", "#ffffff12");
     const shimmer = (t * 120 + j * 70) % 420 - 40; g.fillStyle = "#ffffff18"; g.fillRect(X + clamp(shimmer, 0, 340 * clamp(x.progress, 0, 1)), Y + 14, 14, 16);
@@ -1167,6 +1167,9 @@ function openPanel(key) {
     h += `<a class="btn" target="_blank" rel="noopener" href="https://github.com/mailzastraze-ctrl/bybit-ai-trader/actions/workflows/research.yml">Open the runs on GitHub ↗</a>`;
   } else if (key === "mission") {
     const G = S.goals || {}; h += `<p>${esc(G.mission || "")}</p>` + (G.goals || []).map(x => `<div class="kv"><span>${esc(x.title)}</span><span>${esc(x.value)} / ${esc(x.target)}</span></div>`).join("");
+    const rd = G.readiness || {};
+    if (rd.checks) h += `<h2 style="margin-top:14px">Real-money readiness ${rd.passed}/${rd.total}</h2><div class="sub">${esc(rd.note || "")}</div><table><tr><th>Check</th><th>Now</th><th>Need</th><th></th></tr>${rd.checks.map(c => `<tr><td>${esc(c.title)}</td><td>${esc(c.value)}</td><td>${esc(c.need)}</td><td>${c.pass ? "✓" : "✗"}</td></tr>`).join("")}</table>`
+      + `<div class="kv"><span>evidence P&L demo → realistic</span><span>${num(rd.evidence?.pnl_demo)} → ${num(rd.evidence?.pnl_real)}</span><span>slippage per fill</span><span>${pct(rd.slippage_per_side, 2)}</span></div>`;
     h += `<p style="color:var(--muted)">Drawdown from peak: ${pct(G.drawdown)} · all numbers come from the live registry, nothing is simulated.</p>`;
   } else if (key === "ceo") {
     h += `<div class="kv"><span>kill-switch</span><span>${ov.kill_switch ? "ACTIVE" : "off"}</span><span>entries</span><span>${ov.entries_paused ? "paused" : "enabled"}</span><span>closed trades</span><span>${ov.closed_count}</span><span>closed P&L</span><span>${num(ov.closed_pnl)}</span></div>`;
