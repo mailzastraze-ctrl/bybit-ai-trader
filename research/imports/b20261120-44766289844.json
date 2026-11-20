@@ -1,0 +1,1967 @@
+{
+  "batch_id": "b20261120-44766289844",
+  "candidates": [],
+  "created": "2026-11-20T18:12:30Z",
+  "exchange": "bybit",
+  "experiments_full": [
+    {
+      "finished": "2026-11-20T16:30:39Z",
+      "id": "xbf85f7637b",
+      "result": {
+        "dsr": 0.0412,
+        "epoch_sharpe_std": 8.0033,
+        "exit_reasons": {
+          "exit_signal": 79,
+          "force_exit": 14,
+          "managed_stop": 50,
+          "stop_loss": 170,
+          "take_profit": 34,
+          "time_exit": 177,
+          "trailing_stop_loss": 40
+        },
+        "fold_pos": 0.5,
+        "folds": [
+          {
+            "fold": 0,
+            "is_profit": -0.09727576570199999,
+            "is_trades": 407,
+            "oos": {
+              "annual_return": 0.75919,
+              "avg_profit_abs": 17.3773,
+              "daily_sharpe": 0.077104,
+              "days": 90.0,
+              "expectancy": 0.016209,
+              "kurtosis": 39.1472,
+              "long_trades": 26,
+              "max_drawdown": 0.0851,
+              "n_days": 91,
+              "profit_factor": 1.4161,
+              "sharpe": 1.4731,
+              "short_trades": 60,
+              "skew": 4.8378,
+              "sortino": 3.6364,
+              "total_return": 0.14944,
+              "trades": 86,
+              "win_rate": 0.3953
+            },
+            "test": "20251125-20260223",
+            "train": "20241125-20251125"
+          },
+          {
+            "fold": 1,
+            "is_profit": -0.10529312571800001,
+            "is_trades": 655,
+            "oos": {
+              "annual_return": -0.87924,
+              "avg_profit_abs": -25.2311,
+              "daily_sharpe": -0.297236,
+              "days": 90.0,
+              "expectancy": -0.042459,
+              "kurtosis": 6.3496,
+              "long_trades": 105,
+              "max_drawdown": 0.4123,
+              "n_days": 91,
+              "profit_factor": 0.4505,
+              "sharpe": -5.6787,
+              "short_trades": 56,
+              "skew": -1.0451,
+              "sortino": -6.1387,
+              "total_return": -0.40622,
+              "trades": 161,
+              "win_rate": 0.2857
+            },
+            "test": "20260223-20260524",
+            "train": "20250223-20260223"
+          },
+          {
+            "fold": 2,
+            "is_profit": -0.13700406982599997,
+            "is_trades": 645,
+            "oos": {
+              "annual_return": 0.20736,
+              "avg_profit_abs": 2.954,
+              "daily_sharpe": 0.034705,
+              "days": 90.0,
+              "expectancy": 0.009835,
+              "kurtosis": 32.3459,
+              "long_trades": 74,
+              "max_drawdown": 0.2661,
+              "n_days": 91,
+              "profit_factor": 1.1151,
+              "sharpe": 0.663,
+              "short_trades": 87,
+              "skew": 4.3343,
+              "sortino": 1.5281,
+              "total_return": 0.04756,
+              "trades": 161,
+              "win_rate": 0.4658
+            },
+            "test": "20260524-20260822",
+            "train": "20250524-20260524"
+          },
+          {
+            "fold": 3,
+            "is_profit": -0.043722236468000025,
+            "is_trades": 556,
+            "oos": {
+              "annual_return": -0.57252,
+              "avg_profit_abs": -12.1188,
+              "daily_sharpe": -0.087113,
+              "days": 90.0,
+              "expectancy": -0.014416,
+              "kurtosis": 12.9913,
+              "long_trades": 70,
+              "max_drawdown": 0.308,
+              "n_days": 91,
+              "profit_factor": 0.7295,
+              "sharpe": -1.6643,
+              "short_trades": 86,
+              "skew": 1.6905,
+              "sortino": -2.5635,
+              "total_return": -0.18905,
+              "trades": 156,
+              "win_rate": 0.359
+            },
+            "test": "20260822-20261120",
+            "train": "20250822-20260822"
+          }
+        ],
+        "gates": {
+          "deflated_sharpe": {
+            "pass": false,
+            "threshold": 0.8,
+            "value": 0.0412
+          },
+          "fold_consistency": {
+            "pass": false,
+            "threshold": 0.75,
+            "value": 0.5
+          },
+          "max_drawdown": {
+            "pass": false,
+            "threshold": 0.2,
+            "value": 0.6068
+          },
+          "monte_carlo": {
+            "pass": false,
+            "threshold": 0.8,
+            "value": 0.033
+          },
+          "profit_factor": {
+            "pass": false,
+            "threshold": 1.15,
+            "value": 0.8198
+          },
+          "robustness": {
+            "pass": false,
+            "threshold": 0.6,
+            "value": 0.0
+          },
+          "sharpe": {
+            "pass": false,
+            "threshold": 0.75,
+            "value": -0.8442
+          },
+          "stress_pf": {
+            "pass": false,
+            "threshold": 1.0,
+            "value": 0.781
+          },
+          "trades": {
+            "pass": true,
+            "threshold": 25,
+            "value": 564.0
+          },
+          "wfe": {
+            "pass": false,
+            "threshold": 0.3,
+            "value": 0.0
+          }
+        },
+        "mc": {
+          "dd_p95": 0.78032,
+          "prob_profit": 0.033,
+          "ret_p5": -0.74668,
+          "ret_p50": -0.40332
+        },
+        "n_trials": 4,
+        "oos": {
+          "annual_return": -0.4025,
+          "avg_profit_abs": -7.0615,
+          "daily_sharpe": -0.044189,
+          "days": 360.0,
+          "expectancy": -0.010829,
+          "kurtosis": 30.3955,
+          "long_trades": 275,
+          "max_drawdown": 0.6068,
+          "n_days": 361,
+          "profit_factor": 0.8198,
+          "sharpe": -0.8442,
+          "short_trades": 289,
+          "skew": 3.6437,
+          "sortino": -1.5184,
+          "total_return": -0.39827,
+          "trades": 564,
+          "win_rate": 0.3741
+        },
+        "pair_stats": {
+          "AAVE/USDT:USDT": {
+            "pnl": -75.19,
+            "trades": 54
+          },
+          "DOGE/USDT:USDT": {
+            "pnl": -1811.99,
+            "trades": 65
+          },
+          "ENA/USDT:USDT": {
+            "pnl": 1019.77,
+            "trades": 59
+          },
+          "ETH/USDT:USDT": {
+            "pnl": -516.57,
+            "trades": 65
+          },
+          "RARE/USDT:USDT": {
+            "pnl": -1793.31,
+            "trades": 57
+          },
+          "STRK/USDT:USDT": {
+            "pnl": -23.77,
+            "trades": 57
+          },
+          "SUI/USDT:USDT": {
+            "pnl": 209.01,
+            "trades": 54
+          },
+          "WLD/USDT:USDT": {
+            "pnl": -176.93,
+            "trades": 54
+          },
+          "XLM/USDT:USDT": {
+            "pnl": -628.84,
+            "trades": 48
+          },
+          "XRP/USDT:USDT": {
+            "pnl": -184.89,
+            "trades": 51
+          }
+        },
+        "pairs": [
+          "ENA/USDT:USDT",
+          "SUI/USDT:USDT"
+        ],
+        "params": {
+          "be_rr": 1.17,
+          "conv_w": 0.95,
+          "dc_len": 53,
+          "exit_len": 29,
+          "htf_len": 287,
+          "htf_trend": 1,
+          "lock_frac": 0.72,
+          "lock_rr": 2.78,
+          "max_hold": 68,
+          "sl_atr": 3.9,
+          "tp_rr": 4.2,
+          "trail_atr": 2.6,
+          "trail_rr": 2.8,
+          "vol_mult": 1.1,
+          "vol_regime": 1
+        },
+        "perturb_pf_median": 0.794,
+        "robust_frac": 0.0,
+        "score": 0.0,
+        "stress": {
+          "annual_return": -0.49646,
+          "avg_profit_abs": -8.7181,
+          "daily_sharpe": -0.056134,
+          "days": 360.0,
+          "expectancy": -0.013526,
+          "kurtosis": 30.4279,
+          "long_trades": 275,
+          "max_drawdown": 0.6737,
+          "n_days": 361,
+          "profit_factor": 0.781,
+          "sharpe": -1.0724,
+          "short_trades": 289,
+          "skew": 3.5998,
+          "sortino": -1.8909,
+          "total_return": -0.4917,
+          "trades": 564,
+          "win_rate": 0.3617
+        },
+        "variant": "donchian_breakout +HTF-trend(287) +high-vol",
+        "verdict": "rejected",
+        "wfe": 0.0
+      },
+      "spec": {
+        "epochs": 80,
+        "family": "donchian_breakout",
+        "pairs": [
+          "AAVE/USDT:USDT",
+          "DOGE/USDT:USDT",
+          "ENA/USDT:USDT",
+          "ETH/USDT:USDT",
+          "RARE/USDT:USDT",
+          "STRK/USDT:USDT",
+          "SUI/USDT:USDT",
+          "WLD/USDT:USDT",
+          "XLM/USDT:USDT",
+          "XRP/USDT:USDT"
+        ],
+        "seed": 9910,
+        "sides": [
+          "long",
+          "short"
+        ],
+        "space_overrides": {},
+        "timeframe": "1h",
+        "used_learnings": []
+      },
+      "started": "2026-11-20T15:53:34Z"
+    },
+    {
+      "finished": "2026-11-20T17:01:39Z",
+      "id": "x7ed6b71be4",
+      "result": {
+        "dsr": 0.0049,
+        "epoch_sharpe_std": 7.3095,
+        "exit_reasons": {
+          "exit_signal": 56,
+          "force_exit": 13,
+          "managed_stop": 34,
+          "stop_loss": 159,
+          "take_profit": 13,
+          "time_exit": 138,
+          "trailing_stop_loss": 35
+        },
+        "fold_pos": 0.25,
+        "folds": [
+          {
+            "fold": 0,
+            "is_profit": 0.3375121892469999,
+            "is_trades": 417,
+            "oos": {
+              "annual_return": -0.64114,
+              "avg_profit_abs": -15.8367,
+              "daily_sharpe": -0.118662,
+              "days": 90.0,
+              "expectancy": -0.014778,
+              "kurtosis": 7.8063,
+              "long_trades": 36,
+              "max_drawdown": 0.3004,
+              "n_days": 91,
+              "profit_factor": 0.6561,
+              "sharpe": -2.267,
+              "short_trades": 105,
+              "skew": -0.2472,
+              "sortino": -2.912,
+              "total_return": -0.2233,
+              "trades": 141,
+              "win_rate": 0.4043
+            },
+            "test": "20251125-20260223",
+            "train": "20241125-20251125"
+          },
+          {
+            "fold": 1,
+            "is_profit": -0.05716686775599992,
+            "is_trades": 349,
+            "oos": {
+              "annual_return": -0.5421,
+              "avg_profit_abs": -22.1756,
+              "daily_sharpe": -0.147621,
+              "days": 90.0,
+              "expectancy": -0.022203,
+              "kurtosis": 16.0091,
+              "long_trades": 26,
+              "max_drawdown": 0.1841,
+              "n_days": 91,
+              "profit_factor": 0.5747,
+              "sharpe": -2.8203,
+              "short_trades": 53,
+              "skew": -2.3598,
+              "sortino": -3.2108,
+              "total_return": -0.17519,
+              "trades": 79,
+              "win_rate": 0.2911
+            },
+            "test": "20260223-20260524",
+            "train": "20250223-20260223"
+          },
+          {
+            "fold": 2,
+            "is_profit": -0.005289916926999968,
+            "is_trades": 385,
+            "oos": {
+              "annual_return": 0.17151,
+              "avg_profit_abs": 4.1034,
+              "daily_sharpe": 0.034832,
+              "days": 90.0,
+              "expectancy": 0.013869,
+              "kurtosis": 17.4297,
+              "long_trades": 38,
+              "max_drawdown": 0.2351,
+              "n_days": 91,
+              "profit_factor": 1.1084,
+              "sharpe": 0.6655,
+              "short_trades": 59,
+              "skew": 3.3166,
+              "sortino": 1.6048,
+              "total_return": 0.0398,
+              "trades": 97,
+              "win_rate": 0.3608
+            },
+            "test": "20260524-20260822",
+            "train": "20250524-20260524"
+          },
+          {
+            "fold": 3,
+            "is_profit": -0.12503176066099994,
+            "is_trades": 443,
+            "oos": {
+              "annual_return": -0.56284,
+              "avg_profit_abs": -14.0886,
+              "daily_sharpe": -0.157559,
+              "days": 90.0,
+              "expectancy": -0.024453,
+              "kurtosis": 7.6574,
+              "long_trades": 52,
+              "max_drawdown": 0.2372,
+              "n_days": 91,
+              "profit_factor": 0.6329,
+              "sharpe": -3.0102,
+              "short_trades": 79,
+              "skew": 0.9424,
+              "sortino": -4.1399,
+              "total_return": -0.18456,
+              "trades": 131,
+              "win_rate": 0.3969
+            },
+            "test": "20260822-20261120",
+            "train": "20250822-20260822"
+          }
+        ],
+        "gates": {
+          "deflated_sharpe": {
+            "pass": false,
+            "threshold": 0.8,
+            "value": 0.0049
+          },
+          "fold_consistency": {
+            "pass": false,
+            "threshold": 0.75,
+            "value": 0.25
+          },
+          "max_drawdown": {
+            "pass": false,
+            "threshold": 0.2,
+            "value": 0.5979
+          },
+          "monte_carlo": {
+            "pass": false,
+            "threshold": 0.8,
+            "value": 0.003
+          },
+          "profit_factor": {
+            "pass": false,
+            "threshold": 1.15,
+            "value": 0.7187
+          },
+          "robustness": {
+            "pass": false,
+            "threshold": 0.6,
+            "value": 0.0
+          },
+          "sharpe": {
+            "pass": false,
+            "threshold": 0.75,
+            "value": -1.7086
+          },
+          "stress_pf": {
+            "pass": false,
+            "threshold": 1.0,
+            "value": 0.6818
+          },
+          "trades": {
+            "pass": true,
+            "threshold": 25,
+            "value": 448.0
+          },
+          "wfe": {
+            "pass": false,
+            "threshold": 0.3,
+            "value": -14.6161
+          }
+        },
+        "mc": {
+          "dd_p95": 0.88928,
+          "prob_profit": 0.003,
+          "ret_p5": -0.86942,
+          "ret_p50": -0.55219
+        },
+        "n_trials": 4,
+        "oos": {
+          "annual_return": -0.54819,
+          "avg_profit_abs": -12.1259,
+          "daily_sharpe": -0.08943,
+          "days": 360.0,
+          "expectancy": -0.012714,
+          "kurtosis": 11.5153,
+          "long_trades": 152,
+          "max_drawdown": 0.5979,
+          "n_days": 361,
+          "profit_factor": 0.7187,
+          "sharpe": -1.7086,
+          "short_trades": 296,
+          "skew": 1.1928,
+          "sortino": -2.5105,
+          "total_return": -0.54324,
+          "trades": 448,
+          "win_rate": 0.3728
+        },
+        "pair_stats": {
+          "AAVE/USDT:USDT": {
+            "pnl": -881.64,
+            "trades": 41
+          },
+          "ENA/USDT:USDT": {
+            "pnl": -600.81,
+            "trades": 48
+          },
+          "LINK/USDT:USDT": {
+            "pnl": -1234.12,
+            "trades": 47
+          },
+          "RARE/USDT:USDT": {
+            "pnl": -811.39,
+            "trades": 35
+          },
+          "STRK/USDT:USDT": {
+            "pnl": 137.17,
+            "trades": 50
+          },
+          "SUI/USDT:USDT": {
+            "pnl": -310.17,
+            "trades": 43
+          },
+          "WLD/USDT:USDT": {
+            "pnl": -761.56,
+            "trades": 44
+          },
+          "XLM/USDT:USDT": {
+            "pnl": -693.47,
+            "trades": 46
+          },
+          "XRP/USDT:USDT": {
+            "pnl": -527.29,
+            "trades": 47
+          },
+          "ZEC/USDT:USDT": {
+            "pnl": 250.86,
+            "trades": 47
+          }
+        },
+        "pairs": [
+          "ZEC/USDT:USDT",
+          "STRK/USDT:USDT"
+        ],
+        "params": {
+          "be_rr": 1.36,
+          "conv_w": 0.65,
+          "dc_len": 87,
+          "exit_len": 46,
+          "htf_len": 291,
+          "htf_trend": 1,
+          "lock_frac": 0.38,
+          "lock_rr": 1.4,
+          "max_hold": 37,
+          "sl_atr": 3.7,
+          "tp_rr": 4.0,
+          "trail_atr": 1.7,
+          "trail_rr": 2.7,
+          "vol_mult": 2.3,
+          "vol_regime": 1
+        },
+        "perturb_pf_median": 0.66,
+        "robust_frac": 0.0,
+        "score": 0.0,
+        "stress": {
+          "annual_return": -0.63063,
+          "avg_profit_abs": -13.9634,
+          "daily_sharpe": -0.103162,
+          "days": 360.0,
+          "expectancy": -0.015428,
+          "kurtosis": 11.835,
+          "long_trades": 152,
+          "max_drawdown": 0.6744,
+          "n_days": 361,
+          "profit_factor": 0.6818,
+          "sharpe": -1.9709,
+          "short_trades": 296,
+          "skew": 1.195,
+          "sortino": -2.8515,
+          "total_return": -0.62556,
+          "trades": 448,
+          "win_rate": 0.3549
+        },
+        "variant": "donchian_breakout +HTF-trend(291) +high-vol",
+        "verdict": "rejected",
+        "wfe": -14.6161
+      },
+      "spec": {
+        "epochs": 80,
+        "family": "donchian_breakout",
+        "pairs": [
+          "AAVE/USDT:USDT",
+          "ENA/USDT:USDT",
+          "LINK/USDT:USDT",
+          "RARE/USDT:USDT",
+          "STRK/USDT:USDT",
+          "SUI/USDT:USDT",
+          "WLD/USDT:USDT",
+          "XLM/USDT:USDT",
+          "XRP/USDT:USDT",
+          "ZEC/USDT:USDT"
+        ],
+        "seed": 8815,
+        "sides": [
+          "long",
+          "short"
+        ],
+        "space_overrides": {},
+        "timeframe": "1h",
+        "used_learnings": []
+      },
+      "started": "2026-11-20T16:30:40Z"
+    },
+    {
+      "finished": "2026-11-20T17:37:42Z",
+      "id": "xabf9e56f78",
+      "result": {
+        "dsr": 0.0188,
+        "epoch_sharpe_std": 7.7894,
+        "exit_reasons": {
+          "exit_signal": 83,
+          "force_exit": 4,
+          "managed_stop": 34,
+          "stop_loss": 137,
+          "take_profit": 65,
+          "time_exit": 133,
+          "trailing_stop_loss": 65
+        },
+        "fold_pos": 0.0,
+        "folds": [
+          {
+            "fold": 0,
+            "is_profit": -0.04849154644499999,
+            "is_trades": 508,
+            "oos": {
+              "annual_return": -0.26027,
+              "avg_profit_abs": -6.8884,
+              "daily_sharpe": -0.092545,
+              "days": 90.0,
+              "expectancy": -0.013856,
+              "kurtosis": 9.1244,
+              "long_trades": 23,
+              "max_drawdown": 0.1475,
+              "n_days": 91,
+              "profit_factor": 0.7009,
+              "sharpe": -1.7681,
+              "short_trades": 81,
+              "skew": 0.314,
+              "sortino": -2.3733,
+              "total_return": -0.07164,
+              "trades": 104,
+              "win_rate": 0.2981
+            },
+            "test": "20251125-20260223",
+            "train": "20241125-20251125"
+          },
+          {
+            "fold": 1,
+            "is_profit": -0.17238134429,
+            "is_trades": 535,
+            "oos": {
+              "annual_return": -0.75677,
+              "avg_profit_abs": -23.3591,
+              "daily_sharpe": -0.280204,
+              "days": 90.0,
+              "expectancy": -0.036315,
+              "kurtosis": 13.2248,
+              "long_trades": 73,
+              "max_drawdown": 0.2943,
+              "n_days": 91,
+              "profit_factor": 0.3555,
+              "sharpe": -5.3533,
+              "short_trades": 53,
+              "skew": -1.269,
+              "sortino": -5.8894,
+              "total_return": -0.29432,
+              "trades": 126,
+              "win_rate": 0.1508
+            },
+            "test": "20260223-20260524",
+            "train": "20250223-20260223"
+          },
+          {
+            "fold": 2,
+            "is_profit": -0.31477645665000004,
+            "is_trades": 503,
+            "oos": {
+              "annual_return": -0.375,
+              "avg_profit_abs": -7.9874,
+              "daily_sharpe": -0.092904,
+              "days": 90.0,
+              "expectancy": -0.004599,
+              "kurtosis": 28.8927,
+              "long_trades": 71,
+              "max_drawdown": 0.1898,
+              "n_days": 91,
+              "profit_factor": 0.7335,
+              "sharpe": -1.7749,
+              "short_trades": 66,
+              "skew": 3.4535,
+              "sortino": -2.9619,
+              "total_return": -0.10943,
+              "trades": 137,
+              "win_rate": 0.4161
+            },
+            "test": "20260524-20260822",
+            "train": "20250524-20260524"
+          },
+          {
+            "fold": 3,
+            "is_profit": -0.15938833777699996,
+            "is_trades": 567,
+            "oos": {
+              "annual_return": -0.48452,
+              "avg_profit_abs": -9.7885,
+              "daily_sharpe": -0.073864,
+              "days": 90.0,
+              "expectancy": -0.025362,
+              "kurtosis": 21.1835,
+              "long_trades": 72,
+              "max_drawdown": 0.2456,
+              "n_days": 91,
+              "profit_factor": 0.7822,
+              "sharpe": -1.4112,
+              "short_trades": 82,
+              "skew": 2.9899,
+              "sortino": -2.4339,
+              "total_return": -0.15074,
+              "trades": 154,
+              "win_rate": 0.4091
+            },
+            "test": "20260822-20261120",
+            "train": "20250822-20260822"
+          }
+        ],
+        "gates": {
+          "deflated_sharpe": {
+            "pass": false,
+            "threshold": 0.8,
+            "value": 0.0188
+          },
+          "fold_consistency": {
+            "pass": false,
+            "threshold": 0.75,
+            "value": 0.0
+          },
+          "max_drawdown": {
+            "pass": false,
+            "threshold": 0.2,
+            "value": 0.7142
+          },
+          "monte_carlo": {
+            "pass": false,
+            "threshold": 0.8,
+            "value": 0.0
+          },
+          "profit_factor": {
+            "pass": false,
+            "threshold": 1.15,
+            "value": 0.6519
+          },
+          "robustness": {
+            "pass": false,
+            "threshold": 0.6,
+            "value": 0.0
+          },
+          "sharpe": {
+            "pass": false,
+            "threshold": 0.75,
+            "value": -1.5603
+          },
+          "stress_pf": {
+            "pass": false,
+            "threshold": 1.0,
+            "value": 0.6138
+          },
+          "trades": {
+            "pass": true,
+            "threshold": 25,
+            "value": 521.0
+          },
+          "wfe": {
+            "pass": false,
+            "threshold": 0.3,
+            "value": 0.0
+          }
+        },
+        "mc": {
+          "dd_p95": 0.90887,
+          "prob_profit": 0.0,
+          "ret_p5": -0.89508,
+          "ret_p50": -0.629
+        },
+        "n_trials": 4,
+        "oos": {
+          "annual_return": -0.63121,
+          "avg_profit_abs": -12.0179,
+          "daily_sharpe": -0.081671,
+          "days": 360.0,
+          "expectancy": -0.020255,
+          "kurtosis": 69.2464,
+          "long_trades": 239,
+          "max_drawdown": 0.7142,
+          "n_days": 361,
+          "profit_factor": 0.6519,
+          "sharpe": -1.5603,
+          "short_trades": 282,
+          "skew": 5.4389,
+          "sortino": -2.6956,
+          "total_return": -0.62613,
+          "trades": 521,
+          "win_rate": 0.3263
+        },
+        "pair_stats": {
+          "AAVE/USDT:USDT": {
+            "pnl": -325.56,
+            "trades": 50
+          },
+          "ENA/USDT:USDT": {
+            "pnl": -498.33,
+            "trades": 49
+          },
+          "ETH/USDT:USDT": {
+            "pnl": -1539.86,
+            "trades": 56
+          },
+          "LTC/USDT:USDT": {
+            "pnl": -723.06,
+            "trades": 55
+          },
+          "NEAR/USDT:USDT": {
+            "pnl": 12.1,
+            "trades": 44
+          },
+          "RARE/USDT:USDT": {
+            "pnl": -1270.13,
+            "trades": 47
+          },
+          "STRK/USDT:USDT": {
+            "pnl": 234.46,
+            "trades": 53
+          },
+          "SUI/USDT:USDT": {
+            "pnl": -737.35,
+            "trades": 53
+          },
+          "WLD/USDT:USDT": {
+            "pnl": -956.72,
+            "trades": 63
+          },
+          "XLM/USDT:USDT": {
+            "pnl": -456.9,
+            "trades": 51
+          }
+        },
+        "pairs": [
+          "STRK/USDT:USDT",
+          "NEAR/USDT:USDT"
+        ],
+        "params": {
+          "be_rr": 1.19,
+          "conv_w": 0.0,
+          "dc_len": 118,
+          "exit_len": 56,
+          "htf_len": 183,
+          "htf_trend": 0,
+          "lock_frac": 0.22,
+          "lock_rr": 2.47,
+          "max_hold": 88,
+          "sl_atr": 3.3,
+          "tp_rr": 1.0,
+          "trail_atr": 3.8,
+          "trail_rr": 2.7,
+          "vol_mult": 1.9,
+          "vol_regime": 1
+        },
+        "perturb_pf_median": 0.784,
+        "robust_frac": 0.0,
+        "score": 0.0,
+        "stress": {
+          "annual_return": -0.71641,
+          "avg_profit_abs": -13.656,
+          "daily_sharpe": -0.081271,
+          "days": 360.0,
+          "expectancy": -0.022951,
+          "kurtosis": 89.0834,
+          "long_trades": 239,
+          "max_drawdown": 0.7929,
+          "n_days": 361,
+          "profit_factor": 0.6138,
+          "sharpe": -1.5527,
+          "short_trades": 282,
+          "skew": 6.4751,
+          "sortino": -2.768,
+          "total_return": -0.71148,
+          "trades": 521,
+          "win_rate": 0.3167
+        },
+        "variant": "donchian_breakout +high-vol",
+        "verdict": "rejected",
+        "wfe": 0.0
+      },
+      "spec": {
+        "epochs": 80,
+        "family": "donchian_breakout",
+        "pairs": [
+          "AAVE/USDT:USDT",
+          "ENA/USDT:USDT",
+          "ETH/USDT:USDT",
+          "LTC/USDT:USDT",
+          "NEAR/USDT:USDT",
+          "RARE/USDT:USDT",
+          "STRK/USDT:USDT",
+          "SUI/USDT:USDT",
+          "WLD/USDT:USDT",
+          "XLM/USDT:USDT"
+        ],
+        "seed": 7709,
+        "sides": [
+          "long",
+          "short"
+        ],
+        "space_overrides": {},
+        "timeframe": "1h",
+        "used_learnings": []
+      },
+      "started": "2026-11-20T17:01:39Z"
+    },
+    {
+      "finished": "2026-11-20T18:12:30Z",
+      "id": "x2362aae585",
+      "result": {
+        "dsr": 0.0393,
+        "epoch_sharpe_std": 7.5248,
+        "exit_reasons": {
+          "exit_signal": 185,
+          "force_exit": 13,
+          "managed_stop": 71,
+          "stop_loss": 187,
+          "take_profit": 28,
+          "time_exit": 23,
+          "trailing_stop_loss": 24
+        },
+        "fold_pos": 0.25,
+        "folds": [
+          {
+            "fold": 0,
+            "is_profit": 0.310182494341,
+            "is_trades": 235,
+            "oos": {
+              "annual_return": -0.69292,
+              "avg_profit_abs": -28.7015,
+              "daily_sharpe": -0.184152,
+              "days": 90.0,
+              "expectancy": -0.023259,
+              "kurtosis": 10.4547,
+              "long_trades": 25,
+              "max_drawdown": 0.2858,
+              "n_days": 91,
+              "profit_factor": 0.4972,
+              "sharpe": -3.5182,
+              "short_trades": 63,
+              "skew": -1.054,
+              "sortino": -4.0849,
+              "total_return": -0.25257,
+              "trades": 88,
+              "win_rate": 0.2386
+            },
+            "test": "20251125-20260223",
+            "train": "20241125-20251125"
+          },
+          {
+            "fold": 1,
+            "is_profit": 0.10347323409,
+            "is_trades": 587,
+            "oos": {
+              "annual_return": -0.88256,
+              "avg_profit_abs": -25.4839,
+              "daily_sharpe": -0.299071,
+              "days": 90.0,
+              "expectancy": -0.031605,
+              "kurtosis": 6.9536,
+              "long_trades": 84,
+              "max_drawdown": 0.4111,
+              "n_days": 91,
+              "profit_factor": 0.4027,
+              "sharpe": -5.7137,
+              "short_trades": 77,
+              "skew": -1.0845,
+              "sortino": -6.1997,
+              "total_return": -0.41029,
+              "trades": 161,
+              "win_rate": 0.2609
+            },
+            "test": "20260223-20260524",
+            "train": "20250223-20260223"
+          },
+          {
+            "fold": 2,
+            "is_profit": -0.35240097958299993,
+            "is_trades": 679,
+            "oos": {
+              "annual_return": 0.40985,
+              "avg_profit_abs": 5.6657,
+              "daily_sharpe": 0.055162,
+              "days": 90.0,
+              "expectancy": 0.008405,
+              "kurtosis": 15.6205,
+              "long_trades": 73,
+              "max_drawdown": 0.2799,
+              "n_days": 91,
+              "profit_factor": 1.1379,
+              "sharpe": 1.0539,
+              "short_trades": 83,
+              "skew": 2.7314,
+              "sortino": 2.2304,
+              "total_return": 0.08838,
+              "trades": 156,
+              "win_rate": 0.4551
+            },
+            "test": "20260524-20260822",
+            "train": "20250524-20260524"
+          },
+          {
+            "fold": 3,
+            "is_profit": -0.390894874617,
+            "is_trades": 497,
+            "oos": {
+              "annual_return": -0.50415,
+              "avg_profit_abs": -12.6061,
+              "daily_sharpe": -0.084053,
+              "days": 90.0,
+              "expectancy": -0.02448,
+              "kurtosis": 27.6406,
+              "long_trades": 57,
+              "max_drawdown": 0.2659,
+              "n_days": 91,
+              "profit_factor": 0.7422,
+              "sharpe": -1.6058,
+              "short_trades": 69,
+              "skew": 3.8237,
+              "sortino": -3.0031,
+              "total_return": -0.15884,
+              "trades": 126,
+              "win_rate": 0.3254
+            },
+            "test": "20260822-20261120",
+            "train": "20250822-20260822"
+          }
+        ],
+        "gates": {
+          "deflated_sharpe": {
+            "pass": false,
+            "threshold": 0.8,
+            "value": 0.0393
+          },
+          "fold_consistency": {
+            "pass": false,
+            "threshold": 0.75,
+            "value": 0.25
+          },
+          "max_drawdown": {
+            "pass": false,
+            "threshold": 0.2,
+            "value": 0.8467
+          },
+          "monte_carlo": {
+            "pass": false,
+            "threshold": 0.8,
+            "value": 0.0
+          },
+          "profit_factor": {
+            "pass": false,
+            "threshold": 1.15,
+            "value": 0.7002
+          },
+          "robustness": {
+            "pass": false,
+            "threshold": 0.6,
+            "value": 0.0
+          },
+          "sharpe": {
+            "pass": false,
+            "threshold": 0.75,
+            "value": -0.9378
+          },
+          "stress_pf": {
+            "pass": false,
+            "threshold": 1.0,
+            "value": 0.6671
+          },
+          "trades": {
+            "pass": true,
+            "threshold": 25,
+            "value": 531.0
+          },
+          "wfe": {
+            "pass": false,
+            "threshold": 0.3,
+            "value": 0.0
+          }
+        },
+        "mc": {
+          "dd_p95": 1.09903,
+          "prob_profit": 0.0,
+          "ret_p5": -1.08396,
+          "ret_p50": -0.72953
+        },
+        "n_trials": 4,
+        "oos": {
+          "annual_return": -0.73817,
+          "avg_profit_abs": -13.8101,
+          "daily_sharpe": -0.049084,
+          "days": 360.0,
+          "expectancy": -0.016777,
+          "kurtosis": 44.5907,
+          "long_trades": 239,
+          "max_drawdown": 0.8467,
+          "n_days": 361,
+          "profit_factor": 0.7002,
+          "sharpe": -0.9378,
+          "short_trades": 292,
+          "skew": 4.8165,
+          "sortino": -1.8211,
+          "total_return": -0.73332,
+          "trades": 531,
+          "win_rate": 0.3296
+        },
+        "pair_stats": {
+          "AAVE/USDT:USDT": {
+            "pnl": -518.12,
+            "trades": 52
+          },
+          "DOGE/USDT:USDT": {
+            "pnl": -871.66,
+            "trades": 54
+          },
+          "ETH/USDT:USDT": {
+            "pnl": -1772.28,
+            "trades": 61
+          },
+          "LINK/USDT:USDT": {
+            "pnl": -1023.9,
+            "trades": 53
+          },
+          "NEAR/USDT:USDT": {
+            "pnl": -416.04,
+            "trades": 48
+          },
+          "RARE/USDT:USDT": {
+            "pnl": -745.74,
+            "trades": 42
+          },
+          "STRK/USDT:USDT": {
+            "pnl": 16.64,
+            "trades": 58
+          },
+          "WLD/USDT:USDT": {
+            "pnl": -1248.71,
+            "trades": 51
+          },
+          "XRP/USDT:USDT": {
+            "pnl": -1240.19,
+            "trades": 52
+          },
+          "ZEC/USDT:USDT": {
+            "pnl": 486.85,
+            "trades": 60
+          }
+        },
+        "pairs": [
+          "ZEC/USDT:USDT",
+          "STRK/USDT:USDT"
+        ],
+        "params": {
+          "be_rr": 1.86,
+          "conv_w": 0.32,
+          "dc_len": 75,
+          "exit_len": 24,
+          "htf_len": 395,
+          "htf_trend": 1,
+          "lock_frac": 0.05,
+          "lock_rr": 2.41,
+          "max_hold": 109,
+          "sl_atr": 3.1,
+          "tp_rr": 4.7,
+          "trail_atr": 2.1,
+          "trail_rr": 2.3,
+          "vol_mult": 2.0,
+          "vol_regime": 1
+        },
+        "perturb_pf_median": 0.714,
+        "robust_frac": 0.0,
+        "score": 0.0,
+        "stress": {
+          "annual_return": -0.83135,
+          "avg_profit_abs": -15.5779,
+          "daily_sharpe": -0.036296,
+          "days": 360.0,
+          "expectancy": -0.019487,
+          "kurtosis": 69.4353,
+          "long_trades": 239,
+          "max_drawdown": 0.9312,
+          "n_days": 361,
+          "profit_factor": 0.6671,
+          "sharpe": -0.6934,
+          "short_trades": 292,
+          "skew": 6.2912,
+          "sortino": -1.477,
+          "total_return": -0.82718,
+          "trades": 531,
+          "win_rate": 0.3239
+        },
+        "variant": "donchian_breakout +HTF-trend(395) +high-vol",
+        "verdict": "rejected",
+        "wfe": 0.0
+      },
+      "spec": {
+        "epochs": 80,
+        "family": "donchian_breakout",
+        "pairs": [
+          "AAVE/USDT:USDT",
+          "DOGE/USDT:USDT",
+          "ETH/USDT:USDT",
+          "LINK/USDT:USDT",
+          "NEAR/USDT:USDT",
+          "RARE/USDT:USDT",
+          "STRK/USDT:USDT",
+          "WLD/USDT:USDT",
+          "XRP/USDT:USDT",
+          "ZEC/USDT:USDT"
+        ],
+        "seed": 9027,
+        "sides": [
+          "long",
+          "short"
+        ],
+        "space_overrides": {},
+        "timeframe": "1h",
+        "used_learnings": []
+      },
+      "started": "2026-11-20T17:37:43Z"
+    }
+  ],
+  "market": {
+    "1000PEPE/USDT:USDT": {
+      "adx": 23.81,
+      "autocorr1": 0.0157,
+      "efficiency": 0.2171,
+      "ret_30d": -0.2425,
+      "revert_score": 0.4697,
+      "trend_score": 0.3207,
+      "turnover_24h_est": 72824440.0,
+      "vol_annual": 1.0668
+    },
+    "AAVE/USDT:USDT": {
+      "adx": 25.25,
+      "autocorr1": -0.0106,
+      "efficiency": 0.2128,
+      "ret_30d": -0.3601,
+      "revert_score": 0.4893,
+      "trend_score": 0.3296,
+      "turnover_24h_est": 33279423.0,
+      "vol_annual": 0.8428
+    },
+    "ADA/USDT:USDT": {
+      "adx": 24.71,
+      "autocorr1": 0.0234,
+      "efficiency": 0.1962,
+      "ret_30d": -0.3609,
+      "revert_score": 0.4823,
+      "trend_score": 0.3154,
+      "turnover_24h_est": 40518181.0,
+      "vol_annual": 0.7747
+    },
+    "APT/USDT:USDT": {
+      "adx": 24.25,
+      "autocorr1": 0.0215,
+      "efficiency": 0.2017,
+      "ret_30d": -0.5183,
+      "revert_score": 0.479,
+      "trend_score": 0.315,
+      "turnover_24h_est": 11713934.0,
+      "vol_annual": 1.0313
+    },
+    "ARB/USDT:USDT": {
+      "adx": 22.57,
+      "autocorr1": -0.0062,
+      "efficiency": 0.1974,
+      "ret_30d": -0.3983,
+      "revert_score": 0.4915,
+      "trend_score": 0.299,
+      "turnover_24h_est": 14614580.0,
+      "vol_annual": 1.0205
+    },
+    "AVAX/USDT:USDT": {
+      "adx": 24.32,
+      "autocorr1": 0.0359,
+      "efficiency": 0.1946,
+      "ret_30d": -0.3157,
+      "revert_score": 0.4833,
+      "trend_score": 0.3113,
+      "turnover_24h_est": 27861575.0,
+      "vol_annual": 0.8135
+    },
+    "BNB/USDT:USDT": {
+      "adx": 23.92,
+      "autocorr1": -0.0215,
+      "efficiency": 0.2002,
+      "ret_30d": -0.2403,
+      "revert_score": 0.5142,
+      "trend_score": 0.3115,
+      "turnover_24h_est": 24686501.0,
+      "vol_annual": 0.4288
+    },
+    "BTC/USDT:USDT": {
+      "adx": 25.39,
+      "autocorr1": -0.0322,
+      "efficiency": 0.2031,
+      "ret_30d": -0.2693,
+      "revert_score": 0.5296,
+      "trend_score": 0.325,
+      "turnover_24h_est": 6079922564.0,
+      "vol_annual": 0.3848
+    },
+    "CYBER/USDT:USDT": {
+      "adx": 24.82,
+      "autocorr1": -0.0984,
+      "efficiency": 0.198,
+      "ret_30d": -0.2786,
+      "revert_score": 0.6387,
+      "trend_score": 0.3174,
+      "turnover_24h_est": 4360038.0,
+      "vol_annual": 1.636
+    },
+    "DOGE/USDT:USDT": {
+      "adx": 26.98,
+      "autocorr1": -0.0012,
+      "efficiency": 0.1993,
+      "ret_30d": -0.3249,
+      "revert_score": 0.4823,
+      "trend_score": 0.3354,
+      "turnover_24h_est": 72103998.0,
+      "vol_annual": 0.6463
+    },
+    "ENA/USDT:USDT": {
+      "adx": 25.05,
+      "autocorr1": 0.003,
+      "efficiency": 0.2221,
+      "ret_30d": -0.5374,
+      "revert_score": 0.4667,
+      "trend_score": 0.3337,
+      "turnover_24h_est": 58625453.0,
+      "vol_annual": 1.1928
+    },
+    "ETH/USDT:USDT": {
+      "adx": 25.27,
+      "autocorr1": 0.0227,
+      "efficiency": 0.206,
+      "ret_30d": -0.3062,
+      "revert_score": 0.4764,
+      "trend_score": 0.3258,
+      "turnover_24h_est": 2424876793.0,
+      "vol_annual": 0.5116
+    },
+    "HBAR/USDT:USDT": {
+      "adx": 24.11,
+      "autocorr1": 0.0554,
+      "efficiency": 0.2066,
+      "ret_30d": -0.379,
+      "revert_score": 0.4761,
+      "trend_score": 0.3168,
+      "turnover_24h_est": 12537447.0,
+      "vol_annual": 0.8174
+    },
+    "INJ/USDT:USDT": {
+      "adx": 23.19,
+      "autocorr1": 0.0392,
+      "efficiency": 0.1848,
+      "ret_30d": -0.2816,
+      "revert_score": 0.4891,
+      "trend_score": 0.2964,
+      "turnover_24h_est": 32242468.0,
+      "vol_annual": 1.13
+    },
+    "LINK/USDT:USDT": {
+      "adx": 26.72,
+      "autocorr1": 0.0064,
+      "efficiency": 0.2013,
+      "ret_30d": -0.3095,
+      "revert_score": 0.4792,
+      "trend_score": 0.3346,
+      "turnover_24h_est": 26359587.0,
+      "vol_annual": 0.7393
+    },
+    "LTC/USDT:USDT": {
+      "adx": 26.05,
+      "autocorr1": 0.0028,
+      "efficiency": 0.1982,
+      "ret_30d": -0.3296,
+      "revert_score": 0.4811,
+      "trend_score": 0.3273,
+      "turnover_24h_est": 19143747.0,
+      "vol_annual": 0.6821
+    },
+    "NEAR/USDT:USDT": {
+      "adx": 24.96,
+      "autocorr1": -0.021,
+      "efficiency": 0.2136,
+      "ret_30d": -0.4463,
+      "revert_score": 0.5054,
+      "trend_score": 0.3279,
+      "turnover_24h_est": 136178035.0,
+      "vol_annual": 1.2595
+    },
+    "ONDO/USDT:USDT": {
+      "adx": 24.87,
+      "autocorr1": 0.0204,
+      "efficiency": 0.2012,
+      "ret_30d": -0.3756,
+      "revert_score": 0.4793,
+      "trend_score": 0.3196,
+      "turnover_24h_est": 21937306.0,
+      "vol_annual": 1.0272
+    },
+    "RARE/USDT:USDT": {
+      "adx": 29.06,
+      "autocorr1": -0.0696,
+      "efficiency": 0.2246,
+      "ret_30d": -0.0588,
+      "revert_score": 0.5767,
+      "trend_score": 0.3673,
+      "turnover_24h_est": 19543138.0,
+      "vol_annual": 2.1847
+    },
+    "SOL/USDT:USDT": {
+      "adx": 24.56,
+      "autocorr1": -0.0096,
+      "efficiency": 0.1922,
+      "ret_30d": -0.3451,
+      "revert_score": 0.5,
+      "trend_score": 0.3118,
+      "turnover_24h_est": 539853786.0,
+      "vol_annual": 0.5919
+    },
+    "STRK/USDT:USDT": {
+      "adx": 25.59,
+      "autocorr1": -0.0071,
+      "efficiency": 0.2128,
+      "ret_30d": -0.4971,
+      "revert_score": 0.4838,
+      "trend_score": 0.3324,
+      "turnover_24h_est": 13568791.0,
+      "vol_annual": 1.732
+    },
+    "SUI/USDT:USDT": {
+      "adx": 25.45,
+      "autocorr1": 0.0151,
+      "efficiency": 0.2026,
+      "ret_30d": -0.3496,
+      "revert_score": 0.4785,
+      "trend_score": 0.3251,
+      "turnover_24h_est": 45621686.0,
+      "vol_annual": 0.8853
+    },
+    "TAO/USDT:USDT": {
+      "adx": 24.46,
+      "autocorr1": 0.0061,
+      "efficiency": 0.1958,
+      "ret_30d": -0.3307,
+      "revert_score": 0.4825,
+      "trend_score": 0.3132,
+      "turnover_24h_est": 21483645.0,
+      "vol_annual": 0.8883
+    },
+    "UNI/USDT:USDT": {
+      "adx": 23.62,
+      "autocorr1": 0.0086,
+      "efficiency": 0.2027,
+      "ret_30d": -0.3789,
+      "revert_score": 0.4784,
+      "trend_score": 0.3106,
+      "turnover_24h_est": 33028820.0,
+      "vol_annual": 1.0107
+    },
+    "WLD/USDT:USDT": {
+      "adx": 26.06,
+      "autocorr1": 0.0228,
+      "efficiency": 0.2259,
+      "ret_30d": -0.5747,
+      "revert_score": 0.4644,
+      "trend_score": 0.3441,
+      "turnover_24h_est": 27889881.0,
+      "vol_annual": 1.1515
+    },
+    "XLM/USDT:USDT": {
+      "adx": 26.33,
+      "autocorr1": -0.0216,
+      "efficiency": 0.2045,
+      "ret_30d": -0.2922,
+      "revert_score": 0.5119,
+      "trend_score": 0.3333,
+      "turnover_24h_est": 16946813.0,
+      "vol_annual": 0.7002
+    },
+    "XMR/USDT:USDT": {
+      "adx": 23.46,
+      "autocorr1": -0.0615,
+      "efficiency": 0.1655,
+      "ret_30d": -0.2368,
+      "revert_score": 0.5992,
+      "trend_score": 0.2869,
+      "turnover_24h_est": 24865947.0,
+      "vol_annual": 0.7661
+    },
+    "XRP/USDT:USDT": {
+      "adx": 25.56,
+      "autocorr1": -0.0118,
+      "efficiency": 0.2047,
+      "ret_30d": -0.3162,
+      "revert_score": 0.496,
+      "trend_score": 0.3273,
+      "turnover_24h_est": 335214890.0,
+      "vol_annual": 0.6029
+    },
+    "ZEC/USDT:USDT": {
+      "adx": 25.38,
+      "autocorr1": 0.0395,
+      "efficiency": 0.2173,
+      "ret_30d": -0.3933,
+      "revert_score": 0.4696,
+      "trend_score": 0.3334,
+      "turnover_24h_est": 298902771.0,
+      "vol_annual": 1.1143
+    },
+    "ZRO/USDT:USDT": {
+      "adx": 24.4,
+      "autocorr1": -0.0332,
+      "efficiency": 0.2092,
+      "ret_30d": -0.406,
+      "revert_score": 0.5276,
+      "trend_score": 0.3208,
+      "turnover_24h_est": 16820263.0,
+      "vol_annual": 1.4999
+    }
+  },
+  "n_completed": 4,
+  "n_experiments": 4,
+  "n_trials_for_dsr": 4,
+  "summary": [
+    {
+      "batch_dsr": 0.0412,
+      "batch_verdict": "rejected",
+      "error": null,
+      "family": "donchian_breakout +HTF-trend(287) +high-vol",
+      "gates": {
+        "deflated_sharpe": {
+          "pass": false,
+          "threshold": 0.8,
+          "value": 0.0412
+        },
+        "fold_consistency": {
+          "pass": false,
+          "threshold": 0.75,
+          "value": 0.5
+        },
+        "max_drawdown": {
+          "pass": false,
+          "threshold": 0.2,
+          "value": 0.6068
+        },
+        "monte_carlo": {
+          "pass": false,
+          "threshold": 0.8,
+          "value": 0.033
+        },
+        "profit_factor": {
+          "pass": false,
+          "threshold": 1.15,
+          "value": 0.8198
+        },
+        "robustness": {
+          "pass": false,
+          "threshold": 0.6,
+          "value": 0.0
+        },
+        "sharpe": {
+          "pass": false,
+          "threshold": 0.75,
+          "value": -0.8442
+        },
+        "stress_pf": {
+          "pass": false,
+          "threshold": 1.0,
+          "value": 0.781
+        },
+        "trades": {
+          "pass": true,
+          "threshold": 25,
+          "value": 564.0
+        },
+        "wfe": {
+          "pass": false,
+          "threshold": 0.3,
+          "value": 0.0
+        }
+      },
+      "id": "xbf85f7637b",
+      "oos": {
+        "annual_return": -0.4025,
+        "avg_profit_abs": -7.0615,
+        "daily_sharpe": -0.044189,
+        "days": 360.0,
+        "expectancy": -0.010829,
+        "kurtosis": 30.3955,
+        "long_trades": 275,
+        "max_drawdown": 0.6068,
+        "n_days": 361,
+        "profit_factor": 0.8198,
+        "sharpe": -0.8442,
+        "short_trades": 289,
+        "skew": 3.6437,
+        "sortino": -1.5184,
+        "total_return": -0.39827,
+        "trades": 564,
+        "win_rate": 0.3741
+      },
+      "pairs": [
+        "AAVE/USDT:USDT",
+        "DOGE/USDT:USDT",
+        "ENA/USDT:USDT",
+        "ETH/USDT:USDT",
+        "RARE/USDT:USDT",
+        "STRK/USDT:USDT",
+        "SUI/USDT:USDT",
+        "WLD/USDT:USDT",
+        "XLM/USDT:USDT",
+        "XRP/USDT:USDT"
+      ]
+    },
+    {
+      "batch_dsr": 0.0049,
+      "batch_verdict": "rejected",
+      "error": null,
+      "family": "donchian_breakout +HTF-trend(291) +high-vol",
+      "gates": {
+        "deflated_sharpe": {
+          "pass": false,
+          "threshold": 0.8,
+          "value": 0.0049
+        },
+        "fold_consistency": {
+          "pass": false,
+          "threshold": 0.75,
+          "value": 0.25
+        },
+        "max_drawdown": {
+          "pass": false,
+          "threshold": 0.2,
+          "value": 0.5979
+        },
+        "monte_carlo": {
+          "pass": false,
+          "threshold": 0.8,
+          "value": 0.003
+        },
+        "profit_factor": {
+          "pass": false,
+          "threshold": 1.15,
+          "value": 0.7187
+        },
+        "robustness": {
+          "pass": false,
+          "threshold": 0.6,
+          "value": 0.0
+        },
+        "sharpe": {
+          "pass": false,
+          "threshold": 0.75,
+          "value": -1.7086
+        },
+        "stress_pf": {
+          "pass": false,
+          "threshold": 1.0,
+          "value": 0.6818
+        },
+        "trades": {
+          "pass": true,
+          "threshold": 25,
+          "value": 448.0
+        },
+        "wfe": {
+          "pass": false,
+          "threshold": 0.3,
+          "value": -14.6161
+        }
+      },
+      "id": "x7ed6b71be4",
+      "oos": {
+        "annual_return": -0.54819,
+        "avg_profit_abs": -12.1259,
+        "daily_sharpe": -0.08943,
+        "days": 360.0,
+        "expectancy": -0.012714,
+        "kurtosis": 11.5153,
+        "long_trades": 152,
+        "max_drawdown": 0.5979,
+        "n_days": 361,
+        "profit_factor": 0.7187,
+        "sharpe": -1.7086,
+        "short_trades": 296,
+        "skew": 1.1928,
+        "sortino": -2.5105,
+        "total_return": -0.54324,
+        "trades": 448,
+        "win_rate": 0.3728
+      },
+      "pairs": [
+        "AAVE/USDT:USDT",
+        "ENA/USDT:USDT",
+        "LINK/USDT:USDT",
+        "RARE/USDT:USDT",
+        "STRK/USDT:USDT",
+        "SUI/USDT:USDT",
+        "WLD/USDT:USDT",
+        "XLM/USDT:USDT",
+        "XRP/USDT:USDT",
+        "ZEC/USDT:USDT"
+      ]
+    },
+    {
+      "batch_dsr": 0.0188,
+      "batch_verdict": "rejected",
+      "error": null,
+      "family": "donchian_breakout +high-vol",
+      "gates": {
+        "deflated_sharpe": {
+          "pass": false,
+          "threshold": 0.8,
+          "value": 0.0188
+        },
+        "fold_consistency": {
+          "pass": false,
+          "threshold": 0.75,
+          "value": 0.0
+        },
+        "max_drawdown": {
+          "pass": false,
+          "threshold": 0.2,
+          "value": 0.7142
+        },
+        "monte_carlo": {
+          "pass": false,
+          "threshold": 0.8,
+          "value": 0.0
+        },
+        "profit_factor": {
+          "pass": false,
+          "threshold": 1.15,
+          "value": 0.6519
+        },
+        "robustness": {
+          "pass": false,
+          "threshold": 0.6,
+          "value": 0.0
+        },
+        "sharpe": {
+          "pass": false,
+          "threshold": 0.75,
+          "value": -1.5603
+        },
+        "stress_pf": {
+          "pass": false,
+          "threshold": 1.0,
+          "value": 0.6138
+        },
+        "trades": {
+          "pass": true,
+          "threshold": 25,
+          "value": 521.0
+        },
+        "wfe": {
+          "pass": false,
+          "threshold": 0.3,
+          "value": 0.0
+        }
+      },
+      "id": "xabf9e56f78",
+      "oos": {
+        "annual_return": -0.63121,
+        "avg_profit_abs": -12.0179,
+        "daily_sharpe": -0.081671,
+        "days": 360.0,
+        "expectancy": -0.020255,
+        "kurtosis": 69.2464,
+        "long_trades": 239,
+        "max_drawdown": 0.7142,
+        "n_days": 361,
+        "profit_factor": 0.6519,
+        "sharpe": -1.5603,
+        "short_trades": 282,
+        "skew": 5.4389,
+        "sortino": -2.6956,
+        "total_return": -0.62613,
+        "trades": 521,
+        "win_rate": 0.3263
+      },
+      "pairs": [
+        "AAVE/USDT:USDT",
+        "ENA/USDT:USDT",
+        "ETH/USDT:USDT",
+        "LTC/USDT:USDT",
+        "NEAR/USDT:USDT",
+        "RARE/USDT:USDT",
+        "STRK/USDT:USDT",
+        "SUI/USDT:USDT",
+        "WLD/USDT:USDT",
+        "XLM/USDT:USDT"
+      ]
+    },
+    {
+      "batch_dsr": 0.0393,
+      "batch_verdict": "rejected",
+      "error": null,
+      "family": "donchian_breakout +HTF-trend(395) +high-vol",
+      "gates": {
+        "deflated_sharpe": {
+          "pass": false,
+          "threshold": 0.8,
+          "value": 0.0393
+        },
+        "fold_consistency": {
+          "pass": false,
+          "threshold": 0.75,
+          "value": 0.25
+        },
+        "max_drawdown": {
+          "pass": false,
+          "threshold": 0.2,
+          "value": 0.8467
+        },
+        "monte_carlo": {
+          "pass": false,
+          "threshold": 0.8,
+          "value": 0.0
+        },
+        "profit_factor": {
+          "pass": false,
+          "threshold": 1.15,
+          "value": 0.7002
+        },
+        "robustness": {
+          "pass": false,
+          "threshold": 0.6,
+          "value": 0.0
+        },
+        "sharpe": {
+          "pass": false,
+          "threshold": 0.75,
+          "value": -0.9378
+        },
+        "stress_pf": {
+          "pass": false,
+          "threshold": 1.0,
+          "value": 0.6671
+        },
+        "trades": {
+          "pass": true,
+          "threshold": 25,
+          "value": 531.0
+        },
+        "wfe": {
+          "pass": false,
+          "threshold": 0.3,
+          "value": 0.0
+        }
+      },
+      "id": "x2362aae585",
+      "oos": {
+        "annual_return": -0.73817,
+        "avg_profit_abs": -13.8101,
+        "daily_sharpe": -0.049084,
+        "days": 360.0,
+        "expectancy": -0.016777,
+        "kurtosis": 44.5907,
+        "long_trades": 239,
+        "max_drawdown": 0.8467,
+        "n_days": 361,
+        "profit_factor": 0.7002,
+        "sharpe": -0.9378,
+        "short_trades": 292,
+        "skew": 4.8165,
+        "sortino": -1.8211,
+        "total_return": -0.73332,
+        "trades": 531,
+        "win_rate": 0.3296
+      },
+      "pairs": [
+        "AAVE/USDT:USDT",
+        "DOGE/USDT:USDT",
+        "ETH/USDT:USDT",
+        "LINK/USDT:USDT",
+        "NEAR/USDT:USDT",
+        "RARE/USDT:USDT",
+        "STRK/USDT:USDT",
+        "WLD/USDT:USDT",
+        "XRP/USDT:USDT",
+        "ZEC/USDT:USDT"
+      ]
+    }
+  ],
+  "universe": [
+    "BTC/USDT:USDT",
+    "ETH/USDT:USDT",
+    "SOL/USDT:USDT",
+    "ZEC/USDT:USDT",
+    "XRP/USDT:USDT",
+    "NEAR/USDT:USDT",
+    "1000PEPE/USDT:USDT",
+    "DOGE/USDT:USDT",
+    "ENA/USDT:USDT",
+    "SUI/USDT:USDT",
+    "ADA/USDT:USDT",
+    "XMR/USDT:USDT",
+    "UNI/USDT:USDT",
+    "INJ/USDT:USDT",
+    "AAVE/USDT:USDT",
+    "WLD/USDT:USDT",
+    "AVAX/USDT:USDT",
+    "LINK/USDT:USDT",
+    "CYBER/USDT:USDT",
+    "BNB/USDT:USDT",
+    "LTC/USDT:USDT",
+    "RARE/USDT:USDT",
+    "ONDO/USDT:USDT",
+    "TAO/USDT:USDT",
+    "STRK/USDT:USDT",
+    "ZRO/USDT:USDT",
+    "HBAR/USDT:USDT",
+    "APT/USDT:USDT",
+    "ARB/USDT:USDT",
+    "XLM/USDT:USDT"
+  ]
+}

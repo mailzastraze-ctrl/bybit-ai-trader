@@ -1,4 +1,33 @@
 {
   "note": "Every research trial (all batches). Deflated Sharpe counts trials of the last 90 days, so repeated searching cannot inflate significance.",
-  "trials": []
+  "trials": [
+    {
+      "batch": "b20261120-44766289844",
+      "family": "donchian_breakout",
+      "id": "xbf85f7637b",
+      "sr": -0.044189,
+      "ts": "2026-11-20T16:30:39Z"
+    },
+    {
+      "batch": "b20261120-44766289844",
+      "family": "donchian_breakout",
+      "id": "x7ed6b71be4",
+      "sr": -0.08943,
+      "ts": "2026-11-20T17:01:39Z"
+    },
+    {
+      "batch": "b20261120-44766289844",
+      "family": "donchian_breakout",
+      "id": "xabf9e56f78",
+      "sr": -0.081671,
+      "ts": "2026-11-20T17:37:42Z"
+    },
+    {
+      "batch": "b20261120-44766289844",
+      "family": "donchian_breakout",
+      "id": "x2362aae585",
+      "sr": -0.049084,
+      "ts": "2026-11-20T18:12:30Z"
+    }
+  ]
 }
