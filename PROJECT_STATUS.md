@@ -1,35 +1,42 @@
 # PROJECT_STATUS
 
-_Last updated: 2026-11-20 (session 1)_
+_Last updated: 2026-11-20 11:30 CET (session 1)_
 
 ## Summary
-The full system is implemented and unit-tested. It is **not yet deployed**: deployment needs the GitHub repo and the Railway service (see "Next steps"). There are no trading results yet, and none are claimed.
+**Deployed and trading on Bybit Demo** (Railway, EU West / Amsterdam, single container, volume `/data`).
+- Web terminal: https://aitrader-production-cf456409.up.railway.app (basic auth, user `admin`; the password is in the Railway variable `WEB_PASSWORD`)
+- Repo: `mailzastraze-ctrl/bybit-ai-trader`. Railway auto-deploys on push to `main`.
+
+No trading results have been claimed. All figures in the terminal come from real demo fills or Freqtrade backtests.
+
+## Verified (with evidence)
+- [x] **Bybit Demo connectivity.** Freqtrade log: `Using Exchange "Bybit (Demo)"`, `Demo trading enabled`, `Bybit: Unified account`, `Wallets synced`. The self-test passed all 6 checks on 2026-11-20 10:17 UTC: config demo flag, bot API, futures and dry_run=false, authenticated demo balance (account value ≈168.7k USDT of demo funds), whitelist, and the demo log line.
+- [x] The bot is `RUNNING` with the AIPortfolio strategy and 4 bootstrap exploration sleeves (8 pairs, 0.1 % risk, unvalidated defaults used as a pipeline check).
+- [x] CI is green. The whole test suite runs inside the real `freqtrade 2026.10` image (strategy glue, web API, research pipeline). All 5 strategies load in Freqtrade.
+- [x] The market scan (`test-pairlist` with VolumePairList, AgeFilter and SpreadFilter) runs on Bybit from Railway.
+- [ ] First completed research experiment (pending: history download → hyperopt).
+- [ ] First demo order filled and the stop-loss order placed on the exchange.
+
+## Bugs found by real runs (fixed)
+1. Per-job `--userdir` must exist before Freqtrade is called (found by CI).
+2. RemotePairList strips `file:///`, so an absolute path needs `file:////data/...` (found on the first deploy).
+3. Memory peaked at 1.06 GB against the 1 GB trial limit. Fixes: research processes get `oom_score_adj=1000` so the bot survives an OOM, plus `MALLOC_ARENA_MAX=2` and the lite profile.
+4. Redeploys interrupted the first history download, so the universe ended up with only 2 pairs and research waited silently. It now forces a rescan, and the state is logged.
 
 ## Decisions
 | Decision | Reason |
 |---|---|
-| Foundation: **Freqtrade 2026.10** (Docker `freqtradeorg/freqtrade:2026.10`) | Native Bybit Demo (`exchange.demo_trading`, checked in `freqtrade/exchange/exchange.py` and `bybit.py`), futures, stop-loss on the exchange, backtesting with fees and funding, hyperopt (Optuna), REST API. |
-| **One bot, many sleeves** (manifest-driven `AIPortfolio`) | Freqtrade docs: one bot per (sub)account; multiple bots on one account are unsupported. Sleeves own disjoint pairs, and `enter_tag` = sleeve id gives per-strategy attribution. |
-| Timeframe 1h, USDT linear perps, isolated, leverage 3 (risk is set by the stop distance, not by leverage) | Robust signal and cost ratio, and manageable compute on Railway. |
-| Single container + supervisor | A Railway volume can attach to only one service. |
-| Region EU West (Amsterdam) | Bybit geo-blocks US IPs. |
+| Freqtrade 2026.10 | Native Bybit Demo, futures, stop-loss on the exchange, backtesting and hyperopt with fees and funding, REST API. |
+| One bot with many sleeves (manifest) | Freqtrade supports one bot per account. Sleeves own disjoint pairs, and `enter_tag` gives attribution. |
+| Single container plus supervisor | A Railway volume can attach to only one service. |
+| EU region | Bybit geo-blocks the US. |
+| `AITRADER_PROFILE=lite` | The Railway trial has 1 GB RAM: 1 hyperopt job, 60 epochs, 6 pairs per experiment, 15 min pause. |
 
-## Verified
-- [x] Freqtrade source (2026.10, commit 4cf0351) was read for: the demo-trading flag, Bybit futures and stop-loss-on-exchange, the RemotePairList `file:///` format, the backtest zip and `.fthypt` formats, the hyperopt loss interface, strategy callback signatures, parameter detection, the REST endpoints, env-var config overrides and the CLI flags.
-- [x] 43 unit and integration tests pass locally against a Freqtrade API stub. They cover: indicators, no-lookahead checks for every family, stop/TP/trailing/time/sizing math, manifest ownership, metrics/PSR/DSR/Monte-Carlo, gates, walk-forward folds, result parsers, the registry, lifecycle transitions, learner rules, the kill switch, and a full research pipeline with a simulated Freqtrade runner.
-- [ ] CI with the real Freqtrade image: runs on the first push.
-- [ ] Web API test: needs FastAPI and runs in CI. It could not run locally because there is no package network.
-- [ ] Live self-test on Railway (demo auth, demo endpoint log line).
-- [ ] First real research experiment on Bybit data.
+## Operations
+- The supervisor prints `STATUS heartbeats=… universe=… experiments=… strategies=… closed_trades=…` every 5 min, visible in Railway deploy logs.
+- Kill switch: a 25 % account drawdown pauses entries for 48 h.
 
-## Next steps
-1. Push to `mailzastraze-ctrl/bybit-ai-trader`.
-2. Railway: project, service from repo, EU region, `/data` volume, variables, domain.
-3. Watch the build and deploy logs, the self-test, the first manifest and the first demo orders.
-4. Check that the first experiment completes. Tune `RESEARCH_EPOCHS` and `RESEARCH_JOBS` to the CPU budget.
-
-## Known limitations / risks
-- Backtest take profit fills at candle close, not intrabar. That is conservative for TP and slightly optimistic for gaps.
-- Bootstrap sleeves (`boot-*`) trade **unvalidated default parameters** at 0.1 % risk. Their purpose is to check the pipeline, not to make money, and they retire on their own.
-- Bybit Demo has a fixed API rate limit and keeps orders for only 7 days. Freqtrade's trade DB on `/data` is the system of record.
-- Research CPU use costs money on Railway. The defaults are 2 hyperopt jobs and a 5 min pause between experiments.
+## Open items / risks
+- **Hosting:** this is a Railway *trial* account ($5 credit, 1 GB RAM). Estimated runway is about 2–3 weeks. Long-term operation needs Railway Hobby (with a hard usage limit) or another server.
+- The Bybit Demo API key was shared in chat. Rotate it and update the `BYBIT_API_KEY` and `BYBIT_API_SECRET` variables on Railway.
+- Backtest take-profit fills at candle close (not intrabar).

@@ -48,6 +48,25 @@ def _oom_adj(score: int):
     return fn
 
 
+def _rss_by_proc(procs) -> dict:
+    """Resident memory (MB) of each supervised process including its children."""
+    try:
+        import psutil
+    except ImportError:
+        return {}
+    out = {}
+    for p in procs:
+        if not p.popen or p.popen.poll() is not None:
+            continue
+        try:
+            root = psutil.Process(p.popen.pid)
+            tree = [root, *root.children(recursive=True)]
+            out[p.name] = int(sum(x.memory_info().rss for x in tree if x.is_running()) / 1e6)
+        except psutil.Error:
+            continue
+    return out
+
+
 @dataclass
 class Proc:
     name: str
@@ -98,7 +117,9 @@ def main() -> None:
                  "FREQTRADE__API_SERVER__WS_TOKEN": ws}))
     else:
         reg.event("supervisor", "BYBIT_API_KEY / BYBIT_API_SECRET not set – trading bot NOT started", "error")
-    procs.append(Proc("manager", [py, "-m", "aitrader.manager"], oom_score=300))
+    lite = os.environ.get("AITRADER_PROFILE", "").lower() == "lite"
+    if not lite:  # in lite mode the manager loop runs as a thread inside the web process
+        procs.append(Proc("manager", [py, "-m", "aitrader.manager"], oom_score=300))
     if os.environ.get("RESEARCH_ENABLED", "1") != "0":
         # research (and every freqtrade hyperopt/backtest it spawns) is the first OOM victim
         procs.append(Proc("research", ["nice", "-n", "10", py, "-m", "aitrader.research.worker"],
@@ -106,7 +127,7 @@ def main() -> None:
     port = os.environ.get("PORT", "8000")
     procs.append(Proc("web", [py, "-m", "uvicorn", "aitrader.web.app:app", "--host", "0.0.0.0",
                               "--port", port, "--log-level", "warning", "--proxy-headers"],
-                     oom_score=300))
+                     env={"AITRADER_EMBED_MANAGER": "1" if lite else "0"}, oom_score=300))
 
     stopping = threading.Event()
 
@@ -143,8 +164,8 @@ def main() -> None:
                 ex = {r["status"]: r["n"] for r in reg.q("SELECT status, COUNT(*) n FROM experiments GROUP BY status")}
                 st = {r["stage"]: r["n"] for r in reg.q("SELECT stage, COUNT(*) n FROM strategies GROUP BY stage")}
                 nt = reg.one("SELECT COUNT(*) n FROM live_trades")["n"]
-                log.info("STATUS heartbeats=%s universe=%d experiments=%s strategies=%s closed_trades=%s",
-                         hb, len(u.get("pairs") or []), ex, st, nt)
+                log.info("STATUS heartbeats=%s universe=%d experiments=%s strategies=%s closed_trades=%s rss_mb=%s",
+                         hb, len(u.get("pairs") or []), ex, st, nt, _rss_by_proc(procs))
             except Exception as e:  # noqa: BLE001
                 log.warning("status line failed: %s", e)
         for p in procs:

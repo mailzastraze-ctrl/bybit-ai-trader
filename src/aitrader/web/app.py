@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import secrets
 import shutil
 from pathlib import Path
@@ -43,6 +44,14 @@ def auth(creds: HTTPBasicCredentials = Depends(security)) -> str:
     if not ok:
         raise HTTPException(401, "unauthorized", headers={"WWW-Authenticate": "Basic"})
     return creds.username
+
+
+if os.environ.get("AITRADER_EMBED_MANAGER") == "1":
+    # Small instances: run the manager loop in this process instead of a separate interpreter.
+    import threading
+
+    from aitrader import manager as _manager
+    threading.Thread(target=_manager.main, name="manager", daemon=True).start()
 
 
 def _safe(fn, default=None):
