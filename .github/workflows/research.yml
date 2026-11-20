@@ -1,124 +1,100 @@
-name: bulk-research
-# Offline research burst on GitHub runners with the real Freqtrade image.
-# Runners are in the US where Bybit's API is geo-blocked, so research data comes from OKX
-# USDT perps (public API). Results are imported by the live system as validated /
-# exploratory candidates and must still pass forward tests on Bybit Demo.
+name: research-lab
+# The company's research lab. All heavy compute (hyperopt, walk-forward backtests, stress,
+# robustness, Monte Carlo) runs here on GitHub runners — never on the trading server.
+#
+#   1. asks the live server what to work on (learnings, revalidations, promising strategies)
+#   2. runs walk-forward experiments within a time budget, streaming live progress
+#   3. merges with a batch-wide + 90-day-ledger Deflated Sharpe (anti-overfitting)
+#   4. sends only the compact results to the server and commits them to research/
+#   5. public repo: immediately starts the next run (continuous research, free minutes)
+#
+# Data: OKX USDT perps 1h (Bybit's API is geo-blocked on US runners). Imported strategies
+# must still pass forward tests on Bybit Demo before they get real (demo) risk.
+# Auth to the server: GitHub OIDC token (no secrets stored anywhere).
 on:
   schedule:
-    - cron: "17 2 * * 1"   # weekly, Monday 02:17 UTC (4 jobs × 4 experiments ≈ 350 runner-minutes)
+    - cron: "17 2,14 * * *"          # base cadence (also fits private-repo free minutes)
+    - cron: "41 5,8,11,17,20,23 * * *" # extra restarts for public repos (chain watchdog)
   workflow_dispatch:
     inputs:
-      jobs:
-        description: "Parallel research jobs"
-        default: "4"
-      experiments_per_job:
-        description: "Experiments per job"
-        default: "4"
-      epochs:
-        description: "Hyperopt epochs per walk-forward fold"
-        default: "100"
-      universe:
-        description: "Number of liquid pairs in the universe"
-        default: "20"
+      budget_minutes:
+        description: "Research time budget (empty = auto: 170 public / 22 private)"
+        default: ""
+      chain:
+        description: "Start the next run when done (public repos)"
+        default: "true"
 
 permissions:
-  contents: write   # merge job commits research/imports/*.json → Railway redeploys and imports
+  contents: write   # commit results/ledger
+  id-token: write   # OIDC token for the live server
+  actions: write    # chain the next run
 
 concurrency:
-  group: bulk-research
+  group: research-lab
   cancel-in-progress: false
 
 env:
   RESEARCH_EXCHANGE: okx
+  LAB_SERVER: https://aitrader-production-cf456409.up.railway.app
 
 jobs:
-  scan:
+  lab:
+    if: github.event_name != 'schedule' || github.event.schedule == '17 2,14 * * *' || github.event.repository.private == false
     runs-on: ubuntu-latest
-    timeout-minutes: 120
-    outputs:
-      matrix: ${{ steps.m.outputs.matrix }}
+    timeout-minutes: 240
     steps:
       - uses: actions/checkout@v5
-      - run: docker build -t aitrader:research .
-      - name: Market scan + history download (OKX)
+      - id: plan
         run: |
-          mkdir -p work && chmod 777 work
-          docker run --rm -v "$PWD/work:/data" -e RESEARCH_EXCHANGE -e RESEARCH_UNIVERSE=${{ inputs.universe || '20' }} \
-            aitrader:research python -m aitrader.research.batch scan --out /data/batch
-          sudo chown -R "$(id -u):$(id -g)" work
-          head -c 2000 work/batch/universe.json
-      - id: m
-        run: echo "matrix=$(python3 -c 'import json;print(json.dumps(list(range(int("${{ inputs.jobs || '4' }}")))))')" >> "$GITHUB_OUTPUT"
-      - uses: actions/upload-artifact@v4
+          PRIVATE="${{ github.event.repository.private }}"
+          if [ "$PRIVATE" = "false" ]; then PUBLIC=true; BUDGET=170; else PUBLIC=false; BUDGET=22; fi
+          [ -n "${{ inputs.budget_minutes }}" ] && BUDGET="${{ inputs.budget_minutes }}"
+          echo "public=$PUBLIC" >> "$GITHUB_OUTPUT"
+          echo "budget=$BUDGET" >> "$GITHUB_OUTPUT"
+          echo "cpus=$(nproc)" >> "$GITHUB_OUTPUT"
+          echo "public=$PUBLIC budget=${BUDGET}min cpus=$(nproc)"
+      - run: docker build -q -t aitrader:research .
+      - uses: actions/cache/restore@v4
         with:
-          name: market-data
           path: |
             work/user_data/data
             work/batch/universe.json
-          retention-days: 3
-
-  research:
-    needs: scan
-    runs-on: ubuntu-latest
-    timeout-minutes: 340
-    strategy:
-      fail-fast: false
-      matrix:
-        job: ${{ fromJSON(needs.scan.outputs.matrix) }}
-    steps:
-      - uses: actions/checkout@v5
-      - run: docker build -t aitrader:research .
-      - uses: actions/download-artifact@v4
-        with:
-          name: market-data
-          path: work
-      - name: Research job ${{ matrix.job }}
+          key: okx-1h-${{ github.run_id }}
+          restore-keys: okx-1h-
+      - name: Research cycle
         run: |
-          chmod -R 777 work
-          docker run --rm -v "$PWD/work:/data" -e RESEARCH_EXCHANGE \
-            -e RESEARCH_EPOCHS=${{ inputs.epochs || '100' }} -e RESEARCH_JOBS=2 -e RESEARCH_IDLE_SECONDS=0 \
-            aitrader:research python -m aitrader.research.batch run --out /data/batch/job-${{ matrix.job }} \
-              --job ${{ matrix.job }} --experiments ${{ inputs.experiments_per_job || '4' }} \
-              --universe /data/batch/universe.json
+          mkdir -p work/batch work/export && chmod -R 777 work
+          cp research/ledger.json work/ledger.json 2>/dev/null || echo '{"trials": []}' > work/ledger.json
+          docker run --rm -v "$PWD/work:/data" \
+            -e RESEARCH_EXCHANGE -e LAB_PUBLIC=${{ steps.plan.outputs.public }} \
+            -e ACTIONS_ID_TOKEN_REQUEST_URL -e ACTIONS_ID_TOKEN_REQUEST_TOKEN \
+            -e RESEARCH_EPOCHS=80 -e RESEARCH_JOBS=${{ steps.plan.outputs.cpus }} -e RESEARCH_UNIVERSE=24 \
+            aitrader:research python -m aitrader.research.batch cycle --out /data/batch --export /data/export \
+              --budget-min ${{ steps.plan.outputs.budget }} --run-id ${{ github.run_id }} \
+              --server "$LAB_SERVER" --ledger /data/ledger.json
       - if: always()
         run: sudo chown -R "$(id -u):$(id -g)" work
-      - uses: actions/upload-artifact@v4
+      - uses: actions/cache/save@v4
         if: always()
         with:
-          name: results-${{ matrix.job }}
-          path: work/batch/job-${{ matrix.job }}/results-*.json
-          retention-days: 14
-
-  merge:
-    needs: research
-    if: always()
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v5
-      - uses: actions/setup-python@v6
-        with: {python-version: "3.13"}
-      - run: pip install -q pandas numpy requests
-      - uses: actions/download-artifact@v4
-        with:
-          pattern: results-*
-          path: results
-      - name: Merge (batch-wide Deflated Sharpe + gates) and report
+          path: |
+            work/user_data/data
+            work/batch/universe.json
+          key: okx-1h-${{ github.run_id }}
+      - name: Commit results (history + fallback import on deploy)
         run: |
-          ID="b$(date -u +%Y%m%d)-${{ github.run_id }}"
-          PYTHONPATH=src python -m aitrader.research.batch merge results \
-            --out "out/imports/$ID.json" --report "out/reports/$ID.md" --batch-id "$ID"
-          cat "out/reports/$ID.md" | tee -a "$GITHUB_STEP_SUMMARY"
-      - uses: actions/upload-artifact@v4
-        with:
-          name: batch-report
-          path: out
-          retention-days: 30
-      - name: Commit candidates + report (live system imports them on deploy)
-        run: |
+          if ! ls work/export/imports/*.json >/dev/null 2>&1; then echo "no results"; exit 0; fi
           mkdir -p research/imports research/reports
-          cp out/imports/*.json research/imports/ && cp out/reports/*.md research/reports/
-          git config user.name "aitrader-research-bot"
-          git config user.email "aitrader-research-bot@users.noreply.github.com"
-          git add research/imports research/reports
-          git commit -m "research: batch ${{ github.run_id }} results" || exit 0
-          git pull --rebase origin main && git push origin HEAD:main
+          cp work/export/imports/*.json research/imports/ && cp work/export/reports/*.md research/reports/
+          cp work/export/ledger.json research/ledger.json
+          cat work/export/reports/*.md >> "$GITHUB_STEP_SUMMARY"
+          git config user.name "aitrader-research-lab"
+          git config user.email "aitrader-research-lab@users.noreply.github.com"
+          git add research/imports research/reports research/ledger.json
+          git commit -q -m "research-lab: run ${{ github.run_id }} results [skip ci]" || exit 0
+          for i in 1 2 3; do git pull -q --rebase origin main && git push -q origin HEAD:main && break; sleep 5; done
+      - name: Chain the next run (continuous research on public repos)
+        if: success() && steps.plan.outputs.public == 'true' && inputs.chain != 'false'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh workflow run research.yml --ref main -f chain=true || true

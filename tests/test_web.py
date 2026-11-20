@@ -35,5 +35,10 @@ def test_auth_and_endpoints(client):
                  "/api/learnings", "/api/events", "/api/health"):
         r = client.get(path, auth=a)
         assert r.status_code == 200, path
+    assert client.get("/api/lab/state").status_code == 401
+    assert client.post("/api/lab/import", json={}, headers={"Authorization": "Bearer junk"}).status_code == 401
+    g = client.get("/api/goals", auth=a).json()
+    assert g["mission"] and len(g["goals"]) >= 5
+    assert client.get("/api/candles", params={"pair": "BTC/USDT:USDT"}, auth=a).json()["candles"] == []
     assert client.post("/api/control/pause_research", auth=a).json()["ok"]
     assert client.get("/api/research", auth=a).json()["paused"] is True

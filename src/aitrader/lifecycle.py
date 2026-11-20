@@ -68,30 +68,41 @@ class Lifecycle:
                 data = json.loads(f.read_text())
             except (OSError, json.JSONDecodeError):
                 continue
-            batch = data.get("batch_id")
-            current = {c["id"] for c in data.get("candidates", [])}
-            if batch:  # a re-filtered batch file also retracts candidates it no longer contains
-                for r in self.reg.q("SELECT id FROM strategies WHERE id LIKE ? AND stage IN ('exploratory','validated')",
-                                    (f"{batch}-%",)):
-                    if r["id"] not in current:
-                        self.reg.set_stage(r["id"], "rejected", "retracted by stricter re-filter of its batch")
-            for c in data.get("candidates", []):
-                if self.reg.one("SELECT id FROM strategies WHERE id=?", (c["id"],)):
-                    continue
-                now = iso()
-                note = (f"offline batch {data.get('batch_id')} ({data.get('exchange')} data, "
-                        f"N={data.get('n_trials_for_dsr')} trials) – needs Bybit forward test")
-                self.reg.upsert("strategies", {
-                    "id": c["id"], "experiment_id": c.get("experiment", ""), "family": c["family"],
-                    "params": c["params"], "pairs": c["pairs"], "sides": c.get("sides", ["long", "short"]),
-                    "stage": c["stage"], "score": c.get("score", 0.0), "oos": c.get("oos", {}),
-                    "gates": c.get("gates", {}), "live": {}, "created": now, "updated": now,
-                    "stage_since": now, "history": [{"ts": now, "to": c["stage"], "reason": note}],
-                    "note": note,
-                })
-                n += 1
+            n += self.import_batch(data, announce=False)
         if n:
             self.reg.event("lifecycle", f"imported {n} offline research candidates")
+        return n
+
+    def import_batch(self, data: dict, announce: bool = True) -> int:
+        """One research batch (GitHub research lab or offline file) → candidates."""
+        n = 0
+        batch = data.get("batch_id")
+        current = {c["id"] for c in data.get("candidates", [])}
+        if batch:  # a re-filtered batch file also retracts candidates it no longer contains
+            for r in self.reg.q("SELECT id FROM strategies WHERE id LIKE ? AND stage IN ('exploratory','validated')",
+                                (f"{batch}-%",)):
+                if r["id"] not in current:
+                    self.reg.set_stage(r["id"], "rejected", "retracted by stricter re-filter of its batch")
+        for c in data.get("candidates", []):
+            if self.reg.one("SELECT id FROM strategies WHERE id=?", (c["id"],)):
+                continue
+            now = iso()
+            note = (f"research batch {batch} ({data.get('exchange')} data, "
+                    f"N={data.get('n_trials_for_dsr')} trials) – needs Bybit forward test")
+            self.reg.upsert("strategies", {
+                "id": c["id"], "experiment_id": c.get("experiment", ""), "family": c["family"],
+                "params": c["params"], "pairs": c["pairs"], "sides": c.get("sides", ["long", "short"]),
+                "stage": c["stage"], "score": c.get("score", 0.0), "oos": c.get("oos", {}),
+                "gates": c.get("gates", {}), "live": {}, "created": now, "updated": now,
+                "stage_since": now, "history": [{"ts": now, "to": c["stage"], "reason": note}],
+                "note": note,
+            })
+            self.reg.event("research", f"{c['id']} ({c.get('variant', c['family'])}) imported as {c['stage']} — "
+                           f"OOS PF {(c.get('oos') or {}).get('profit_factor')}, Sharpe {(c.get('oos') or {}).get('sharpe')}",
+                           data={"strategy": c["id"]})
+            n += 1
+        if n and announce:
+            self.reg.event("lifecycle", f"imported {n} candidates from research batch {batch}")
         return n
 
     # ------------------------------------------------------------------ evaluation

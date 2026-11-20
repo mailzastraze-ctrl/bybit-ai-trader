@@ -12,6 +12,7 @@ from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
 from fastapi.staticfiles import StaticFiles
 
+from aitrader import lab as labsync
 from aitrader.ftclient import FtClient
 from aitrader.manifest import Manifest
 from aitrader.registry import Registry
@@ -212,6 +213,101 @@ def control(action: str) -> JSONResponse:
         raise HTTPException(400, "unknown action")
     reg().event("web", f"control action: {action}", "warning")
     return JSONResponse({"ok": True, "action": action})
+
+
+# ---------------------------------------------------------------------------- research lab
+def lab_auth(request: Request) -> dict:
+    """GitHub Actions OIDC token of this repository's main branch (no shared secret)."""
+    tok = request.headers.get("authorization", "")
+    tok = tok[7:].strip() if tok.lower().startswith("bearer ") else ""
+    try:
+        return labsync.verify_oidc(tok, S.lab_repository)
+    except labsync.LabAuthError as e:
+        raise HTTPException(401, f"lab auth: {e}") from e
+
+
+@app.get("/api/lab/state")
+def lab_state(claims: dict = Depends(lab_auth)) -> dict:  # noqa: ARG001
+    return labsync.build_state(S, reg())
+
+
+@app.post("/api/lab/progress")
+async def lab_progress(request: Request, claims: dict = Depends(lab_auth)) -> dict:  # noqa: ARG001
+    labsync.record_progress(reg(), await request.json())
+    return {"ok": True}
+
+
+@app.post("/api/lab/run")
+async def lab_run(request: Request, claims: dict = Depends(lab_auth)) -> dict:  # noqa: ARG001
+    labsync.record_run(reg(), await request.json())
+    return {"ok": True}
+
+
+@app.post("/api/lab/import")
+async def lab_import(request: Request, claims: dict = Depends(lab_auth)) -> dict:  # noqa: ARG001
+    data = await request.json()
+    import asyncio
+    res = await asyncio.to_thread(labsync.apply_import, S, reg(), data)
+    return {"ok": True, **res}
+
+
+# ---------------------------------------------------------------------------- HQ helpers
+@app.get("/api/candles", dependencies=[Depends(auth)])
+def candles(pair: str, limit: int = 96) -> dict:
+    """Recent 1h candles for a pair the bot trades (for the HQ trader screens)."""
+    c = ft()
+    data = _safe(lambda: c.pair_candles(pair, "1h", min(max(limit, 10), 200)), {}) or {}
+    cols = data.get("columns") or []
+    want = ["date", "open", "high", "low", "close", "volume"]
+    idx = [cols.index(k) for k in want if k in cols]
+    rows = [[r[i] for i in idx] for r in (data.get("data") or [])] if len(idx) == len(want) else []
+    return {"pair": pair, "candles": rows[-limit:]}
+
+
+@app.get("/api/goals", dependencies=[Depends(auth)])
+def goals() -> dict:
+    return company_goals(reg())
+
+
+def company_goals(r: Registry) -> dict:
+    """The company's mission, measured from real data only."""
+    from datetime import timedelta
+
+    from aitrader.util import iso
+    eq = r.q("SELECT equity FROM equity ORDER BY ts")
+    start = float(eq[0]["equity"]) if eq else 0.0
+    now_eq = float(eq[-1]["equity"]) if eq else 0.0
+    peak = max((float(x["equity"]) for x in eq), default=0.0)
+    dd = (peak - now_eq) / peak if peak else 0.0
+    trades = r.q("SELECT profit_abs FROM live_trades")
+    pnl = [float(t["profit_abs"] or 0) for t in trades]
+    gains, losses = sum(x for x in pnl if x > 0), -sum(x for x in pnl if x < 0)
+    pf = gains / losses if losses else (99.0 if gains else 0.0)
+    week = iso(utcnow() - timedelta(days=7))
+    n_week = r.one("SELECT COUNT(*) n FROM experiments WHERE status='done' AND finished >= ?", (week,))["n"]
+    ever_validated = r.one("SELECT COUNT(*) n FROM strategies WHERE stage IN ('validated','incubation','eligible','production') "
+                           "OR history LIKE '%\"to\": \"validated\"%'")["n"]
+    n_prod = r.one("SELECT COUNT(*) n FROM strategies WHERE stage='production'")["n"]
+    ret = (now_eq / start - 1) if start else 0.0
+    lab = r.kv_get("lab") or {}
+    week_target = 60 if lab.get("public") else 20
+    items = [
+        {"id": "validated", "title": "Find a strategy that passes every strict gate",
+         "value": ever_validated, "target": 1, "unit": "", "progress": min(1.0, ever_validated / 1)},
+        {"id": "evidence", "title": "Collect forward-test evidence on Bybit Demo",
+         "value": len(pnl), "target": 100, "unit": "trades", "progress": min(1.0, len(pnl) / 100)},
+        {"id": "research", "title": "Research throughput (walk-forward experiments / 7 days)",
+         "value": n_week, "target": week_target, "unit": "", "progress": min(1.0, n_week / week_target)},
+        {"id": "pf", "title": "Live profit factor ≥ 1.3",
+         "value": round(pf, 2), "target": 1.3, "unit": "", "progress": min(1.0, pf / 1.3) if pnl else 0.0},
+        {"id": "production", "title": "Strategies promoted to production",
+         "value": n_prod, "target": 3, "unit": "", "progress": min(1.0, n_prod / 3)},
+        {"id": "return", "title": "Grow demo equity +10% (without breaching 15% drawdown)",
+         "value": round(ret * 100, 2), "target": 10, "unit": "%",
+         "progress": max(0.0, min(1.0, ret / 0.10)), "warning": dd > 0.10},
+    ]
+    return {"mission": "Find, prove and scale real trading edges on Bybit Demo — no overfitting, no fake results.",
+            "goals": items, "equity": now_eq, "drawdown": round(dd, 4), "lab": lab}
 
 
 @app.exception_handler(Exception)

@@ -120,7 +120,12 @@ def main() -> None:
     lite = os.environ.get("AITRADER_PROFILE", "").lower() == "lite"
     if not lite:  # in lite mode the manager loop runs as a thread inside the web process
         procs.append(Proc("manager", [py, "-m", "aitrader.manager"], oom_score=300))
-    if os.environ.get("RESEARCH_ENABLED", "1") != "0":
+    if s.research.mode == "remote":
+        log.info("research mode: remote – heavy research runs on GitHub Actions (research lab); "
+                 "this server only receives results")
+        reg.event("supervisor", "research mode: remote (GitHub research lab) – no heavy compute on this server")
+        reg.heartbeat("research", "idle", {"remote": True})
+    elif os.environ.get("RESEARCH_ENABLED", "1") != "0":
         # research (and every freqtrade hyperopt/backtest it spawns) is the first OOM victim
         procs.append(Proc("research", ["nice", "-n", "10", py, "-m", "aitrader.research.worker"],
                           oom_score=1000))

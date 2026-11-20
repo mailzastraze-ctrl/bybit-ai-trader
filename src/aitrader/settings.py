@@ -83,6 +83,9 @@ class Research:
     # Exchange whose public data research uses. Live trading is always Bybit Demo; offline
     # bulk research on GitHub runners (US IPs, Bybit geo-blocked) uses OKX perps as a proxy.
     exchange: str = "bybit"
+    # "remote": heavy research runs on GitHub Actions (research lab) and only results are
+    # sent to this server; "local": research runs inside this container.
+    mode: str = "local"
 
 
 @dataclass
@@ -94,6 +97,8 @@ class Settings:
     ft_api_password: str = field(default_factory=lambda: _env("FT_API_PASSWORD", "change-me"))
     web_user: str = field(default_factory=lambda: _env("WEB_USER", "admin"))
     web_password: str = field(default_factory=lambda: _env("WEB_PASSWORD", ""))
+    # GitHub repository whose Actions OIDC tokens may talk to the research-lab sync API
+    lab_repository: str = field(default_factory=lambda: _env("LAB_REPOSITORY", "mailzastraze-ctrl/bybit-ai-trader"))
     freqtrade_bin: str = field(default_factory=lambda: _env("FREQTRADE_BIN", "freqtrade"))
     gates: Gates = field(default_factory=Gates)
     lifecycle: Lifecycle = field(default_factory=Lifecycle)
@@ -110,6 +115,8 @@ class Settings:
         r.idle_sleep_s = _i("RESEARCH_IDLE_SECONDS", r.idle_sleep_s)
         r.universe_size = _i("RESEARCH_UNIVERSE", r.universe_size)
         r.exchange = _env("RESEARCH_EXCHANGE", r.exchange)
+        lite = os.environ.get("AITRADER_PROFILE", "").lower() == "lite"
+        r.mode = _env("RESEARCH_MODE", "remote" if lite else r.mode).lower()
         lc = self.lifecycle
         lc.leverage = _f("AITRADER_LEVERAGE", lc.leverage)
         lc.risk_production = _f("RISK_PRODUCTION", lc.risk_production)

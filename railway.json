@@ -8,8 +8,7 @@
       "ft/**",
       "config/**",
       "Dockerfile",
-      "pyproject.toml",
-      "research/imports/**"
+      "pyproject.toml"
     ]
   },
   "deploy": {

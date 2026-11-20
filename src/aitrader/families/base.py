@@ -94,7 +94,7 @@ class Family:
             if overrides and p.name in overrides:
                 olo, ohi = overrides[p.name]
                 lo, hi = max(p.low, float(olo)), min(p.high, float(ohi))
-                if hi <= lo:
+                if hi < lo:  # lo == hi pins a parameter (e.g. a structural gene)
                     lo, hi = p.low, p.high
             out[p.name] = (lo, hi)
         return out

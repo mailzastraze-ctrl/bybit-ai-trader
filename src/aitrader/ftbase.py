@@ -222,12 +222,15 @@ def build_parameters(cls: type, family_name: str) -> type:
     for p in fam.params:
         lo, hi = space[p.name]
         default = min(max(p.default, lo), hi)
+        pinned = hi - lo < (1 if p.kind == "int" else 10 ** -p.decimals)
+        if pinned:  # fixed value: keep the full valid range, don't optimise
+            lo, hi = p.low, p.high
         if p.kind == "int":
             param = IntParameter(int(lo), int(hi), default=int(round(default)), space=p.space,
-                                 optimize=True)
+                                 optimize=not pinned)
         else:
             param = DecimalParameter(lo, hi, default=default, decimals=p.decimals,
-                                     space=p.space, optimize=True)
+                                     space=p.space, optimize=not pinned)
         setattr(cls, p.name, param)
     cls.family_name = family_name
     return cls

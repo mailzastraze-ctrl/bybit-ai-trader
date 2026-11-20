@@ -42,15 +42,22 @@ STARTING_BALANCE = 10000.0
 
 
 class Pipeline:
-    def __init__(self, settings: Settings, registry: Registry, runner: FreqtradeRunner | None = None):
+    def __init__(self, settings: Settings, registry: Registry, runner: FreqtradeRunner | None = None,
+                 on_progress=None):
         self.s = settings
         self.reg = registry
         self.ft = runner or FreqtradeRunner(settings)
+        self.on_progress = on_progress  # callback(eid, stage, extra) – research-lab live progress
 
     # ------------------------------------------------------------------ helpers
     def _progress(self, eid: str, stage: str, **extra) -> None:
         self.reg.update("experiments", eid, {"progress": {"stage": stage, "ts": iso(), **extra}})
         self.reg.heartbeat("research", "busy", {"experiment": eid, "stage": stage})
+        if self.on_progress:
+            try:
+                self.on_progress(eid, stage, extra)
+            except Exception:  # noqa: BLE001 – progress reporting must never break research
+                log.debug("progress callback failed", exc_info=True)
 
     def _portfolio_backtest(self, job: Job, base_cfg, family: str, params: dict, pairs: list[str],
                             sides: list[str], timerange: str, fee: float, tag: str) -> list[dict]:
@@ -111,7 +118,9 @@ class Pipeline:
             if not best:
                 fold_reports.append({"fold": k, "error": "no epoch with enough trades"})
                 continue
-            params = fam.normalize(best[0]["params_dict"])
+            pins = {k: v[0] for k, v in (spec.get("space_overrides") or {}).items()
+                    if isinstance(v, (list, tuple)) and len(v) == 2 and v[0] == v[1]}
+            params = fam.normalize({**best[0]["params_dict"], **pins})
             ism = best[0].get("results_metrics", {})
             train_days = (fold.train_end - fold.train_start).days
             is_ann = (1 + float(ism.get("profit_total", 0.0))) ** (365 / max(train_days, 1)) - 1

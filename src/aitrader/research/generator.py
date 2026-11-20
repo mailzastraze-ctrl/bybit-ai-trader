@@ -29,12 +29,21 @@ def ucb_pick(stats: dict[str, tuple[int, float]], c: float = 0.6, rng: random.Ra
 
 
 class Generator:
-    def __init__(self, settings: Settings, registry: Registry, seed: int | None = None):
+    def __init__(self, settings: Settings, registry: Registry, seed: int | None = None,
+                 stats_override: dict | None = None):
         self.s = settings
         self.reg = registry
         self.rng = random.Random(seed)
+        # research lab: the bandit uses the live server's full experiment history
+        self.stats_override = stats_override
 
     def family_stats(self) -> dict[str, tuple[int, float]]:
+        if self.stats_override:
+            stats = {f: (0, 0.0) for f in FAMILIES}
+            for f, v in self.stats_override.items():
+                if f in stats and isinstance(v, (list, tuple)) and len(v) == 2:
+                    stats[f] = (int(v[0]), float(v[1]))
+            return stats
         stats = {f: (0, 0.0) for f in FAMILIES}
         rows = self.reg.q("SELECT family, result, status FROM experiments WHERE status IN ('done','failed')")
         acc: dict[str, list[float]] = {f: [] for f in FAMILIES}
@@ -76,6 +85,28 @@ class Generator:
             self.reg.kv_set("revalidated", marks)
             return spec
         return None
+
+    def refine_spec(self, universe: list[str], cand: dict, width: float = 0.2) -> dict:
+        """Exploit: re-search a narrowed space (±width of each range) around a promising
+        candidate's parameters, on its own pairs plus fresh affinity pairs. Every refinement
+        still goes through the full walk-forward + gates + batch-wide Deflated Sharpe."""
+        fam = FAMILIES[cand["family"]]
+        spec = self.next_spec(universe, family=cand["family"])
+        params = fam.normalize(cand.get("params"))
+        over = {}
+        for p in fam.params:
+            if p.name in ("htf_trend", "vol_regime"):
+                over[p.name] = [params[p.name], params[p.name]]  # keep the structural genes
+                continue
+            span = (p.high - p.low) * width
+            over[p.name] = [max(p.low, params[p.name] - span), min(p.high, params[p.name] + span)]
+        spec["space_overrides"] = {**over, **spec.get("space_overrides", {})}
+        own = [p for p in (cand.get("pairs") or []) if p in universe]
+        n = self.s.research.pairs_per_experiment
+        spec["pairs"] = sorted((own + [p for p in spec["pairs"] if p not in own])[:max(n, len(own))])
+        spec["sides"] = cand.get("sides") or spec["sides"]
+        spec["refines"] = cand["id"]
+        return spec
 
     def next_spec(self, universe: list[str], family: str | None = None) -> dict:
         family = family or ucb_pick(self.family_stats(), rng=self.rng)
