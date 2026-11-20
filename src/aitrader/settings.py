@@ -78,6 +78,9 @@ class Research:
     mc_samples: int = 2000
     idle_sleep_s: int = 300  # pause between experiments (keeps CPU bill in check)
     min_history_days: int = 400
+    # Exchange whose public data research uses. Live trading is always Bybit Demo; offline
+    # bulk research on GitHub runners (US IPs, Bybit geo-blocked) uses OKX perps as a proxy.
+    exchange: str = "bybit"
 
 
 @dataclass
@@ -104,6 +107,7 @@ class Settings:
         r.hyperopt_jobs = _i("RESEARCH_JOBS", r.hyperopt_jobs)
         r.idle_sleep_s = _i("RESEARCH_IDLE_SECONDS", r.idle_sleep_s)
         r.universe_size = _i("RESEARCH_UNIVERSE", r.universe_size)
+        r.exchange = _env("RESEARCH_EXCHANGE", r.exchange)
         lc = self.lifecycle
         lc.leverage = _f("AITRADER_LEVERAGE", lc.leverage)
         lc.risk_production = _f("RISK_PRODUCTION", lc.risk_production)
@@ -137,7 +141,7 @@ class Settings:
 
     @property
     def market_data_dir(self) -> Path:
-        return self.user_data / "data" / "bybit"
+        return self.user_data / "data" / self.research.exchange
 
     @property
     def strategies_dir(self) -> Path:

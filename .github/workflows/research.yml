@@ -1,0 +1,106 @@
+name: bulk-research
+# Offline research burst on GitHub runners with the real Freqtrade image.
+# Runners are in the US where Bybit's API is geo-blocked, so research data comes from OKX
+# USDT perps (public API). Results are imported by the live system as validated /
+# exploratory candidates and must still pass forward tests on Bybit Demo.
+on:
+  workflow_dispatch:
+    inputs:
+      jobs:
+        description: "Parallel research jobs"
+        default: "4"
+      experiments_per_job:
+        description: "Experiments per job"
+        default: "4"
+      epochs:
+        description: "Hyperopt epochs per walk-forward fold"
+        default: "100"
+      universe:
+        description: "Number of liquid pairs in the universe"
+        default: "20"
+
+permissions:
+  contents: read
+
+env:
+  RESEARCH_EXCHANGE: okx
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    outputs:
+      matrix: ${{ steps.m.outputs.matrix }}
+    steps:
+      - uses: actions/checkout@v5
+      - run: docker build -t aitrader:research .
+      - name: Market scan + history download (OKX)
+        run: |
+          mkdir -p work && chmod 777 work
+          docker run --rm -v "$PWD/work:/data" -e RESEARCH_EXCHANGE -e RESEARCH_UNIVERSE=${{ inputs.universe }} \
+            aitrader:research python -m aitrader.research.batch scan --out /data/batch
+          cat work/batch/universe.json | head -c 2000
+      - id: m
+        run: echo "matrix=$(python3 -c 'import json;print(json.dumps(list(range(int("${{ inputs.jobs }}")))))')" >> "$GITHUB_OUTPUT"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: market-data
+          path: |
+            work/user_data/data
+            work/batch/universe.json
+          retention-days: 3
+
+  research:
+    needs: scan
+    runs-on: ubuntu-latest
+    timeout-minutes: 340
+    strategy:
+      fail-fast: false
+      matrix:
+        job: ${{ fromJSON(needs.scan.outputs.matrix) }}
+    steps:
+      - uses: actions/checkout@v5
+      - run: docker build -t aitrader:research .
+      - uses: actions/download-artifact@v4
+        with:
+          name: market-data
+          path: work
+      - name: Research job ${{ matrix.job }}
+        run: |
+          chmod -R 777 work
+          docker run --rm -v "$PWD/work:/data" -e RESEARCH_EXCHANGE \
+            -e RESEARCH_EPOCHS=${{ inputs.epochs }} -e RESEARCH_JOBS=2 -e RESEARCH_IDLE_SECONDS=0 \
+            aitrader:research python -m aitrader.research.batch run --out /data/batch/job-${{ matrix.job }} \
+              --job ${{ matrix.job }} --experiments ${{ inputs.experiments_per_job }} \
+              --universe /data/batch/universe.json
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: results-${{ matrix.job }}
+          path: work/batch/job-${{ matrix.job }}/results-*.json
+          retention-days: 14
+
+  merge:
+    needs: research
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with: {python-version: "3.13"}
+      - run: pip install -q pandas numpy requests
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: results-*
+          path: results
+      - name: Merge (batch-wide Deflated Sharpe + gates) and report
+        run: |
+          ID="b$(date -u +%Y%m%d)-${{ github.run_id }}"
+          PYTHONPATH=src python -m aitrader.research.batch merge results \
+            --out "out/imports/$ID.json" --report "out/reports/$ID.md" --batch-id "$ID"
+          cat "out/reports/$ID.md" >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: batch-report
+          path: out
+          retention-days: 30

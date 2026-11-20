@@ -56,6 +56,36 @@ class Lifecycle:
         self.reg.kv_set("bootstrapped", now)
         self.reg.event("lifecycle", "bootstrapped exploration sleeves with default parameters")
 
+    def import_offline_candidates(self, directory) -> int:
+        """Import candidates from offline research batches (research/imports/*.json).
+        They enter as validated/exploratory and must pass Bybit Demo forward tests."""
+        import json
+        from pathlib import Path
+        n = 0
+        for f in sorted(Path(directory).glob("*.json")):
+            try:
+                data = json.loads(f.read_text())
+            except (OSError, json.JSONDecodeError):
+                continue
+            for c in data.get("candidates", []):
+                if self.reg.one("SELECT id FROM strategies WHERE id=?", (c["id"],)):
+                    continue
+                now = iso()
+                note = (f"offline batch {data.get('batch_id')} ({data.get('exchange')} data, "
+                        f"N={data.get('n_trials_for_dsr')} trials) – needs Bybit forward test")
+                self.reg.upsert("strategies", {
+                    "id": c["id"], "experiment_id": c.get("experiment", ""), "family": c["family"],
+                    "params": c["params"], "pairs": c["pairs"], "sides": c.get("sides", ["long", "short"]),
+                    "stage": c["stage"], "score": c.get("score", 0.0), "oos": c.get("oos", {}),
+                    "gates": c.get("gates", {}), "live": {}, "created": now, "updated": now,
+                    "stage_since": now, "history": [{"ts": now, "to": c["stage"], "reason": note}],
+                    "note": note,
+                })
+                n += 1
+        if n:
+            self.reg.event("lifecycle", f"imported {n} offline research candidates")
+        return n
+
     # ------------------------------------------------------------------ evaluation
     def update_live(self, equity: float) -> None:
         for st in self.reg.strategies(DEPLOYED + ("retired",)):

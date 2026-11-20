@@ -54,6 +54,7 @@ def main() -> None:
     ft = FtClient(s.ft_api_url, s.ft_api_user, s.ft_api_password)
     life, learner, scanner = Lifecycle(s, reg), Learner(s, reg), Scanner(s, reg)
     life.bootstrap()
+    life.import_offline_candidates(s.app_dir / "research" / "imports")
     # make sure the bot has a manifest + pairlist before it starts trading
     life.write(life.build_manifest([], set(scanner.excluded_pairs()), False), [])
     reg.event("manager", "manager started")

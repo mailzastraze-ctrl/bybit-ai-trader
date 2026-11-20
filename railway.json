@@ -3,7 +3,14 @@
   "build": {
     "builder": "DOCKERFILE",
     "dockerfilePath": "Dockerfile",
-    "watchPatterns": ["src/**", "ft/**", "config/**", "Dockerfile", "pyproject.toml"]
+    "watchPatterns": [
+      "src/**",
+      "ft/**",
+      "config/**",
+      "Dockerfile",
+      "pyproject.toml",
+      "research/imports/**"
+    ]
   },
   "deploy": {
     "healthcheckPath": "/healthz",
@@ -11,6 +18,10 @@
     "restartPolicyType": "ALWAYS",
     "drainingSeconds": "30",
     "overlapSeconds": "0",
-    "multiRegionConfig": {"europe-west4-drams3a": {"numReplicas": 1}}
+    "multiRegionConfig": {
+      "europe-west4-drams3a": {
+        "numReplicas": 1
+      }
+    }
   }
 }

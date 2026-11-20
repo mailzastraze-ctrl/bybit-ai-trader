@@ -18,6 +18,7 @@ RUN pip install --user --no-cache-dir --no-deps -e . \
  && python -c "import aitrader, freqtrade; print('aitrader', aitrader.__version__, 'freqtrade', freqtrade.__version__)"
 COPY --chown=ftuser:ftuser ft ./ft
 COPY --chown=ftuser:ftuser config ./config
+COPY --chown=ftuser:ftuser research ./research
 
 # Railway volumes are mounted as root → run as root; Python packages stay in ftuser's user base.
 USER root

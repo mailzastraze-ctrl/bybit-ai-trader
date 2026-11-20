@@ -253,3 +253,31 @@ def test_ccxt_loads_linear_markets_only():
     cfg = json.loads((Path(__file__).resolve().parents[1] / "config" / "trade.json").read_text())
     for c in (cfg, research_config(Settings(), ["BTC/USDT:USDT"]), scan_config(Settings())):
         assert c["exchange"]["ccxt_config"]["options"]["fetchMarkets"]["types"] == ["linear"]
+
+
+def test_batch_run_merge_and_import(env, tmp_path, monkeypatch):
+    from aitrader.research import batch
+    s, reg = env
+    s.research.perturbations = 2
+    monkeypatch.setattr(batch, "get_settings", lambda: s)
+    monkeypatch.setattr(batch, "Pipeline", lambda st, rg: Pipeline(st, rg, FakeRunner(True)))
+    uni = tmp_path / "universe.json"
+    uni.write_text(json.dumps({"ts": iso(), "exchange": "okx",
+                               "pairs": ["BTC/USDT:USDT", "ETH/USDT:USDT", "SOL/USDT:USDT", "XRP/USDT:USDT"],
+                               "market": {}}))
+    for job in (0, 1):
+        batch.cmd_run(tmp_path / f"job{job}", job, 2, uni)
+    m = batch.merge([tmp_path], "b1")
+    assert m["n_completed"] == 4 and m["n_trials_for_dsr"] == 4
+    assert {e["family"] for e in m["experiments"]} == set(batch.FAMILIES)
+    assert m["candidates"] and all(c["stage"] in ("validated", "exploratory") for c in m["candidates"])
+    md = batch.report_md(m)
+    assert "Research batch b1" in md and "| Experiment |" in md
+    imp = tmp_path / "imports"
+    imp.mkdir()
+    (imp / "b1.json").write_text(json.dumps({k: v for k, v in m.items() if k != "experiments"}))
+    life = Lifecycle(s, reg)
+    assert life.import_offline_candidates(imp) == len(m["candidates"])
+    assert life.import_offline_candidates(imp) == 0  # idempotent
+    st = reg.one("SELECT * FROM strategies WHERE id=?", (m["candidates"][0]["id"],))
+    assert "okx data" in st["note"]

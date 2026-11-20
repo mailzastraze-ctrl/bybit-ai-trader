@@ -55,8 +55,8 @@ class Generator:
                           (family,))
         return [r for r in rows if not r.get("expires") or r["expires"] > now]
 
-    def next_spec(self, universe: list[str]) -> dict:
-        family = ucb_pick(self.family_stats(), rng=self.rng)
+    def next_spec(self, universe: list[str], family: str | None = None) -> dict:
+        family = family or ucb_pick(self.family_stats(), rng=self.rng)
         fam = FAMILIES[family]
         market = {r["pair"]: r["data"] for r in self.reg.q("SELECT pair, data FROM market")}
         key = "trend_score" if fam.affinity == "trend" else "revert_score"
