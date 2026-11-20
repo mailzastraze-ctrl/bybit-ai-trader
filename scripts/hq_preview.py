@@ -180,8 +180,8 @@ def shoot(port: int, out: Path) -> int:
         for name, idx in (("hq-person-research", 3), ("hq-person-trader", 11)):
             pg.evaluate("document.getElementById('bReset').click()")
             time.sleep(2)
-            pg.evaluate(f"window.__hq.follow({idx})")
-            time.sleep(8)
+            pg.evaluate(f"window.__hq.follow({idx}, true)")
+            time.sleep(4)
             pg.screenshot(path=str(out / f"{name}.png"))
         b.close()
     (out / "console.txt").write_text("\n".join(errors) or "no errors")

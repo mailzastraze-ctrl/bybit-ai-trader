@@ -1407,5 +1407,6 @@ flyTo(HOME_POS, HOME_TGT, 3200);
 setTimeout(() => ceo.say("Morning, team. Demo account only — we earn trust with evidence, not hope.", 6500), 2600);
 setTimeout(() => conversation(researchers[1], researchers[0], [[researchers[1], "Walk-forward fold two is running. Train on 300 days, test on the next 60."], [researchers[0], "Good. Remember: we only trust the out-of-sample numbers."]]), 9000);
 tick();
-window.__hq = {chars, follow: i => { follow = chars[i]; tour = false; camTween = null; }};
+window.__hq = {chars, follow: (i, instant) => { follow = chars[i]; tour = false; camTween = null;
+  if (instant) { const tp = follow.root.position.clone().setY(1.2); controls.target.copy(tp); camera.position.copy(tp.clone().add(new THREE.Vector3(2.6, 1.9, 3.3))); } }};
 window.__hqReady = true;

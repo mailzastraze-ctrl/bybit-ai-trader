@@ -35,15 +35,32 @@ def test_allow_list(rest, query, ok):
     assert (lr.target_url(rest, query) is not None) == ok
 
 
-def test_ccxt_routes_bybit_market_data_through_relay(tmp_path):
+
+def test_relay_hook_rewrites_ccxt_bybit_requests(monkeypatch, tmp_path):
     ccxt = pytest.importorskip("ccxt")  # present in the freqtrade image (CI)
-    from aitrader.research.ftrunner import ccxt_config
+    import importlib
+    import sys
+
+    from aitrader.research.ftrunner import RELAY_HOOK_DIR, relay_env
     from aitrader.settings import Settings
     s = Settings(data_dir=tmp_path)
     s.research.exchange, s.research.relay, s.research.relay_token = "bybit", "https://srv/relay/", "tok"
-    ex = ccxt.bybit(ccxt_config(s))
-    req = ex.sign("v5/market/kline", "public", "GET", {"category": "linear", "symbol": "BTCUSDT", "interval": "60"})
-    assert req["url"].startswith("https://srv/relay/https://api.bybit.com/v5/market/kline?")
-    assert lr.target_url(req["url"].split("/relay/", 1)[1].split("?")[0], "") is not None
-    assert ex.headers.get("X-Lab-Token") == "tok"
-    ex.check_proxy_settings()  # no conflicting ccxt proxy settings
+    env = relay_env(s)
+    assert str(RELAY_HOOK_DIR) in env["PYTHONPATH"] and env["AITRADER_RELAY_TOKEN"] == "tok"
+    seen = {}
+    from ccxt.base.exchange import Exchange
+    monkeypatch.setattr(Exchange, "fetch", lambda self, url, method="GET", headers=None, body=None:
+                        seen.update(url=url, headers=headers) or {"retCode": 0, "result": {}})
+    monkeypatch.setattr(Exchange, "_aitrader_relay", False, raising=False)
+    monkeypatch.setenv("AITRADER_RELAY", "https://srv/relay/")
+    monkeypatch.setenv("AITRADER_RELAY_TOKEN", "tok")
+    monkeypatch.syspath_prepend(str(RELAY_HOOK_DIR))
+    sys.modules.pop("sitecustomize", None)
+    hook = importlib.import_module("sitecustomize")
+    assert hook.RELAY == "https://srv/relay/"
+    ccxt.bybit().fetch("https://api.bybit.com/v5/market/time", "GET", {}, None)
+    assert seen["url"] == "https://srv/relay/https://api.bybit.com/v5/market/time"
+    assert seen["headers"]["X-Lab-Token"] == "tok"
+    ccxt.bybit().fetch("https://example.com/x", "GET", {}, None)
+    assert seen["url"] == "https://example.com/x"  # other hosts untouched
+    sys.modules.pop("sitecustomize", None)

@@ -27,14 +27,20 @@ CCXT_LINEAR_ONLY = {"options": {"fetchMarkets": {"types": ["linear"]}}}
 
 def ccxt_config(settings: Settings) -> dict:
     cfg = dict(CCXT_LINEAR_ONLY) if settings.research.exchange == "bybit" else {}
-    if settings.research.relay and settings.research.exchange == "bybit":
-        # Route Bybit's REST base URLs through the live server's relay (EU egress). Using
-        # ccxt's own proxy options conflicts with ccxt's proxy-agent detection, so the API
-        # base URLs are overridden instead; freqtrade hands ccxt_config to sync + async ccxt.
-        base = settings.research.relay + "https://api.bybit.com"
-        cfg["urls"] = {"api": {k: base for k in ("spot", "futures", "v2", "public", "private")}}
-        cfg["headers"] = {"X-Lab-Token": settings.research.relay_token}
     return cfg
+
+
+RELAY_HOOK_DIR = Path(__file__).parent / "relayhook"
+
+
+def relay_env(settings: Settings) -> dict:
+    """Env for freqtrade subprocesses: a sitecustomize hook rewrites ccxt's Bybit requests
+    to the live server's relay (Bybit geo-blocks the US runners)."""
+    if not (settings.research.relay and settings.research.exchange == "bybit"):
+        return {}
+    pp = os.environ.get("PYTHONPATH", "")
+    return {"PYTHONPATH": f"{RELAY_HOOK_DIR}{os.pathsep}{pp}" if pp else str(RELAY_HOOK_DIR),
+            "AITRADER_RELAY": settings.research.relay, "AITRADER_RELAY_TOKEN": settings.research.relay_token}
 
 
 class FreqtradeError(RuntimeError):
@@ -177,7 +183,7 @@ class FreqtradeRunner:
     def _run(self, args: list[str], job: Job, env: dict | None = None,
              timeout: int = 6 * 3600) -> subprocess.CompletedProcess:
         cmd = [self.s.freqtrade_bin, *args]
-        full_env = {**os.environ, **(env or {})}
+        full_env = {**os.environ, **relay_env(self.s), **(env or {})}
         # Research must never see live credentials.
         for k in list(full_env):
             if k.startswith("FREQTRADE__"):
