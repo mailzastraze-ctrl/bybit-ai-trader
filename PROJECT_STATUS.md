@@ -20,7 +20,7 @@ The system is **deployed and running autonomously on Bybit Demo**: Railway, EU W
 | 7 | Web terminal | ✅ live | **3D company HQ** at `/` (Three.js): departments = system components, workers animated by live data, clickable live panels, company log. Classic terminal at `/terminal` |
 | — | Framework first, verified Bybit Demo compatibility | ✅ | Freqtrade 2026.10, native `demo_trading`; self-test 6/6 |
 | — | Cloud, independent of your PC | ✅ / ⚠️ | Railway **trial** (1 GB RAM, $5 credit). Hobby is needed for indefinite operation |
-| — | GitHub + PROJECT_STATUS | ✅ | CI green with the real Freqtrade image; 62 tests |
+| — | GitHub + PROJECT_STATUS | ✅ | CI green with the real Freqtrade image; 65 tests |
 
 ## Verified in production
 - Self-test 6/6: demo endpoint, auth (≈168.7k USDT demo account value), futures, whitelist, log line `Demo trading enabled for Bybit (Demo)`.
@@ -42,7 +42,7 @@ cgroup headroom guard before heavy jobs, adaptive research scale after OOM, `oom
 userdir must exist · absolute `file:////` pairlist URL · OOM on 1 GB · silent wait when the universe was too small · artifact permissions · forced entries need explicit stake handling · keep-alive connection reset during polling.
 
 ## Needs the owner
-1. **Railway Hobby** (with a hard usage limit) for operation beyond the trial (~2–3 weeks of credit).
+1. **Railway Hobby** (with a hard usage limit) for operation beyond the trial (~15 days of credit at the measured ≈ $10/month).
 
 Owner decision (2026-11-20): keep the current Bybit **Demo** API key; no rotation (demo funds only).
 
