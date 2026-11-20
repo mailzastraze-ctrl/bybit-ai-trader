@@ -250,15 +250,15 @@ def _fresh_universe(path: Path, max_age_h: float = 12) -> dict | None:
     return u
 
 
-def probe_bybit(proxy: str) -> bool:
+def probe_bybit(relay: str, token: str) -> bool:
     import requests
     try:
-        r = requests.get("https://api.bybit.com/v5/market/time", proxies={"https": proxy}, timeout=20)
+        r = requests.get(relay + "https://api.bybit.com/v5/market/time", headers={"X-Lab-Token": token}, timeout=20)
         ok = r.status_code == 200 and r.json().get("retCode") == 0
-        log.info("Bybit via EU proxy: HTTP %s %s", r.status_code, "OK" if ok else r.text[:200])
+        log.info("Bybit via EU relay: HTTP %s %s", r.status_code, "OK" if ok else r.text[:200])
         return ok
     except Exception as e:  # noqa: BLE001
-        log.warning("Bybit via EU proxy failed: %s", e)
+        log.warning("Bybit via EU relay failed: %s", e)
         return False
 
 
@@ -300,12 +300,12 @@ def cmd_cycle(out: Path, budget_min: float, run_id: str, server: str | None, max
         return None
     public = os.environ.get("LAB_PUBLIC", "") == "true"
     # Real Bybit data: GitHub runners are geo-blocked by Bybit (US), so public market-data
-    # requests are tunnelled through the live server's EU egress proxy. Fallback: OKX.
-    proxy = lab.proxy() if lab.enabled else None
-    if proxy and probe_bybit(proxy):
-        s.research.exchange, s.research.proxy = "bybit", proxy
+    # requests go through the live server's relay (EU). Fallback: OKX data.
+    relay = lab.relay() if lab.enabled else None
+    if relay and probe_bybit(*relay):
+        s.research.exchange, (s.research.relay, s.research.relay_token) = "bybit", relay
     else:
-        log.warning("Bybit egress proxy unavailable – researching on %s data", s.research.exchange)
+        log.warning("Bybit relay unavailable – researching on %s data", s.research.exchange)
     lab.run_event("start", budget_min=budget_min, cpus=os.cpu_count(), public=public,
                   exchange=s.research.exchange)
 

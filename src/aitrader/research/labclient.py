@@ -56,9 +56,9 @@ class LabClient:
             time.sleep(3 * (attempt + 1))
         return None
 
-    def proxy(self) -> str | None:
-        r = self._call("GET", "/api/lab/proxy")
-        return (r or {}).get("url")
+    def relay(self) -> tuple[str, str] | None:
+        r = self._call("GET", "/api/lab/proxy") or {}
+        return (r["relay"], r["token"]) if r.get("relay") and r.get("token") else None
 
     def state(self) -> dict:
         return self._call("GET", "/api/lab/state") or {}

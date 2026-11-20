@@ -88,7 +88,8 @@ class Research:
     # "remote": heavy research runs on GitHub Actions (research lab) and only results are
     # sent to this server; "local": research runs inside this container.
     mode: str = "local"
-    proxy: str = ""  # httpsProxy for research ccxt (research lab → Bybit via the EU server)
+    relay: str = ""  # research lab → Bybit public data via the live server (ccxt proxyUrl)
+    relay_token: str = ""
 
 
 @dataclass
@@ -118,7 +119,7 @@ class Settings:
         r.idle_sleep_s = _i("RESEARCH_IDLE_SECONDS", r.idle_sleep_s)
         r.universe_size = _i("RESEARCH_UNIVERSE", r.universe_size)
         r.exchange = _env("RESEARCH_EXCHANGE", r.exchange)
-        r.proxy = _env("RESEARCH_PROXY", r.proxy)
+
         lite = os.environ.get("AITRADER_PROFILE", "").lower() == "lite"
         r.mode = _env("RESEARCH_MODE", "remote" if lite else r.mode).lower()
         lc = self.lifecycle

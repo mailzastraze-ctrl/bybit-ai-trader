@@ -106,7 +106,7 @@ class FakeLab:
     def state(self):
         return self.st
 
-    def proxy(self):
+    def relay(self):
         return None
 
     def run_event(self, kind, **kw):

@@ -261,14 +261,33 @@ async def lab_import(request: Request, claims: dict = Depends(lab_auth)) -> dict
 
 
 @app.get("/api/lab/proxy")
-def lab_proxy(claims: dict = Depends(lab_auth)) -> dict:  # noqa: ARG001
-    """Short-lived credentials for the EU egress proxy (Bybit market data for research)."""
-    from aitrader import bybitproxy
-    host = os.environ.get("RAILWAY_TCP_PROXY_DOMAIN") or os.environ.get("LAB_PROXY_PUBLIC_HOST")
-    port = os.environ.get("RAILWAY_TCP_PROXY_PORT") or os.environ.get("LAB_PROXY_PUBLIC_PORT")
-    if not host or not port or not os.environ.get("LAB_PROXY_SECRET"):
-        raise HTTPException(404, "egress proxy not configured")
-    return {"url": f"http://lab:{bybitproxy.issue_token()}@{host}:{port}", "ttl_s": bybitproxy.TOKEN_TTL_S}
+def lab_proxy(request: Request, claims: dict = Depends(lab_auth)) -> dict:  # noqa: ARG001
+    """Relay endpoint + short-lived token for Bybit public market data (research lab)."""
+    from aitrader import labrelay
+    if not os.environ.get("LAB_PROXY_SECRET"):
+        raise HTTPException(404, "relay not configured")
+    dom = os.environ.get("RAILWAY_PUBLIC_DOMAIN")
+    base = f"https://{dom}" if dom else str(request.base_url).rstrip("/")
+    return {"relay": f"{base}/relay/", "token": labrelay.issue_token(), "ttl_s": labrelay.TOKEN_TTL_S}
+
+
+@app.get("/relay/{rest:path}")
+def relay(rest: str, request: Request) -> Response:
+    """GET-only relay of Bybit *public market data* for the research lab (see labrelay)."""
+    import requests as rq
+
+    from aitrader import labrelay
+    if not labrelay.verify_token(request.headers.get("x-lab-token")):
+        raise HTTPException(401, "relay token required")
+    url = labrelay.target_url(rest, request.url.query)
+    if url is None:
+        raise HTTPException(403, "only Bybit /v5/market/ GET requests are relayed")
+    try:
+        r = rq.get(url, timeout=20, headers={"User-Agent": "aitrader-lab-relay"})
+    except rq.RequestException as e:
+        raise HTTPException(502, f"upstream error: {e}") from e
+    return Response(r.content, status_code=r.status_code,
+                    media_type=r.headers.get("content-type", "application/json"))
 
 
 @app.get("/api/lab/backup")

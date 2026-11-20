@@ -27,8 +27,10 @@ CCXT_LINEAR_ONLY = {"options": {"fetchMarkets": {"types": ["linear"]}}}
 
 def ccxt_config(settings: Settings) -> dict:
     cfg = dict(CCXT_LINEAR_ONLY) if settings.research.exchange == "bybit" else {}
-    if settings.research.proxy:
-        cfg["httpsProxy"] = settings.research.proxy  # freqtrade passes it to sync + async ccxt
+    if settings.research.relay:
+        # freqtrade hands ccxt_config to the sync and async ccxt instances
+        cfg["proxyUrl"] = settings.research.relay
+        cfg["headers"] = {"X-Lab-Token": settings.research.relay_token}
     return cfg
 
 

@@ -13,5 +13,11 @@ jobs:
           TOK=$(curl -s -H "Authorization: bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" "$ACTIONS_ID_TOKEN_REQUEST_URL&audience=aitrader-lab" | python3 -c 'import sys,json;print(json.load(sys.stdin)["value"])')
           echo "token length: ${#TOK}"
           curl -s -o /tmp/r.txt -w "state HTTP %{http_code}\n" -H "Authorization: Bearer $TOK" https://aitrader-production-cf456409.up.railway.app/api/lab/state
-          head -c 600 /tmp/r.txt; echo
+          head -c 300 /tmp/r.txt; echo
+          curl -s -H "Authorization: Bearer $TOK" https://aitrader-production-cf456409.up.railway.app/api/lab/proxy > /tmp/p.json
+          RELAY=$(python3 -c 'import json;print(json.load(open("/tmp/p.json"))["relay"])'); RT=$(python3 -c 'import json;print(json.load(open("/tmp/p.json"))["token"])')
+          echo "relay: $RELAY"
+          curl -s -o /tmp/b.txt -w "bybit via relay HTTP %{http_code}\n" -H "X-Lab-Token: $RT" "${RELAY}https://api.bybit.com/v5/market/time"; head -c 200 /tmp/b.txt; echo
+          curl -s -o /dev/null -w "direct bybit from US runner HTTP %{http_code}\n" https://api.bybit.com/v5/market/time
+          curl -s -o /dev/null -w "relay refuses trading endpoint HTTP %{http_code}\n" -H "X-Lab-Token: $RT" "${RELAY}https://api.bybit.com/v5/order/realtime"
           docker run --rm -e ACTIONS_ID_TOKEN_REQUEST_URL -e ACTIONS_ID_TOKEN_REQUEST_TOKEN python:3.12-slim sh -c 'echo "in container: ${ACTIONS_ID_TOKEN_REQUEST_URL:+yes}"'
