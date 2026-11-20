@@ -220,3 +220,29 @@ def test_broken_runs_do_not_steer_the_bandit(env):
     lab.build_state(s, reg)
     left = reg.q("SELECT id FROM experiments")
     assert [r["id"] for r in left] == ["xok00001"]  # real failures are kept, broken-run rows purged
+
+
+def test_parallel_lab_phases_merge_all_jobs(env, tmp_path, monkeypatch):
+    s, server = env
+    ls = Settings(data_dir=tmp_path / "runner", app_dir=s.app_dir)
+    ls.research.perturbations = 2
+    ls.ensure_dirs()
+    out = tmp_path / "runner" / "batch"
+    out.mkdir(parents=True)
+    (out / "universe.json").write_text(json.dumps({"ts": iso(), "exchange": ls.research.exchange, "pairs": PAIRS,
+                                                   "market": {}}))
+    fake = FakeLab({"family_stats": {"trend_ema": [5, 0.2], "meanrev_bb": [5, 0.1]}})
+    monkeypatch.setattr(batch, "get_settings", lambda: ls)
+    monkeypatch.setattr(batch, "Pipeline", lambda st, rg, **kw: Pipeline(st, rg, FakeRunner(False), **kw))
+    import aitrader.research.labclient as lc
+    monkeypatch.setattr(lc, "LabClient", lambda server, run_id: fake)
+    assert batch.cmd_lab_prep(out, "900", "x", 600, jobs=2)["universe"]["pairs"] == PAIRS
+    r0 = batch.cmd_lab_run(out, 0, 2, 600, "900", "x", max_exp=2)
+    r1 = batch.cmd_lab_run(out, 1, 2, 600, "900", "x", max_exp=2)
+    assert r0[0]["spec"]["family"] != r1[0]["spec"]["family"]  # jobs open with different families
+    assert len({e["spec"]["family"] for e in r0}) == 2           # a job doesn't repeat one family
+    ledger = tmp_path / "ledger.json"
+    ledger.write_text(json.dumps({"trials": [{"ts": iso(), "sr": 0.01 * i} for i in range(10)]}))
+    m = batch.cmd_lab_merge(out, out, "900", "x", ledger, tmp_path / "export")
+    assert m["n_completed"] == 4 and m["n_trials_for_dsr"] == 14
+    assert fake.imported["n_experiments"] == 4 and fake.events[-1] == "end"

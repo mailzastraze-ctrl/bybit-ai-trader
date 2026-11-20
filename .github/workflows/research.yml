@@ -2,11 +2,12 @@ name: research-lab
 # The company's research lab. All heavy compute (hyperopt, walk-forward backtests, stress,
 # robustness, Monte Carlo) runs here on GitHub runners — never on the trading server.
 #
-#   1. asks the live server what to work on (learnings, revalidations, promising strategies)
-#   2. runs walk-forward experiments within a time budget, streaming live progress
-#   3. merges with a batch-wide + 90-day-ledger Deflated Sharpe (anti-overfitting)
-#   4. sends only the compact results to the server and commits them to research/
-#   5. public repo: immediately starts the next run (continuous research, free minutes)
+#   prep   – asks the live server what to work on (learnings, revalidations, promising
+#            strategies), picks the data source, scans the universe → plan
+#   run ×4 – four parallel runners (4 vCPU each), each a budgeted stream of walk-forward
+#            experiments opening with a different strategy family; live progress → HQ
+#   merge  – Deflated Sharpe over EVERY trial (90-day ledger + all four runners), compact
+#            results → server import + research/ commit, registry backup, next run
 #
 # Data: real Bybit USDT perps (1h candles, funding, mark prices). Bybit blocks US IPs, so the
 # lab tunnels its public market-data requests through the live server's EU egress proxy
@@ -36,24 +37,29 @@ concurrency:
 
 env:
   RESEARCH_EXCHANGE: okx
+  JOBS: "4"
   LAB_SERVER: https://aitrader-production-cf456409.up.railway.app
 
 jobs:
-  lab:
+  prep:
     if: github.event_name != 'schedule' || github.event.schedule == '17 2,14 * * *' || github.event.repository.private == false
     runs-on: ubuntu-latest
-    timeout-minutes: 240
+    timeout-minutes: 60
+    outputs:
+      public: ${{ steps.plan.outputs.public }}
+      budget: ${{ steps.plan.outputs.budget }}
+      jobs: ${{ steps.plan.outputs.jobs }}
     steps:
       - uses: actions/checkout@v5
       - id: plan
         run: |
           PRIVATE="${{ github.event.repository.private }}"
-          if [ "$PRIVATE" = "false" ]; then PUBLIC=true; BUDGET=170; else PUBLIC=false; BUDGET=22; fi
+          if [ "$PRIVATE" = "false" ]; then PUBLIC=true; BUDGET=150; J='[0,1,2,3]'; else PUBLIC=false; BUDGET=22; J='[0]'; fi
           [ -n "${{ inputs.budget_minutes }}" ] && BUDGET="${{ inputs.budget_minutes }}"
           echo "public=$PUBLIC" >> "$GITHUB_OUTPUT"
           echo "budget=$BUDGET" >> "$GITHUB_OUTPUT"
-          echo "cpus=$(nproc)" >> "$GITHUB_OUTPUT"
-          echo "public=$PUBLIC budget=${BUDGET}min cpus=$(nproc)"
+          echo "jobs=$J" >> "$GITHUB_OUTPUT"
+          echo "public=$PUBLIC budget=${BUDGET}min runners=$J"
       - run: docker build -q -t aitrader:research .
       - uses: actions/cache/restore@v4
         with:
@@ -63,34 +69,17 @@ jobs:
           key: mkt-1h-${{ github.run_id }}
           restore-keys: |
             mkt-1h-
-            okx-1h-
-      - name: Research cycle
+      - name: State, data source, universe
         run: |
-          mkdir -p work/batch work/export && chmod -R 777 work
-          cp research/ledger.json work/ledger.json 2>/dev/null || echo '{"trials": []}' > work/ledger.json
+          mkdir -p work/batch && chmod -R 777 work
+          N=$(echo '${{ steps.plan.outputs.jobs }}' | tr -cd ',' | wc -c); N=$((N+1))
           docker run --rm -v "$PWD/work:/data" \
             -e RESEARCH_EXCHANGE -e LAB_PUBLIC=${{ steps.plan.outputs.public }} \
-            -e ACTIONS_ID_TOKEN_REQUEST_URL -e ACTIONS_ID_TOKEN_REQUEST_TOKEN \
-            -e RESEARCH_EPOCHS=80 -e RESEARCH_JOBS=${{ steps.plan.outputs.cpus }} -e RESEARCH_UNIVERSE=40 \
-            aitrader:research python -m aitrader.research.batch cycle --out /data/batch --export /data/export \
-              --budget-min ${{ steps.plan.outputs.budget }} --run-id ${{ github.run_id }} \
-              --server "$LAB_SERVER" --ledger /data/ledger.json
+            -e ACTIONS_ID_TOKEN_REQUEST_URL -e ACTIONS_ID_TOKEN_REQUEST_TOKEN -e RESEARCH_UNIVERSE=40 \
+            aitrader:research python -m aitrader.research.batch lab-prep --out /data/batch \
+              --budget-min ${{ steps.plan.outputs.budget }} --jobs $N --run-id ${{ github.run_id }} --server "$LAB_SERVER"
       - if: always()
         run: sudo chown -R "$(id -u):$(id -g)" work
-      - name: Back up the live registry (trades, strategies, learnings)
-        if: always()
-        continue-on-error: true
-        run: |
-          TOK=$(curl -s -H "Authorization: bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" "$ACTIONS_ID_TOKEN_REQUEST_URL&audience=aitrader-lab" | python3 -c 'import sys,json;print(json.load(sys.stdin)["value"])')
-          mkdir -p backup && curl -sf -H "Authorization: Bearer $TOK" -o backup/registry.sqlite.gz "$LAB_SERVER/api/lab/backup" && ls -la backup
-      - uses: actions/upload-artifact@v4
-        if: always()
-        continue-on-error: true
-        with:
-          name: registry-backup
-          path: backup/registry.sqlite.gz
-          retention-days: 30
-          if-no-files-found: ignore
       - uses: actions/cache/save@v4
         if: always()
         with:
@@ -98,6 +87,78 @@ jobs:
             work/user_data/data
             work/batch/universe.json
           key: mkt-1h-${{ github.run_id }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: lab-plan
+          path: work/batch/plan.json
+          retention-days: 3
+
+  run:
+    needs: prep
+    runs-on: ubuntu-latest
+    timeout-minutes: 230
+    strategy:
+      fail-fast: false
+      matrix:
+        job: ${{ fromJSON(needs.prep.outputs.jobs) }}
+    steps:
+      - uses: actions/checkout@v5
+      - run: docker build -q -t aitrader:research .
+      - uses: actions/cache/restore@v4
+        with:
+          path: |
+            work/user_data/data
+            work/batch/universe.json
+          key: mkt-1h-${{ github.run_id }}
+      - uses: actions/download-artifact@v4
+        with:
+          name: lab-plan
+          path: work/batch
+      - name: Walk-forward experiments (runner ${{ matrix.job }})
+        run: |
+          chmod -R 777 work
+          docker run --rm -v "$PWD/work:/data" -e RESEARCH_EXCHANGE \
+            -e ACTIONS_ID_TOKEN_REQUEST_URL -e ACTIONS_ID_TOKEN_REQUEST_TOKEN \
+            -e RESEARCH_EPOCHS=80 -e RESEARCH_JOBS=$(nproc) -e RESEARCH_UNIVERSE=40 \
+            aitrader:research python -m aitrader.research.batch lab-run --out /data/batch \
+              --job ${{ matrix.job }} --budget-min ${{ needs.prep.outputs.budget }} \
+              --run-id ${{ github.run_id }} --server "$LAB_SERVER"
+      - if: always()
+        run: sudo chown -R "$(id -u):$(id -g)" work
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: lab-results-${{ matrix.job }}
+          path: work/batch/job-${{ matrix.job }}/results-*.json
+          retention-days: 7
+          if-no-files-found: ignore
+
+  merge:
+    needs: [prep, run]
+    if: always() && needs.prep.result == 'success'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v5
+      - run: docker build -q -t aitrader:research .
+      - uses: actions/download-artifact@v4
+        with:
+          name: lab-plan
+          path: work/batch
+      - uses: actions/download-artifact@v4
+        continue-on-error: true
+        with:
+          pattern: lab-results-*
+          path: work/batch/results
+      - name: Deflated Sharpe over all trials → live server
+        run: |
+          mkdir -p work/export work/batch/results && chmod -R 777 work
+          cp research/ledger.json work/ledger.json 2>/dev/null || echo '{"trials": []}' > work/ledger.json
+          docker run --rm -v "$PWD/work:/data" -e ACTIONS_ID_TOKEN_REQUEST_URL -e ACTIONS_ID_TOKEN_REQUEST_TOKEN \
+            aitrader:research python -m aitrader.research.batch lab-merge --out /data/batch \
+              --results /data/batch/results --run-id ${{ github.run_id }} --server "$LAB_SERVER" \
+              --ledger /data/ledger.json --export /data/export
+          sudo chown -R "$(id -u):$(id -g)" work
       - name: Commit results (history + fallback import on deploy)
         run: |
           if ! ls work/export/imports/*.json >/dev/null 2>&1; then echo "no results"; exit 0; fi
@@ -110,8 +171,20 @@ jobs:
           git add research/imports research/reports research/ledger.json
           git commit -q -m "research-lab: run ${{ github.run_id }} results [skip ci]" || exit 0
           for i in 1 2 3; do git pull -q --rebase origin main && git push -q origin HEAD:main && break; sleep 5; done
+      - name: Back up the live registry (trades, strategies, learnings)
+        continue-on-error: true
+        run: |
+          TOK=$(curl -s -H "Authorization: bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" "$ACTIONS_ID_TOKEN_REQUEST_URL&audience=aitrader-lab" | python3 -c 'import sys,json;print(json.load(sys.stdin)["value"])')
+          mkdir -p backup && curl -sf -H "Authorization: Bearer $TOK" -o backup/registry.sqlite.gz "$LAB_SERVER/api/lab/backup" && ls -la backup
+      - uses: actions/upload-artifact@v4
+        continue-on-error: true
+        with:
+          name: registry-backup
+          path: backup/registry.sqlite.gz
+          retention-days: 30
+          if-no-files-found: ignore
       - name: Chain the next run (continuous research on public repos)
-        if: success() && steps.plan.outputs.public == 'true' && inputs.chain != 'false'
+        if: needs.prep.outputs.public == 'true' && inputs.chain != 'false'
         env:
           GH_TOKEN: ${{ github.token }}
         run: gh workflow run research.yml --ref main -f chain=true || true

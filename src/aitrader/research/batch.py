@@ -262,7 +262,7 @@ def probe_bybit(relay: str, token: str) -> bool:
         return False
 
 
-def plan(gen: Generator, state: dict, pairs: list[str], rng):
+def plan(gen: Generator, state: dict, pairs: list[str], rng, first_rank: int = 0):
     """Endless spec stream: revalidations first, then ~25% refinements of promising
     strategies and ~75% new searches chosen by the UCB bandit (+ A/B'd learnings)."""
     for st in state.get("revalidate", []):
@@ -273,6 +273,10 @@ def plan(gen: Generator, state: dict, pairs: list[str], rng):
             spec["revalidates"] = st["id"]
             yield spec
     pool = [c for c in state.get("refine", []) if c.get("family") in FAMILIES]
+    if first_rank:  # parallel jobs open with different families (k-th best by the bandit)
+        from aitrader.research.generator import ucb_rank
+        ranked = ucb_rank(gen.family_stats())
+        yield gen.next_spec(pairs, family=ranked[first_rank % len(ranked)])
     while True:
         if pool and rng.random() < 0.25:
             yield gen.refine_spec(pairs, rng.choice(pool))
@@ -280,11 +284,31 @@ def plan(gen: Generator, state: dict, pairs: list[str], rng):
             yield gen.next_spec(pairs)
 
 
-def cmd_cycle(out: Path, budget_min: float, run_id: str, server: str | None, max_exp: int,
-              ledger_path: Path | None, export: Path) -> dict | None:
+def _use_relay(s, lab) -> bool:
+    """Real Bybit data: GitHub runners are geo-blocked by Bybit (US), so public market-data
+    requests go through the live server's relay (EU)."""
+    relay = lab.relay() if lab.enabled else None
+    if relay and probe_bybit(*relay):
+        s.research.exchange, (s.research.relay, s.research.relay_token) = "bybit", relay
+        return True
+    return False
+
+
+def _seed_registry(path: Path, state: dict, uni: dict | None = None) -> Registry:
+    for suffix in ("", "-wal", "-shm"):
+        Path(str(path) + suffix).unlink(missing_ok=True)
+    reg = Registry(path)
+    for lr in state.get("learnings", []):
+        reg.upsert("learnings", {k: lr.get(k) for k in ("id", "scope", "key", "insight", "adjustment", "expires")}
+                   | {"ts": iso(), "active": 1})
+    for p, d in ((uni or {}).get("market") or {}).items():
+        reg.upsert("market", {"pair": p, "ts": uni["ts"], "data": d}, key="pair")
+    return reg
+
+
+def cmd_lab_prep(out: Path, run_id: str, server: str | None, budget_min: float = 0, jobs: int = 1) -> dict | None:
+    """Phase 1 (one runner): live state, data source, universe scan → plan.json."""
     import os
-    import random
-    import time
 
     from aitrader.research.labclient import LabClient
     s = get_settings()
@@ -297,26 +321,13 @@ def cmd_cycle(out: Path, budget_min: float, run_id: str, server: str | None, max
              state.get("family_stats"))
     if state.get("paused"):
         log.warning("research paused from the terminal – nothing to do")
+        write_json_atomic(out / "plan.json", {"paused": True})
         return None
-    public = os.environ.get("LAB_PUBLIC", "") == "true"
-    # Real Bybit data: GitHub runners are geo-blocked by Bybit (US), so public market-data
-    # requests go through the live server's relay (EU). Fallback: OKX data.
-    relay = lab.relay() if lab.enabled else None
-    if relay and probe_bybit(*relay):
-        s.research.exchange, (s.research.relay, s.research.relay_token) = "bybit", relay
-    else:
+    if not _use_relay(s, lab):
         log.warning("Bybit relay unavailable – researching on %s data", s.research.exchange)
-    lab.run_event("start", budget_min=budget_min, cpus=os.cpu_count(), public=public,
-                  exchange=s.research.exchange)
-
-    db = out / "lab.sqlite"
-    for suffix in ("", "-wal", "-shm"):
-        Path(str(db) + suffix).unlink(missing_ok=True)
-    reg = Registry(db)
-    for lr in state.get("learnings", []):
-        reg.upsert("learnings", {k: lr.get(k) for k in ("id", "scope", "key", "insight", "adjustment", "expires")}
-                   | {"ts": iso(), "active": 1})
-
+    lab.run_event("start", budget_min=budget_min, cpus=(os.cpu_count() or 1) * jobs, jobs=jobs,
+                  public=os.environ.get("LAB_PUBLIC", "") == "true", exchange=s.research.exchange)
+    reg = _seed_registry(out / "prep.sqlite", state)
     uni = _fresh_universe(out / "universe.json")
     if uni is not None and uni.get("exchange") != s.research.exchange:
         uni = None  # cached universe belongs to the other exchange
@@ -333,64 +344,101 @@ def cmd_cycle(out: Path, budget_min: float, run_id: str, server: str | None, max
     if len(uni.get("pairs") or []) < 4:
         log.error("universe too small (%s) – no experiments this run", uni.get("pairs"))
         lab.run_event("end", experiments=0, error="universe too small")
+        write_json_atomic(out / "plan.json", {"error": "universe too small"})
         return None
-    for p, d in uni.get("market", {}).items():
-        reg.upsert("market", {"pair": p, "ts": uni["ts"], "data": d}, key="pair")
-    pairs = uni["pairs"]
+    plan_doc = {"exchange": s.research.exchange, "relay": bool(s.research.relay), "universe": uni,
+                "state": state, "ts": iso()}
+    write_json_atomic(out / "plan.json", plan_doc)
+    return plan_doc
 
-    seed = int("".join(ch for ch in run_id if ch.isdigit())[-6:] or 0)
+
+def cmd_lab_run(out: Path, job: int, jobs: int, budget_min: float, run_id: str, server: str | None,
+                max_exp: int = 50) -> list[dict]:
+    """Phase 2 (one of N parallel runners): budgeted walk-forward experiments."""
+    import random
+    import time
+
+    from aitrader.research.labclient import LabClient
+    s = get_settings()
+    s.ensure_dirs()
+    plan_doc = json.loads((out / "plan.json").read_text())
+    if plan_doc.get("paused") or plan_doc.get("error"):
+        return []
+    lab = LabClient(server, run_id)
+    state, uni = plan_doc["state"], plan_doc["universe"]
+    if plan_doc.get("relay") and not _use_relay(s, lab):
+        log.error("job %d: Bybit relay unavailable – skipping (plan was made on Bybit data)", job)
+        return []
+    s.research.exchange = plan_doc["exchange"]
+    reg = _seed_registry(out / f"lab-{job}.sqlite", state, uni)
+    pairs = uni["pairs"]
+    seed = int("".join(ch for ch in run_id if ch.isdigit())[-6:] or 0) * 10 + job
     gen = Generator(s, reg, seed=seed, stats_override=state.get("family_stats"))
     watcher = EpochWatcher(s, lab).start()
+    t0 = time.time()
 
     def on_progress(eid, stage, extra):
         watcher.cur.update(eid=eid, stage=stage)
-        left = budget_min - (time.time() - t0) / 60
-        lab.progress(eid, stage, fold=extra.get("fold"), epochs=watcher.cur.get("epochs"),
-                     budget_left_min=round(left, 1))
+        lab.progress(eid, stage, fold=extra.get("fold"), epochs=watcher.cur.get("epochs"), job=job,
+                     budget_left_min=round(budget_min - (time.time() - t0) / 60, 1))
 
     pipe = Pipeline(s, reg, on_progress=on_progress)
-    specs = plan(gen, state, pairs, random.Random(seed))
-    jdir = out / "job-lab"
-    jdir.mkdir(exist_ok=True)
+    st = state if job == 0 else {**state, "revalidate": []}  # revalidations run once, on job 0
+    specs = plan(gen, st, pairs, random.Random(seed), first_rank=job)
+    jdir = out / f"job-{job}"
+    jdir.mkdir(parents=True, exist_ok=True)
     for f in jdir.glob("results-*.json"):
         f.unlink()
-    t0, durations, results = time.time(), [], []
+    durations, results = [], []
     while len(results) < max_exp:
         elapsed = (time.time() - t0) / 60
         est = statistics.median(durations) if durations else 18.0
         if elapsed + est > budget_min:
-            log.info("budget: %.0f of %.0f min used, next experiment needs ~%.0f – stopping", elapsed,
-                     budget_min, est)
+            log.info("budget: %.0f of %.0f min used, next experiment needs ~%.0f – stopping", elapsed, budget_min, est)
             break
         spec = next(specs)
         eid = reg.new_experiment(spec["family"], spec)
         watcher.cur.update(eid=eid, stage="download", epochs=spec.get("epochs"))
-        lab.progress(eid, "download", spec=spec)
-        log.info("lab experiment %d: %s %s on %s", len(results) + 1, eid, spec["family"], spec["pairs"])
+        lab.progress(eid, "download", spec=spec, job=job)
+        log.info("job %d experiment %d: %s %s on %s", job, len(results) + 1, eid, spec["family"], spec["pairs"])
         started, t1 = iso(), time.time()
         try:
             res = pipe.run(eid, spec)
             results.append({"id": eid, "spec": spec, "result": res, "started": started, "finished": iso()})
-            lab.progress(eid, "evaluated", verdict=res["verdict"])
+            reg.update("experiments", eid, {"status": "done", "finished": iso(), "result": res})  # feeds the bandit
+            lab.progress(eid, "evaluated", verdict=res["verdict"], job=job)
         except Exception as e:  # noqa: BLE001
             log.error("experiment %s failed: %s", eid, e)
             results.append({"id": eid, "spec": spec, "error": f"{e}\n{traceback.format_exc()[-800:]}",
                             "started": started, "finished": iso()})
-            lab.progress(eid, "failed", error=str(e)[:500])
+            lab.progress(eid, "failed", error=str(e)[:500], job=job)
         durations.append((time.time() - t1) / 60)
-        write_json_atomic(jdir / "results-0.json", {"job": 0, "exchange": uni.get("exchange", s.research.exchange),
-                                                    "experiments": results})
+        write_json_atomic(jdir / f"results-{job}.json", {"job": job, "exchange": s.research.exchange,
+                                                         "experiments": results})
         prune_scratch(s.jobs_dir, keep=2)
     watcher.stop()
-    if not results:
+    return results
+
+
+def cmd_lab_merge(out: Path, results_root: Path, run_id: str, server: str | None, ledger_path: Path | None,
+                  export: Path) -> dict | None:
+    """Phase 3 (one runner): Deflated Sharpe over every trial (ledger + all parallel jobs),
+    import to the live server, export files for the repository."""
+    from datetime import datetime, timezone
+
+    from aitrader.research.labclient import LabClient
+    lab = LabClient(server, run_id)
+    plan_doc = json.loads((out / "plan.json").read_text()) if (out / "plan.json").exists() else {}
+    files = sorted(results_root.rglob("results-*.json"))
+    n = sum(len(json.loads(f.read_text()).get("experiments", [])) for f in files)
+    if not n:
         lab.run_event("end", experiments=0)
         return None
-
-    from datetime import datetime, timezone
     ledger = json.loads(ledger_path.read_text()) if ledger_path and ledger_path.exists() else {"trials": []}
     batch_id = f"b{datetime.now(timezone.utc):%Y%m%d}-{run_id}"
-    m = merge([jdir], batch_id, ledger)
-    m["market"], m["universe"] = uni.get("market", {}), pairs
+    m = merge([results_root], batch_id, ledger)
+    uni = plan_doc.get("universe") or {}
+    m["market"], m["universe"] = uni.get("market", {}), uni.get("pairs", [])
     imp = {k: v for k, v in m.items() if k != "experiments"} | {"summary": m["experiments"]}
     (export / "imports").mkdir(parents=True, exist_ok=True)
     (export / "reports").mkdir(parents=True, exist_ok=True)
@@ -398,10 +446,21 @@ def cmd_cycle(out: Path, budget_min: float, run_id: str, server: str | None, max
     (export / "reports" / f"{batch_id}.md").write_text(report_md(m))
     write_json_atomic(export / "ledger.json", update_ledger(ledger, m))
     resp = lab.import_batch(imp)
-    log.info("batch %s: %d experiments, %d candidates; server import: %s", batch_id, len(results),
-             len(m["candidates"]), resp)
-    lab.run_event("end", experiments=len(results), candidates=len(m["candidates"]), batch=batch_id)
+    log.info("batch %s: %d experiments, %d candidates; server import: %s", batch_id, n, len(m["candidates"]), resp)
+    lab.run_event("end", experiments=n, candidates=len(m["candidates"]), batch=batch_id)
     return m
+
+
+def cmd_cycle(out: Path, budget_min: float, run_id: str, server: str | None, max_exp: int,
+              ledger_path: Path | None, export: Path) -> dict | None:
+    """Single-runner lab run (prep → run → merge); the workflow runs the phases in parallel."""
+    if cmd_lab_prep(out, run_id, server, budget_min) is None:
+        return None
+    if not cmd_lab_run(out, 0, 1, budget_min, run_id, server, max_exp):
+        from aitrader.research.labclient import LabClient
+        LabClient(server, run_id).run_event("end", experiments=0)
+        return None
+    return cmd_lab_merge(out, out, run_id, server, ledger_path, export)
 
 
 def prune_scratch(jobs_dir: Path, keep: int = 2) -> None:
@@ -430,6 +489,18 @@ def main() -> None:
     y.add_argument("--run-id", default="local")
     y.add_argument("--server", default=None)
     y.add_argument("--ledger", type=Path, default=None)
+    for name in ("lab-prep", "lab-run", "lab-merge"):
+        q = sub.add_parser(name)
+        q.add_argument("--out", type=Path, required=True)
+        q.add_argument("--run-id", default="local")
+        q.add_argument("--server", default=None)
+        q.add_argument("--budget-min", type=float, default=150)
+        q.add_argument("--job", type=int, default=0)
+        q.add_argument("--jobs", type=int, default=1)
+        q.add_argument("--max-experiments", type=int, default=50)
+        q.add_argument("--results", type=Path, default=None)
+        q.add_argument("--ledger", type=Path, default=None)
+        q.add_argument("--export", type=Path, default=None)
     c = sub.add_parser("merge")
     c.add_argument("dirs", type=Path, nargs="+")
     c.add_argument("--out", type=Path, required=True)
@@ -442,6 +513,12 @@ def main() -> None:
     elif args.cmd == "cycle":
         cmd_cycle(args.out, args.budget_min, args.run_id, args.server, args.max_experiments, args.ledger,
                   args.export)
+    elif args.cmd == "lab-prep":
+        cmd_lab_prep(args.out, args.run_id, args.server, args.budget_min, args.jobs)
+    elif args.cmd == "lab-run":
+        cmd_lab_run(args.out, args.job, args.jobs, args.budget_min, args.run_id, args.server, args.max_experiments)
+    elif args.cmd == "lab-merge":
+        cmd_lab_merge(args.out, args.results or args.out, args.run_id, args.server, args.ledger, args.export)
     elif args.cmd == "run":
         args.out.mkdir(parents=True, exist_ok=True)
         cmd_run(args.out, args.job, args.experiments, args.universe)

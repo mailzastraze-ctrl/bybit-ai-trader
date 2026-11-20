@@ -28,6 +28,16 @@ def ucb_pick(stats: dict[str, tuple[int, float]], c: float = 0.6, rng: random.Ra
     return max(stats, key=lambda f: stats[f][1] + c * math.sqrt(math.log(total) / stats[f][0]))
 
 
+def ucb_rank(stats: dict[str, tuple[int, float]], c: float = 0.6) -> list[str]:
+    """Families ordered by UCB score (untried first) – parallel jobs start on different ones."""
+    total = max(sum(n for n, _ in stats.values()), 1)
+
+    def score(f):
+        n, m = stats[f]
+        return float("inf") if n == 0 else m + c * math.sqrt(math.log(max(total, 2)) / n)
+    return sorted(stats, key=score, reverse=True)
+
+
 class Generator:
     def __init__(self, settings: Settings, registry: Registry, seed: int | None = None,
                  stats_override: dict | None = None):
@@ -38,13 +48,12 @@ class Generator:
         self.stats_override = stats_override
 
     def family_stats(self) -> dict[str, tuple[int, float]]:
-        if self.stats_override:
-            stats = {f: (0, 0.0) for f in FAMILIES}
-            for f, v in self.stats_override.items():
-                if f in stats and isinstance(v, (list, tuple)) and len(v) == 2:
-                    stats[f] = (int(v[0]), float(v[1]))
-            return stats
+        """(n, mean reward) per family: the live server's history (research lab) plus the
+        experiments finished locally in this run, so a run doesn't repeat one family."""
         stats = {f: (0, 0.0) for f in FAMILIES}
+        for f, v in (self.stats_override or {}).items():
+            if f in stats and isinstance(v, (list, tuple)) and len(v) == 2:
+                stats[f] = (int(v[0]), float(v[1]))
         # Only completed experiments are evidence about a family. Infrastructure failures (data,
         # memory, a broken run) say nothing about the strategy and must not steer the bandit.
         rows = self.reg.q("SELECT family, result, status FROM experiments WHERE status='done'")
@@ -57,7 +66,8 @@ class Generator:
             acc[r["family"]].append(float(reward))
         for f, xs in acc.items():
             if xs:
-                stats[f] = (len(xs), sum(xs) / len(xs))
+                n0, m0 = stats[f]
+                stats[f] = (n0 + len(xs), (n0 * m0 + sum(xs)) / (n0 + len(xs)))
         return stats
 
     def active_learnings(self, family: str) -> list[dict]:
