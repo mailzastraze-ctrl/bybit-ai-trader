@@ -141,9 +141,10 @@ def test_portfolio_limits_cap_same_side_and_open_risk(portfolio, monkeypatch):
     from freqtrade.persistence import Trade
     portfolio.config["runmode"] = "live"
     portfolio.wallets = FakeWallets()
+    portfolio.dp = FakeDP(pd.DataFrame({"atr": [1.0]}))
     mk = lambda short, stop: SimpleNamespace(is_short=short, open_rate=100.0, stop_loss=stop,  # noqa: E731
                                              stake_amount=1000.0, leverage=3.0)
-    ok = lambda side: portfolio.confirm_trade_entry("BTC/USDT:USDT", "limit", 1, 100, "GTC", None, "s1", side)  # noqa: E731
+    ok = lambda side: portfolio.confirm_trade_entry("BTC/USDT:USDT", "limit", 40, 100, "PO", None, "s1", side)  # noqa: E731
     # 7 longs open with break-even stops (no risk left) → 8th long blocked, short still allowed
     monkeypatch.setattr(Trade, "get_open_trades", staticmethod(lambda: [mk(False, 100.0)] * 7), raising=False)
     assert ok("long") is False and ok("short") is True
@@ -157,18 +158,37 @@ def test_portfolio_limits_cap_same_side_and_open_risk(portfolio, monkeypatch):
     assert ok("long") is True  # research backtests are single-sleeve: no account limits
 
 
-def test_maker_first_entry_then_cross(portfolio):
-    from datetime import datetime, timezone
-    portfolio.config["runmode"] = "live"
-    portfolio.dp = SimpleNamespace(orderbook=lambda pair, n: {"bids": [[99.9, 1]], "asks": [[100.1, 1]]})
-    t0 = datetime(2026, 1, 1, tzinfo=timezone.utc)
-    order = SimpleNamespace(order_date_utc=t0)
-    adj = lambda secs, prop, cur, side="long": portfolio.adjust_entry_price(  # noqa: E731
-        None, order, "BTC/USDT:USDT", t0 + timedelta(seconds=secs), prop, cur, "s1", side)
-    assert adj(30, 99.9, 99.9) == 99.9            # resting at the bid (maker)
-    assert adj(60, 99.95, 99.8) == 99.95          # follows the touch
-    assert adj(200, 99.9, 99.9) == pytest.approx(100.1 * 1.0005)   # crosses after 3 min
-    assert adj(200, 99.9, 100.1 * 1.0005) == pytest.approx(100.1 * 1.0005)  # already crossing: keep
-    assert adj(200, 100.1, 100.1, "short") == pytest.approx(99.9 * 0.9995)
-    portfolio.config["runmode"] = "backtest"
-    assert adj(200, 99.9, 99.0) == 99.0           # no repricing in backtests
+def test_taker_converts_only_confirmed_remainder(portfolio):
+    from datetime import UTC, datetime
+    from unittest.mock import Mock
+
+    pytest.importorskip("freqtrade.freqtradebot")
+    from aitrader.demobot import DemoTradingBot
+
+    bot = DemoTradingBot.__new__(DemoTradingBot)
+    bot.strategy = portfolio
+    bot.exchange = SimpleNamespace(fetch_l2_order_book=lambda *a, **k: {"asks": [[105.0, 10.0]]})
+    bot.execute_entry = Mock(return_value=True)
+    bot.handle_cancel_enter = Mock()
+    trade = SimpleNamespace(pair="BTC/USDT:USDT", entry_side="buy", enter_tag="s1", is_short=False, leverage=2)
+    order = SimpleNamespace(side="buy", order_type="limit", status="open", ft_is_open=True,
+                            order_date_utc=datetime.now(UTC) - timedelta(seconds=170), order_id="demo-maker",
+                            safe_amount=12.0, filled=4.0, safe_filled=4.0, safe_placement_price=100.0)
+    bot.replace_order({}, order, trade)
+    bot.handle_cancel_enter.assert_not_called()
+    order.order_date_utc -= timedelta(seconds=20)
+    bot.replace_order({}, order, trade)
+    bot.handle_cancel_enter.assert_called_once()
+    bot.execute_entry.assert_not_called()
+
+    def cancel(*args, **kwargs):
+        order.status, order.ft_is_open = "canceled", False
+    bot.handle_cancel_enter.side_effect = cancel
+    bot.replace_order({}, order, trade)
+    assert bot.execute_entry.call_args.args == (trade.pair, 400.0)
+    assert bot.execute_entry.call_args.kwargs["ordertype"] == "market"
+
+    bot.execute_entry.reset_mock()
+    order.filled = order.safe_filled = order.safe_amount
+    bot.replace_order({}, order, trade)
+    bot.execute_entry.assert_not_called()

@@ -76,11 +76,19 @@ def test_lifecycle_exploration_to_incubation_to_production(env):
     s, reg = env
     life = Lifecycle(s, reg)
     _strategy(reg, "e1", "exploration", ["BTC"])
+    reg.update("strategies", "e1", {
+        "oos": {"protocol": "fixed_365x90"}, "gates": {"fold_consistency": {"pass": True}},
+    })
     _live(reg, "e1", [30, -10] * 10)
     life.evaluate(10_000)
     assert reg.one("SELECT stage FROM strategies WHERE id='e1'")["stage"] == "incubation"
-    reg.update("strategies", "e1", {"stage_since": "2020-01-01T00:00:00Z"})
-    life.evaluate(10_000)  # incubation passes (old stage_since, ≥15 trades, PF 3) → eligible → production
+    life.evaluate(10_000)
+    assert reg.one("SELECT stage FROM strategies WHERE id='e1'")["stage"] == "incubation"
+    reg.update("strategies", "e1", {"stage_since": "2025-07-01T00:00:00Z"})
+    learner = Learner(s, reg)
+    later = make_trades([30, -10] * 10, tag="e1", start="2025-08-01")
+    learner.sync_trades([{**t, "trade_id": t["trade_id"] + 5000} for t in later])
+    life.evaluate(10_000)
     assert reg.one("SELECT stage FROM strategies WHERE id='e1'")["stage"] == "production"
 
 
@@ -93,7 +101,7 @@ def test_lifecycle_retires_losers_and_fills_slots(env):
     _strategy(reg, "x1", "exploratory", ["SOL"])
     life.evaluate(10_000)
     st = {r["id"]: r["stage"] for r in reg.strategies()}
-    assert st["bad"] == "retired" and st["v1"] == "incubation" and st["x1"] == "exploration"
+    assert st["bad"] == "retired" and st["v1"] == "exploration" and st["x1"] == "exploration"
     hist = reg.one("SELECT history FROM strategies WHERE id='bad'")["history"]
     assert hist[-1]["to"] == "retired"
 
@@ -126,6 +134,27 @@ def test_bot_equity():
     eq, free = bot_equity({"total_bot": 5000, "stake": "USDT",
                            "currencies": [{"currency": "USDT", "free": 4000}]})
     assert eq == 5000 and free == 4000
+
+
+def test_private_sqlite_backup_can_be_restored(env, tmp_path):
+    import gzip
+    import sqlite3
+    from contextlib import closing
+
+    from aitrader.backup import backup_databases
+
+    s, reg = env
+    reg.kv_set("proof", {"n": 1})
+    with closing(sqlite3.connect(s.state_dir / "trades.sqlite")) as db:
+        db.execute("CREATE TABLE trade_proof (id INTEGER PRIMARY KEY)")
+        db.commit()
+    saved = backup_databases(s.state_dir)
+    assert set(saved) == {"registry", "trades"}
+    restored = tmp_path / "restored.sqlite"
+    archived = s.state_dir / "backups" / saved["registry"]
+    assert archived.stat().st_mode & 0o077 == 0
+    restored.write_bytes(gzip.decompress(archived.read_bytes()))
+    assert Registry(restored).kv_get("proof") == {"n": 1}
 
 
 # ------------------------------------------------------------------ pipeline e2e
@@ -184,7 +213,9 @@ def test_pipeline_end_to_end(env, good):
     spec["family"] = "trend_ema"
     eid = reg.new_experiment(spec["family"], spec)
     res = Pipeline(s, reg, runner).run(eid, spec)
-    assert runner.calls.count("hyperopt") == s.research.wf_folds
+    assert runner.calls.count("hyperopt") == 1
+    assert len({f["train"] for f in res["folds"]}) == 1
+    assert all(f["params"] == res["params"] for f in res["folds"])
     assert any(c.startswith("backtest:bt_stress") for c in runner.calls)
     assert any(c.startswith("backtest:bt_pert") for c in runner.calls)
     assert res["oos"]["trades"] == 36 * s.research.wf_folds
@@ -192,8 +223,8 @@ def test_pipeline_end_to_end(env, good):
     st = reg.one("SELECT * FROM strategies WHERE experiment_id=?", (eid,))
     if good:
         assert res["verdict"] in ("validated", "exploratory") and st["stage"] in ("validated", "exploratory")
-        assert set(st["pairs"]) == {"BTC/USDT:USDT", "ETH/USDT:USDT", "SOL/USDT:USDT"}
-        assert st["params"]["fast"] == 14  # best (lowest-loss) epoch of the last fold
+        assert set(st["pairs"]) == set(spec["pairs"])
+        assert st["params"]["fast"] == 14  # selected on the training period
     else:
         assert res["verdict"] == "rejected" and st["stage"] == "rejected"
     # validated strategies flow into the manifest
@@ -268,7 +299,7 @@ def test_batch_run_merge_and_import(env, tmp_path, monkeypatch):
     for job in (0, 1):
         batch.cmd_run(tmp_path / f"job{job}", job, 2, uni)
     m = batch.merge([tmp_path], "b1")
-    assert m["n_completed"] == 4 and m["n_trials_for_dsr"] == 4
+    assert m["n_completed"] == 4 and m["n_trials_for_dsr"] == 32
     fams = {e["family"] for e in m["experiments"]}
     assert len(fams) == 4 and fams <= set(batch.FAMILIES)
     assert m["candidates"] and all(c["stage"] in ("validated", "exploratory") for c in m["candidates"])

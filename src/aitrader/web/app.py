@@ -17,6 +17,7 @@ from aitrader.ftclient import FtClient
 from aitrader.manifest import Manifest
 from aitrader.registry import Registry
 from aitrader.research.generator import Generator
+from aitrader.selftest import execution_verified
 from aitrader.settings import get_settings
 from aitrader.util import parse_dt, utcnow
 
@@ -66,7 +67,8 @@ def _safe(fn, default=None):
 
 @app.get("/healthz")
 def healthz() -> dict:
-    return {"ok": True}
+    return {"ok": True, "mode": "bybit-demo",
+            "execution_verified": execution_verified(reg())}
 
 
 @app.get("/", dependencies=[Depends(auth)])
@@ -230,7 +232,7 @@ def lab_auth(request: Request) -> dict:
     tok = request.headers.get("authorization", "")
     tok = tok[7:].strip() if tok.lower().startswith("bearer ") else ""
     try:
-        return labsync.verify_oidc(tok, S.lab_repository)
+        return labsync.verify_oidc(tok, S.lab_repository, repository_id=S.lab_repository_id)
     except labsync.LabAuthError as e:
         raise HTTPException(401, f"lab auth: {e}") from e
 
@@ -240,20 +242,26 @@ def lab_state(claims: dict = Depends(lab_auth)) -> dict:  # noqa: ARG001
     return labsync.build_state(S, reg())
 
 
+def lab_writer(claims: dict = Depends(lab_auth)) -> dict:
+    if not str(claims.get("workflow_ref", "")).lower().endswith(f"/{labsync.WORKFLOWS[0]}@refs/heads/main"):
+        raise HTTPException(403, "research writer identity required")
+    return claims
+
+
 @app.post("/api/lab/progress")
-async def lab_progress(request: Request, claims: dict = Depends(lab_auth)) -> dict:  # noqa: ARG001
+async def lab_progress(request: Request, claims: dict = Depends(lab_writer)) -> dict:  # noqa: ARG001
     labsync.record_progress(reg(), await request.json())
     return {"ok": True}
 
 
 @app.post("/api/lab/run")
-async def lab_run(request: Request, claims: dict = Depends(lab_auth)) -> dict:  # noqa: ARG001
+async def lab_run(request: Request, claims: dict = Depends(lab_writer)) -> dict:  # noqa: ARG001
     labsync.record_run(reg(), await request.json())
     return {"ok": True}
 
 
 @app.post("/api/lab/import")
-async def lab_import(request: Request, claims: dict = Depends(lab_auth)) -> dict:  # noqa: ARG001
+async def lab_import(request: Request, claims: dict = Depends(lab_writer)) -> dict:  # noqa: ARG001
     data = await request.json()
     import asyncio
     res = await asyncio.to_thread(labsync.apply_import, S, reg(), data)
@@ -283,30 +291,13 @@ def relay(rest: str, request: Request) -> Response:
     if url is None:
         raise HTTPException(403, "only Bybit /v5/market/ GET requests are relayed")
     try:
-        r = rq.get(url, timeout=20, headers={"User-Agent": "aitrader-lab-relay"})
+        r = rq.get(url, timeout=20, headers={"User-Agent": "aitrader-lab-relay"}, allow_redirects=False)
     except rq.RequestException as e:
         raise HTTPException(502, f"upstream error: {e}") from e
+    if 300 <= r.status_code < 400:
+        raise HTTPException(502, "Bybit returned a redirect")
     return Response(r.content, status_code=r.status_code,
                     media_type=r.headers.get("content-type", "application/json"))
-
-
-@app.get("/api/lab/backup")
-def lab_backup(claims: dict = Depends(lab_auth)) -> Response:  # noqa: ARG001
-    """Consistent gzip snapshot of the registry (the lab stores it as a 30-day artifact)."""
-    import gzip
-    import sqlite3
-    import tempfile
-    with tempfile.TemporaryDirectory() as d:
-        tmp = Path(d) / "registry.sqlite"
-        src, dst = sqlite3.connect(S.registry_path), sqlite3.connect(tmp)
-        try:
-            src.backup(dst)
-        finally:
-            src.close()
-            dst.close()
-        data = gzip.compress(tmp.read_bytes(), 6)
-    return Response(data, media_type="application/gzip",
-                    headers={"Content-Disposition": "attachment; filename=registry.sqlite.gz"})
 
 
 # ---------------------------------------------------------------------------- HQ helpers

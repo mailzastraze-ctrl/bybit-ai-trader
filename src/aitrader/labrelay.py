@@ -21,8 +21,8 @@ import time
 
 ALLOWED_HOSTS = {"api.bybit.com", "api.bytick.com"}
 ALLOWED_PATH = re.compile(r"^/v5/market/[a-z0-9\-/]+$")
-TOKEN_TTL_S = 8 * 3600
-TARGET = re.compile(r"^https?:/+([^/]+)(/[^?]*)")
+TOKEN_TTL_S = 15 * 60
+TARGET = re.compile(r"https:/+([^/]+)(/[^?]*)")
 
 
 def _secret() -> bytes:
@@ -44,18 +44,22 @@ def verify_token(token: str | None, now: float | None = None) -> bool:
         exp = int(exp_s)
     except ValueError:
         return False
-    if exp < (now or time.time()):
+    current = time.time() if now is None else now
+    if exp <= current or exp - current > TOKEN_TTL_S:
         return False
-    good = hmac.new(_secret(), f"relay|{exp}".encode(), hashlib.sha256).hexdigest()[:40]
+    try:
+        good = hmac.new(_secret(), f"relay|{exp}".encode(), hashlib.sha256).hexdigest()[:40]
+    except RuntimeError:
+        return False
     return hmac.compare_digest(sig, good)
 
 
 def target_url(rest: str, query: str) -> str | None:
     """'https:/api.bybit.com/v5/market/kline' + query → validated upstream URL or None."""
-    m = TARGET.match(rest)
+    m = TARGET.fullmatch(rest)
     if not m:
         return None
     host, path = m.group(1).lower(), m.group(2)
-    if host not in ALLOWED_HOSTS or not ALLOWED_PATH.match(path):
+    if host not in ALLOWED_HOSTS or not ALLOWED_PATH.fullmatch(path) or "//" in path or len(query) > 2048:
         return None
     return f"https://{host}{path}" + (f"?{query}" if query else "")

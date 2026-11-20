@@ -1,113 +1,37 @@
-# PROJECT_STATUS
+# Статус торговой системы Bybit Demo
 
-_Last updated: 2026-11-20 17:00 CET_
+Дата проверки — 20 ноября 2026, Осло. **Готовность к реальным средствам не подтверждена.** Исторический пакет OKX завершил 29 экспериментов. После повторной фильтрации в импорте осталось 7 `exploratory` и 0 `validated`. Проект оценивает только демо-сделки и открывает ордера через Bybit Demo.
 
-## Summary
-The system is **deployed and running autonomously on Bybit Demo**. It never trades real money: `demo_trading` is hard-required.
+| Требование | Статус | Доказательство |
+|---|---|---|
+| 1. Freqtrade 2026.10, нативный `demo_trading`, USDT perpetual, isolated, 1h | Подтверждено на Railway для работающей версии | Сервис `aitrader` сообщает `Demo trading enabled for Bybit (Demo)`. Перезапуск 20.11 подтвердил авторизацию и получение торговых пар. [Health](https://aitrader-production-cf456409.up.railway.app/healthz) |
+| 1. Запрет реальных ордеров | Реализовано, проверено на нативном CCXT | `demo.py` проверяет эффективную конфигурацию до создания биржевого клиента и проверяет URL каждого подписанного запроса. В тесте SDK подписывает ордер только для `https://api-demo.bybit.com`. [`test_exec.py`](tests/test_exec.py) |
+| 1. Вход → стоп на бирже → выход | Исторический тест демосчёта пройден | XRP 0.9543 → стоп 0.9315 → выход 0.9542. Хранится результат самотеста с ID биржевого стопа. Менеджер использует его как условие запуска стратегий. [`selftest.py`](src/aitrader/selftest.py) |
+| 2. Шесть семейств, параметры входа, ATR SL, TP в R, трейлинг, тайм-аут, размер, фильтры старшего тренда и волатильности | Реализовано и проверено | Стратегии, тесты сигналов и гипероптимизация общих параметров. [`families`](src/aitrader/families) |
+| 2. Безубыток, храповик и трейлинг | Исходное сопровождение подтверждено на демосчёте, усиление проверено тестами | Запрос на пересчёт каждые ≈5 с. В предыдущем деплое стоп DOGE short менялся с 0.05641 на 0.05566. Freqtrade обновляет биржевой стоп с интервалом 60 с, локальный выход проверяется в каждом цикле. [`riskcore.py`](src/aitrader/riskcore.py) |
+| 3. 365 дней обучения, 4×90 дней OOS, ≥3 прибыльных фолда | Реализовано и проверено, нужен новый полный прогон | Фиксируются параметры, пары и направления до первого из четырёх фолдов. На всех фолдах проверяется одна конфигурация. Исторические импорты использовали другую методику. [`pipeline.py`](src/aitrader/research/pipeline.py) |
+| 3. Издержки, funding, стресс 2×, чувствительность ±10%, Монте-Карло, WFE | Реализовано и проверено, ждёт нового результата | В симуляции 0.105% на сторону и 0.210% в стрессе. Funding берётся из истории площадки через Freqtrade. Стресс удваивает комиссии и проскальзывание. Монте-Карло использует блоки по семь дней. [`metrics.py`](src/aitrader/research/metrics.py) |
+| 3. Deflated Sharpe, журнал 90 дней, `validated` / `exploratory` / `rejected` | Реализовано, исторические записи ограничены | Учитываются завершённые, неудачные и повторные эксперименты, наблюдавшиеся эпохи и параметрические варианты. Для прежних запусков без журнала эпох сохранена нижняя граница количества попыток. [`batch.py`](src/aitrader/research/batch.py) · [Исходная работа DSR](https://ssrn.com/abstract=2460551) |
+| 3. UCB, поиск вариантов, A/B, переаттестация 14 дней | Реализовано и проверено тестами | A/B сравнивает совпадающие по окну и seed контроль и вариант. Переаттестация берёт точные параметры, пары и направления активной стратегии. Для этих двух проверок ещё нет независимого длительного демо-результата. [`generator.py`](src/aitrader/research/generator.py) · [`lab.py`](src/aitrader/lab.py) |
+| 4. Риск 0.1% → 0.25% → 0.75%, повторное повышение после форварда | Реализовано и проверено тестами | Каждая ступень считает только сделки, открытые после её начала. Выход из экспериментальной ступени также требует строгих OOS-гейтов. [`lifecycle.py`](src/aitrader/lifecycle.py) |
+| 4. PF, просадка, расхождение, kill-switch, лимиты и корреляция | Реализовано и проверено тестами | Риск считается по фактическим стопам и незаполненной части входов, лимиты 3% на портфель, 7 на сторону, 2 стратегии семейства. Срабатывание kill-switch при просадке 25%, снятие после восстановления и 48 часов. Риск снижается при корреляции и волатильности счёта. [`ftbase.py`](src/aitrader/ftbase.py) · [`manager.py`](src/aitrader/manager.py) |
+| 4. Мейкер → тейкер через 3 минуты | Реализовано, проверены таймер и остаток ордера | Bybit `PostOnly` на входе. По достижении 180 с рабочий цикл сверяет отмену на бирже и отправляет остаток рыночным ордером. Нужна трасса такого перехода на демосчёте с реальным незаполненным лимитом. [`demobot.py`](src/aitrader/demobot.py) |
+| 5. 5 б.п. на входе и выходе | Реализовано и проверено | Штраф на фактический оборот каждого исполнения. Для старых записей без списка исполнений используется расчёт по входной и выходной цене. [`realism.py`](src/aitrader/realism.py) |
+| 5. Готовность к реалу, все критерии одновременно | Реализовано, данных для рекомендации пока нет | Учитываются сделки после повышения. 90 дней, 250 сделок, две стратегии с абсолютной корреляцией <0.5 на общих 90 днях, t ≥2.5 с поправкой на зависимость дневных доходностей, PF ≥1.3, просадка ≤10% от подтверждённого капитала, стабильность по календарным третям и согласованность с OOS. [`readiness.py`](src/aitrader/readiness.py) |
+| 6. Railway ЕС, 1 ГБ, торговля, обучение на демо, интерфейс | Работающая версия проверена | Один сервис в EU West с томом `/data`. На 20.11 в 16:55 CET два процесса показали 420 и 174 МБ RSS. В Railway тяжёлое исследование отключается на уровне конфигурации. [Railway](https://railway.com/project/98cee692-44e6-4924-beaf-f4c93a39d1d9) |
+| 6. GitHub Actions, публичный проект, 4 vCPU, последовательные запуски | Цикл подтверждён предыдущими запусками | Стандартный Ubuntu runner, один запуск лаборатории за раз. Свежий на момент проверки запуск работал. [Research Actions](https://github.com/mailzastraze-ctrl/bybit-ai-trader/actions/workflows/research.yml) |
+| 6. OIDC и короткие токены EU-ретранслятора, Bybit с резервным OKX | Предыдущий маршрут подтверждён, обновлённый контур проверен тестами | Рабочая версия получила Bybit klines, инструменты и funding через Railway. Обновление ограничивает OIDC конкретным workflow и снижает TTL рыночного токена до 15 минут. Ретранслятор принимает только публичные GET `/v5/market/`. [Запуск лаборатории](https://github.com/mailzastraze-ctrl/bybit-ai-trader/actions/runs/44766289844) · [`labrelay.py`](src/aitrader/labrelay.py) |
+| 6. Сторож, память, резервные копии, Freqtrade в CI | Реализовано, восстановление SQLite проверено тестом | Сторож проверяет heartbeat менеджера и лог бота. Приватный том хранит до семи ежедневных копий обеих БД. Копии переживают перезапуск сервиса. Отдельное хранилище для восстановления при потере тома требует отдельной настройки. [`backup.py`](src/aitrader/backup.py) · [CI](https://github.com/mailzastraze-ctrl/bybit-ai-trader/actions/workflows/ci.yml) |
+| 7. Офис Three.js, отделы, облако GitHub, цели, свечи, фолды и эксперименты | Работающий интерфейс и предыдущий CI-рендер подтверждены | Торговые и исследовательские данные поступают из API. Риг Xbot использует mocap ходьбы и покоя. Печать, посадка и часть жестов процедурные. Рендер проверяет загрузку скелетной анимации с тестовыми данными. [Офис](https://aitrader-production-cf456409.up.railway.app/) · [Рендер CI](https://github.com/mailzastraze-ctrl/bybit-ai-trader/actions/workflows/hq-preview.yml) |
 
-Architecture, split by load:
-- **Railway** (one container, volume `/data`, EU West): only trades, learns from fills, manages the strategy lifecycle and serves the web HQ. **No heavy compute.**
-- **GitHub Actions research lab** (`research-lab` workflow, public repo, 4 vCPU runners, free minutes): all hyperopt, walk-forward, stress, robustness and Monte Carlo. It sends only compact results to the server.
+## Ограничения измерения
 
-Links and rules:
-- Web HQ: https://aitrader-production-cf456409.up.railway.app (basic auth, user `admin`, password in the Railway variable `WEB_PASSWORD`). Classic terminal: `/terminal`.
-- Repo: `mailzastraze-ctrl/bybit-ai-trader` (**public** since 2026-11-20; no secrets in the repo or its history). Railway deploys on code changes only (`src`, `ft`, `config`, `Dockerfile`, `pyproject.toml`); research commits do not redeploy.
-- No profitability is claimed. Every number comes from real demo fills or from walk-forward out-of-sample backtests.
+- 1h бэктест не воспроизводит пятитисекундный путь котировки, очередь мейкер-ордера и реальное проскальзывание при гэпе. Для бэктеста используется консервативное рыночное исполнение.
+- Состав сканируемой вселенной ограничен доступными на площадке контрактами. Исторические рейтинги считаются только до обучающего среза. Закрытые до сегодняшнего дня контракты учитываются лишь при наличии их данных у площадки.
+- Предыдущий `registry-backup` опубликован как артефакт публичного репозитория и на момент проверки ещё хранится. Обновлённый процесс сохраняет копии на приватном томе.
+- Исходный отчёт фиксирует девять экспериментальных кандидатов. В более позднем файле импорта после фильтрации осталось семь, ни одного `validated`. [Отчёт](research/reports/b20261120-44725886469.md) · [Импорт](research/imports/b20261120-44725886469.json)
 
-## Original brief vs. implementation
-| # | Requirement | Status | Evidence |
-|---|---|---|---|
-| 1 | Monitor markets, find opportunities | ✅ | Lab scans **Bybit** USDT perps (via the EU relay; OKX fallback) with VolumePairList and scores trend vs. mean-reversion per pair. The server receives the universe and the scores |
-| 2 | Research, **develop**, test, optimise multiple strategies | ✅ | **6 families**: EMA trend, Bollinger mean reversion, Donchian, squeeze, **time-series momentum (vol-scaled)** and **funding-rate crowding reversal**, plus structural genes. A UCB bandit, learnings (A/B) and refinements of promising strategies choose the next experiment |
-| 3 | Entries, SL, TP, sizing and exits optimised together | ✅ | ATR stop, R-multiple TP, trailing, time exit and conviction-weighted risk sizing in one parameter vector |
-| 4 | Realistic validation, costs, OOS, overfitting control | ✅ | Walk-forward OOS, fees + slippage + funding, 2× cost stress, ±10% parameter perturbation, Monte Carlo and WFE gates. **Deflated Sharpe counts every trial of the last 90 days** (`research/ledger.json`), so continuous searching cannot inflate significance |
-| 5 | Execute and manage trades on Bybit Demo, controlled experiments | ✅ verified | Execution test passed: entry → **exchange stop-loss** → exit. Exploration sleeves trade at 0.1% risk |
-| 6 | Analyse, learn, promote only after independent validation | ✅ code / ⏳ trades | Learner (pair exclusion, MFE, time exits, side asymmetry, gate failures) with A/B pruning. Lifecycle: exploration → incubation → forward demo evidence → production. Revalidation every 14 days runs in the lab; a failed one retires the strategy |
-| 7 | Web terminal | ✅ live | **3D HQ v3**: real data on every screen (live 1h candles with entry/stop/target, live GitHub hyperopt epochs, fold results, gates, bandit, market map, goals). Company mission board, stand-up meetings built from real numbers, GitHub-lab cloud with data beam, expressive characters. Rendered headlessly on every UI change (`hq-preview` workflow, screenshots in `docs/preview/`, fails on JS errors) |
-| — | Cloud, independent of your PC | ✅ / ⚠️ | Railway **trial** credit runs out in about 15 days. Hobby is needed for indefinite operation |
-| — | GitHub + PROJECT_STATUS | ✅ | CI green with the real Freqtrade image; 104 tests |
+## Проверка изменений в этой ветке
 
-## Success-critical upgrades (2026-11-20, evening)
-- **Real-money readiness gate** (`readiness.py`, `/api/readiness`, HQ mission panel). It is advisory and never switches by itself. All 8 checks are evaluated on post-promotion production trades:
-  - ≥ 90 days of forward trading;
-  - ≥ 250 trades;
-  - ≥ 2 strategies with daily correlation < 0.5;
-  - t ≥ 2.5;
-  - PF ≥ 1.3;
-  - drawdown ≤ 10%;
-  - profitable in 2 of 3 time thirds;
-  - no divergence from out-of-sample results.
-- **Demo → reality haircut:** 5 bp of slippage per fill on every demo trade (the demo never touches the real book). Promotion, retirement and goals all use the realistic P&L.
-- **Active position management:** the stop is checked every ~5 s and mirrored to the exchange.
-  - It moves to break-even (+ fee buffer) at `be_rr`·R.
-  - From `lock_rr`·R a profit ratchet locks `lock_frac` of the best open profit, then the ATR trail takes over.
-  - The three thresholds are optimised exit parameters.
-  - Verified live 15:15–15:18 UTC: DOGE short #3 (entry 0.05648), stop moved to break-even at 0.05641, then ratcheted to 0.05566 (≈ +28 USDT locked).
-- **Portfolio limits:** open risk at stops ≤ 3% of equity, ≤ 7 positions per direction, ≤ 2 sleeves per family, volatility targeting (daily equity vol > 1.5% scales risk down), correlated sleeves (corr > 0.7) at half risk, exploration lane 5.
-- **Maker-first entries:** limit orders at the touch, crossing the spread after 3 min (maker 0.02% vs taker 0.055%).
-- **Stricter validation:** 365-day training, a full year of out-of-sample data as 4 unseen 90-day slices, a new fold-consistency gate (≥ 3/4 slices profitable), ≥ 760 days of history, a 40-pair research universe.
-- **Registry backup** every lab run (30-day artifact; the repo is public, so the demo data in it is visible to GitHub users).
-- **Not done yet:**
-  - Telegram alerts (need a bot token from the owner);
-  - cross-sectional momentum / open-interest data;
-  - a real-account switch procedure.
-
-## Real Bybit research data (2026-11-20)
-Bybit blocks US IPs, and GitHub runners are in the US. Probe result: a direct request from the runner gets HTTP 403, while the same request through the server relay gets HTTP 200.
-
-How the data reaches the lab:
-- The live server (Railway EU) relays **GET-only `/v5/market/*`** requests to `api.bybit.com` at `/relay/`. Tokens are 8-hour HMACs issued via OIDC; no new ports and no API keys are involved.
-- Research freqtrade subprocesses load a `sitecustomize` hook that rewrites ccxt's Bybit URLs to the relay. ccxt's own proxy options conflicted.
-
-First live run 15:44 UTC: instruments, risk limits, 1h klines and funding history were all downloaded through the relay with HTTP 200. Fallback to OKX applies if Bybit is unreachable, and no experiments run on a universe smaller than 4 pairs.
-
-Incident: the first attempt (ccxt proxy conflict) produced 50 empty experiments. The guard above was added and that batch file removed.
-
-## HQ staff (2026-11-20)
-- **Model and motion:** motion-captured skinned characters (three.js Xbot, Mixamo rig) with idle/walk mocap plus additive nod, head-shake and slump.
-- **Procedural poses** (world-axis, rig-independent): sitting, typing, talking, phone, coffee, cheering, clapping, pointing, whiteboard.
-- **Clothing shader:** skin, hair, shirts/jackets by department, lab coats, ties, belts, trousers, shoes.
-- **Fallback:** the procedural rig if the model can't load.
-
-## Research lab (GitHub Actions), added 2026-11-20
-1. `GET /api/lab/state` fetches learnings, revalidations due, strategies worth refining and the family bandit stats.
-2. Budgeted cycle of 170 min on public repos: revalidations → ~25% refinements → UCB new searches. Live progress (stage, epoch, best in-sample) is posted to `/api/lab/progress`.
-3. Merge with the 90-day ledger DSR → `POST /api/lab/import`. Results are committed to `research/imports`, `research/reports` and `research/ledger.json`.
-4. The next run is chained immediately (public repo). Cron restarts serve as a watchdog.
-
-Auth is GitHub OIDC: the server accepts only tokens of this repository's `main` branch, with no stored secret. `lab-probe` verifies this end to end (HTTP 200 on 2026-11-20).
-
-First run, 2026-11-20: scan finished at 14:56 UTC, experiments streaming.
-
-## Verified in production
-- Self-test 6/6 (demo endpoint, auth, futures, whitelist, `Demo trading enabled for Bybit (Demo)`).
-- Execution test: XRP entry 0.9543 → exchange stop 0.9315 → exit 0.9542 (−0.08 USDT fees/spread).
-- First autonomous strategy trade: 13:00 UTC, DOGE long, stop on the exchange.
-- Bulk batch b20261120-44725886469 (29 OOS experiments, OKX 1h): **0 validated**, 7 exploratory after a stricter re-filter.
-  - Breakout and squeeze **lose OOS after costs**.
-  - EMA trend and mean reversion show OOS edge but fail Deflated Sharpe, so they run as tiny-risk exploration.
-- Server since the remote-research switch: research process off, no OOM. Supervisor log line: `research mode: remote`.
-
-## Honest outlook (owner asked)
-- A subjective estimate of ~35–50% chance to find a modest, robust edge, most likely trend/time-series momentum.
-- Large stable returns are unlikely.
-- Demo fills are kinder than live trading.
-- Next levers:
-  - maker/limit entries (cost);
-  - funding/basis data (added);
-  - 4h/1d momentum horizons (TSMOM added);
-  - a portfolio of weak, uncorrelated edges;
-  - time for forward evidence.
-
-## Bugs found by real runs (all fixed, with regression tests)
-userdir must exist · absolute `file:////` pairlist URL · OOM on 1 GB (now: no research on the server) · universe too small · artifact permissions · forced-entry stake · keep-alive reset · hyperopt hang (watchdog) · weak candidates (stricter gates + retraction) · placeholders blocking research · CI missing psutil.
-
-## Needs the owner
-1. **Railway Hobby** (with a hard usage limit) for operation beyond the trial (≈ $10/month measured; trial credit ≈ 15 days).
-
-Owner decisions (2026-11-20): keep the current Bybit **Demo** API key (no rotation); make the repo public for free research compute.
-
-## Known limitations
-- Research data now comes from Bybit through the server relay. If the relay is down, a run falls back to OKX data and says so in its report.
-- Backtest TP fills at candle close, not intrabar.
-- Funding family: live funding candles are requested only when a funding sleeve is deployed. If data is missing, the family stays silent.
+- Локально: 108 тестов на Freqtrade 2026.10 и Ruff прошли.
+- Офис в локальном headless Chromium не стартовал из-за ограничения сокетов в окружении. Рендер этого изменения проверяется в GitHub Actions.

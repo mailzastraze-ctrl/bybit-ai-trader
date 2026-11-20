@@ -22,7 +22,7 @@ def client(tmp_path, monkeypatch):
 
 
 def test_auth_and_endpoints(client):
-    assert client.get("/healthz").json() == {"ok": True}
+    assert client.get("/healthz").json() == {"ok": True, "mode": "bybit-demo", "execution_verified": False}
     assert client.get("/api/overview").status_code == 401
     assert client.get("/api/overview", auth=("admin", "wrong")).status_code == 401
     a = ("admin", "pw")
@@ -36,7 +36,7 @@ def test_auth_and_endpoints(client):
         r = client.get(path, auth=a)
         assert r.status_code == 200, path
     assert client.get("/api/lab/state").status_code == 401
-    assert client.get("/api/lab/backup").status_code == 401
+    assert client.get("/api/lab/backup").status_code == 404
     assert client.get("/relay/https://api.bybit.com/v5/market/time").status_code == 401
     assert client.get("/api/readiness", auth=a).json()["total"] == 8
     assert client.post("/api/lab/import", json={}, headers={"Authorization": "Bearer junk"}).status_code == 401

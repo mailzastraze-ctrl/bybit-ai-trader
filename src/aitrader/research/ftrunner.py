@@ -146,7 +146,7 @@ def research_config(settings: Settings, pairs: list[str], **aitrader: object) ->
                      # cuts memory per freqtrade process substantially
                      "ccxt_config": ccxt_config(settings)},
         "pairlists": [{"method": "StaticPairList"}],
-        "aitrader": {"risk": 0.01, "leverage": lc.leverage, "min_trades_is": 30,
+        "aitrader": {"risk": 0.0075, "leverage": lc.leverage, "min_trades_is": 30,
                      "dd_limit": settings.gates.max_drawdown, **aitrader},
     }
 
@@ -186,7 +186,7 @@ class FreqtradeRunner:
         full_env = {**os.environ, **relay_env(self.s), **(env or {})}
         # Research must never see live credentials.
         for k in list(full_env):
-            if k.startswith("FREQTRADE__"):
+            if k.startswith("FREQTRADE__") or k in {"BYBIT_API_KEY", "BYBIT_API_SECRET"}:
                 full_env.pop(k)
         job.root.mkdir(parents=True, exist_ok=True)
         job.userdir.mkdir(parents=True, exist_ok=True)  # freqtrade refuses a missing --userdir
