@@ -17,7 +17,7 @@ Links and rules:
 ## Original brief vs. implementation
 | # | Requirement | Status | Evidence |
 |---|---|---|---|
-| 1 | Monitor markets, find opportunities | ✅ | Lab scans OKX USDT perps with VolumePairList and scores trend vs. mean-reversion per pair. The server receives the universe and the scores |
+| 1 | Monitor markets, find opportunities | ✅ | Lab scans **Bybit** USDT perps (via the EU relay; OKX fallback) with VolumePairList and scores trend vs. mean-reversion per pair. The server receives the universe and the scores |
 | 2 | Research, **develop**, test, optimise multiple strategies | ✅ | **6 families**: EMA trend, Bollinger mean reversion, Donchian, squeeze, **time-series momentum (vol-scaled)** and **funding-rate crowding reversal**, plus structural genes. A UCB bandit, learnings (A/B) and refinements of promising strategies choose the next experiment |
 | 3 | Entries, SL, TP, sizing and exits optimised together | ✅ | ATR stop, R-multiple TP, trailing, time exit and conviction-weighted risk sizing in one parameter vector |
 | 4 | Realistic validation, costs, OOS, overfitting control | ✅ | Walk-forward OOS, fees + slippage + funding, 2× cost stress, ±10% parameter perturbation, Monte Carlo and WFE gates. **Deflated Sharpe counts every trial of the last 90 days** (`research/ledger.json`), so continuous searching cannot inflate significance |
@@ -25,7 +25,7 @@ Links and rules:
 | 6 | Analyse, learn, promote only after independent validation | ✅ code / ⏳ trades | Learner (pair exclusion, MFE, time exits, side asymmetry, gate failures) with A/B pruning. Lifecycle: exploration → incubation → forward demo evidence → production. Revalidation every 14 days runs in the lab; a failed one retires the strategy |
 | 7 | Web terminal | ✅ live | **3D HQ v3**: real data on every screen (live 1h candles with entry/stop/target, live GitHub hyperopt epochs, fold results, gates, bandit, market map, goals). Company mission board, stand-up meetings built from real numbers, GitHub-lab cloud with data beam, expressive characters. Rendered headlessly on every UI change (`hq-preview` workflow, screenshots in `docs/preview/`, fails on JS errors) |
 | — | Cloud, independent of your PC | ✅ / ⚠️ | Railway **trial** credit runs out in about 15 days. Hobby is needed for indefinite operation |
-| — | GitHub + PROJECT_STATUS | ✅ | CI green with the real Freqtrade image; 94 tests |
+| — | GitHub + PROJECT_STATUS | ✅ | CI green with the real Freqtrade image; 104 tests |
 
 ## Success-critical upgrades (2026-11-20, evening)
 - **Real-money readiness gate** (`readiness.py`, `/api/readiness`, HQ mission panel). It is advisory and never switches by itself. All 8 checks are evaluated on post-promotion production trades:
