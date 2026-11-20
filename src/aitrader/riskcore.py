@@ -11,7 +11,8 @@ from datetime import datetime, timedelta
 
 import pandas as pd
 
-BE_FEE_BUFFER = 0.0012  # break-even stop sits ~0.12% beyond entry so fees+slippage are covered
+ROUND_TRIP_COST = 2 * (0.00055 + 0.0005)  # taker fees plus the demo slippage haircut
+BE_FEE_BUFFER = 0.0022
 
 
 @dataclass(frozen=True)
@@ -127,13 +128,10 @@ def stake_for_risk(
     loss_at_stop = stake * leverage * sl_distance_pct  ⇒  stake = equity*risk / (lev*sl_pct)
     Returns 0 when the trade can't be sized within limits (caller should skip it).
     """
-    if equity <= 0 or sl_distance_pct <= 0 or leverage <= 0:
+    if not all(math.isfinite(x) and x > 0 for x in (equity, risk, sl_distance_pct, leverage, multiplier)):
         return 0.0
     stake = equity * risk * multiplier / (leverage * sl_distance_pct)
     stake = min(stake, max_stake, equity * max_notional_frac / leverage)
     if min_stake is not None and stake < min_stake:
-        # Bumping to min_stake would exceed the risk budget by >50% → skip trade.
-        if min_stake > stake * 1.5:
-            return 0.0
-        stake = min_stake
+        return 0.0
     return max(stake, 0.0)

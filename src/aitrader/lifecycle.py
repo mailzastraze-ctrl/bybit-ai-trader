@@ -5,11 +5,13 @@ that the optimiser never saw. Builds the manifest the trading bot executes."""
 from __future__ import annotations
 
 import logging
+import math
 from datetime import timedelta
 
 from aitrader.families import FAMILIES
 from aitrader.learner import live_metrics
 from aitrader.manifest import STAGE_PRIORITY, Manifest, Sleeve, write_pairlist
+from aitrader.realism import real_pnl, real_ratio
 from aitrader.registry import Registry
 from aitrader.settings import Settings
 from aitrader.util import iso, parse_dt, utcnow
@@ -33,9 +35,13 @@ class Lifecycle:
         self.reg = registry
 
     def risk_for(self, stage: str) -> float:
-        return {"production": self.lc.risk_production, "incubation": self.lc.risk_incubation,
-                "eligible": self.lc.risk_incubation,
-                "exploration": self.lc.risk_exploration}.get(stage, 0.0)
+        requested, cap = {
+            "production": (self.lc.risk_production, 0.0075),
+            "incubation": (self.lc.risk_incubation, 0.0025),
+            "eligible": (self.lc.risk_incubation, 0.0025),
+            "exploration": (self.lc.risk_exploration, 0.001),
+        }.get(stage, (0.0, 0.0))
+        return min(max(requested, 0.0), cap) if math.isfinite(requested) else 0.0
 
     # ------------------------------------------------------------------ bootstrap
     def bootstrap(self) -> None:
@@ -106,10 +112,16 @@ class Lifecycle:
         return n
 
     # ------------------------------------------------------------------ evaluation
+    def stage_trades(self, s: dict, limit: int = -1) -> list[dict]:
+        return self.reg.q(
+            "SELECT * FROM live_trades WHERE sleeve_id=? AND julianday(open_date) >= julianday(?) "
+            "ORDER BY julianday(close_date) DESC LIMIT ?",
+            (s["id"], s.get("stage_since"), limit),
+        )[::-1]
+
     def update_live(self, equity: float) -> None:
         for st in self.reg.strategies(DEPLOYED + ("retired",)):
-            trades = self.reg.q("SELECT * FROM live_trades WHERE sleeve_id=? AND close_date >= ? "
-                                "ORDER BY close_date", (st["id"], (st.get("created") or "")[:10]))
+            trades = self.stage_trades(st)
             self.reg.update("strategies", st["id"], {"live": live_metrics(trades, equity)})
 
     def evaluate(self, equity: float) -> None:
@@ -124,9 +136,13 @@ class Lifecycle:
             pnl = live.get("pnl", 0.0)
             if s["stage"] == "exploration":
                 if n >= lc.exploration_min_trades:
-                    if pf >= 1.1 and pnl > 0:
+                    gates = s.get("gates") or {}
+                    has_oos = ((s.get("oos") or {}).get("protocol") == "fixed_365x90"
+                               and "fold_consistency" in gates and all(g["pass"] for g in gates.values()))
+                    has_capacity = len(self.reg.strategies(("incubation", "eligible"))) < lc.max_incubation
+                    if has_oos and has_capacity and pf >= 1.1 and pnl > 0 and not self.diverges(s):
                         self.reg.set_stage(s["id"], "incubation", f"exploration passed: {n} trades, PF {pf}")
-                    else:
+                    elif pf < 1.1 or pnl <= 0 or age > lc.exploration_max_days:
                         self.reg.set_stage(s["id"], "retired", f"exploration failed: {n} trades, PF {pf}")
                 elif age > lc.exploration_max_days:
                     self.reg.set_stage(s["id"], "retired", f"exploration inconclusive after {age:.0f}d ({n} trades)")
@@ -143,13 +159,12 @@ class Lifecycle:
                 self.reg.set_stage(s["id"], "retired", "live results diverge from out-of-sample expectation")
                 continue
             if s["stage"] == "production":
-                recent = self.reg.q("SELECT profit_abs FROM live_trades WHERE sleeve_id=? "
-                                    "ORDER BY close_date DESC LIMIT ?", (s["id"], lc.production_window))
+                recent = self.stage_trades(s, lc.production_window)
                 if len(recent) >= lc.production_window:
                     import numpy as np
 
                     from aitrader.research.metrics import profit_factor
-                    rpf = profit_factor(np.array([float(r["profit_abs"] or 0) for r in recent]))
+                    rpf = profit_factor(np.array([real_pnl(r) for r in recent]))
                     if rpf < lc.production_retire_pf:
                         self.reg.set_stage(s["id"], "retired", f"rolling PF {rpf:.2f} over last {len(recent)} trades")
                         continue
@@ -159,18 +174,16 @@ class Lifecycle:
         self._promote()
         self._fill_slots()
 
-    def diverges(self, s: dict, min_trades: int = 20) -> bool:
-        """Live mean trade return significantly (2 SE) below the OOS expectation and negative."""
+    def diverges(self, s: dict, min_trades: int = 20, rows: list[dict] | None = None) -> bool:
+        """Detect material deterioration in post-promotion returns versus the OOS test."""
         import numpy as np
         oos_exp = (s.get("oos") or {}).get("expectancy")
-        rows = self.reg.q("SELECT profit_ratio, profit_abs, stake_amount, leverage FROM live_trades WHERE sleeve_id=?",
-                          (s["id"],))
+        rows = self.stage_trades(s) if rows is None else rows
         if oos_exp is None or oos_exp <= 0 or len(rows) < min_trades:
             return False
-        from aitrader.realism import real_ratio
         r = np.array([real_ratio(x) for x in rows])
         se = r.std(ddof=1) / np.sqrt(len(r)) if len(r) > 1 else 0
-        return bool(r.mean() < 0 and r.mean() < oos_exp - 2 * se)
+        return bool(r.mean() < oos_exp - 2 * se)
 
     def risk_multiplier(self, s: dict, prior: int = 20) -> float:
         """Shift capital towards sleeves with proven live edge (shrunk towards PF=1)."""
@@ -197,21 +210,16 @@ class Lifecycle:
 
     def _fill_slots(self) -> None:
         lc = self.lc
-        n_inc = len(self.reg.strategies(("incubation",)))
-        for cand in self.reg.strategies(("validated",)):
-            if n_inc >= lc.max_incubation:
-                break
-            if self._family_full(cand["family"]):
-                continue
-            self.reg.set_stage(cand["id"], "incubation", "validated by research gates → forward test")
-            n_inc += 1
         n_exp = len(self.reg.strategies(("exploration",)))
-        for cand in self.reg.strategies(("exploratory",)):
+        candidates = self.reg.strategies(("validated",)) + self.reg.strategies(("exploratory",))
+        for cand in candidates:
             if self._family_full(cand["family"]):
-                continue
+                if not self._displace_placeholder(cand, same_family=True):
+                    continue
+                n_exp = len(self.reg.strategies(("exploration",)))
             if n_exp >= lc.max_exploration and not self._displace_placeholder(cand):
                 break
-            self.reg.set_stage(cand["id"], "exploration", "relaxed gates passed → tiny-risk live experiment")
+            self.reg.set_stage(cand["id"], "exploration", "forward test begins at exploration risk")
             n_exp = len(self.reg.strategies(("exploration",)))
         # Always-on learning: keep the exploration lane busy with the best recent near-misses
         # (profitable out-of-sample but failed a strict gate) so live evidence keeps flowing.
@@ -226,13 +234,14 @@ class Lifecycle:
 
     def _family_full(self, family: str, cap: int = 2) -> bool:
         """Diversification: at most `cap` deployed sleeves per strategy family."""
-        return sum(1 for r in self.reg.strategies(DEPLOYED)
-                   if r["family"] == family and not str(r["id"]).startswith(("boot-", "rnd-"))) >= cap
+        return sum(1 for r in self.reg.strategies(DEPLOYED) if r["family"] == family) >= cap
 
-    def _displace_placeholder(self, cand: dict) -> bool:
+    def _displace_placeholder(self, cand: dict, same_family: bool = False) -> bool:
         """Research-backed candidates replace unvalidated placeholders (bootstrap defaults,
         random explorers) unless the placeholder has already shown a live edge."""
         for r in sorted(self.reg.strategies(("exploration",)), key=lambda x: x.get("stage_since") or ""):
+            if same_family and r["family"] != cand["family"]:
+                continue
             if not (str(r["id"]).startswith("boot-") or str(r["id"]).startswith("rnd-")):
                 continue
             live = r.get("live") or {}
@@ -263,8 +272,7 @@ class Lifecycle:
         import random
         uni = (self.reg.kv_get("universe") or {}).get("pairs") or BOOT_PAIRS
         rng = random.Random()
-        for _ in range(2):
-            fam = rng.choice(list(FAMILIES.values()))
+        for fam in rng.sample(list(FAMILIES.values()), k=2):
             params = fam.perturb(fam.defaults(), 0.25, rng)
             pairs = rng.sample(uni, k=min(3, len(uni)))
             sid = f"rnd-{fam.name[:5]}-{rng.randrange(16**6):06x}"
@@ -331,18 +339,25 @@ class Lifecycle:
         rows.sort(key=lambda r: (-STAGE_PRIORITY.get("incubation" if r["stage"] == "eligible" else r["stage"], 0),
                                  -(r.get("score") or 0)))
         taken: set[str] = set()
+        family_count: dict[str, int] = {}
         sleeves: list[Sleeve] = []
         for r in rows:
+            family = r["family"]
+            if family_count.get(family, 0) >= 2:
+                continue
             mine = [p for p in (r.get("pairs") or []) if p not in taken and p not in excluded]
             mine = mine[: self.lc.max_pairs_per_sleeve]
             if not mine:
                 continue
+            if (r.get("oos") or {}).get("protocol") == "fixed_365x90" and mine != r["pairs"]:
+                continue  # the OOS reference applies to the complete, tested portfolio
             taken.update(mine)
+            family_count[family] = family_count.get(family, 0) + 1
             stage = "incubation" if r["stage"] == "eligible" else r["stage"]
             sleeves.append(Sleeve(id=r["id"], family=r["family"], params=r["params"], pairs=mine,
                                   stage=stage,
                                   risk=round(self.risk_for(r["stage"]) * scale * penalty.get(r["id"], 1.0)
-                                             * (self.risk_multiplier(r)
+                                             * (min(1.0, self.risk_multiplier(r))
                                                 if r["stage"] in ("production", "incubation", "eligible") else 1.0), 6),
                                   leverage=self.lc.leverage, sides=r.get("sides") or ["long", "short"],
                                   score=float(r.get("score") or 0.0)))

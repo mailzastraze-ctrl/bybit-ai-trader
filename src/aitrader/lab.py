@@ -29,6 +29,7 @@ log = logging.getLogger(__name__)
 OIDC_ISSUER = "https://token.actions.githubusercontent.com"
 OIDC_JWKS = OIDC_ISSUER + "/.well-known/jwks"
 AUDIENCE = "aitrader-lab"
+WORKFLOWS = (".github/workflows/research.yml", ".github/workflows/lab-probe.yml")
 REVALIDATE_DAYS = 14
 STALE_RUNNING_H = 3
 _jwk_client = None
@@ -39,7 +40,7 @@ class LabAuthError(Exception):
     pass
 
 
-def verify_oidc(token: str, repository: str, jwk_client=None) -> dict:
+def verify_oidc(token: str, repository: str, jwk_client=None, *, repository_id: str | None = None) -> dict:
     """Validate a GitHub Actions OIDC token; returns its claims."""
     import jwt  # PyJWT (ships with freqtrade)
 
@@ -61,6 +62,15 @@ def verify_oidc(token: str, repository: str, jwk_client=None) -> dict:
         raise LabAuthError(f"token belongs to {claims.get('repository')}")
     if claims.get("ref") != "refs/heads/main":
         raise LabAuthError(f"token minted for {claims.get('ref')}, not main")
+    if repository_id and str(claims.get("repository_id")) != repository_id:
+        raise LabAuthError("repository identifier mismatch")
+    allowed = {f"{repository}/{workflow}@refs/heads/main".lower() for workflow in WORKFLOWS}
+    workflow_ref = str(claims.get("workflow_ref", "")).lower()
+    event = claims.get("event_name")
+    if workflow_ref not in allowed or event not in ("schedule", "workflow_dispatch", "push"):
+        raise LabAuthError("research workflow identity required")
+    if event != "workflow_dispatch" and workflow_ref.endswith(f"/{WORKFLOWS[1]}@refs/heads/main"):
+        raise LabAuthError("diagnostic workflow must be manually dispatched")
     return claims
 
 
@@ -211,8 +221,10 @@ def apply_import(s: Settings, reg: Registry, data: dict) -> dict:
             pf = float((res.get("oos") or {}).get("profit_factor") or 0)
             st = reg.one("SELECT stage FROM strategies WHERE id=?", (target,))
             if st and st["stage"] in ("incubation", "eligible", "production") \
-                    and res.get("verdict") == "rejected" and pf < 1.0:
-                reg.set_stage(target, "retired", f"revalidation on fresh data: edge gone (OOS PF {pf})")
+                    and res.get("protocol") == "fixed_365x90" and (
+                        pf < 1.0 or float(res.get("fold_pos") or 0) < s.gates.min_fold_consistency
+                    ):
+                reg.set_stage(target, "retired", f"revalidation on deployed parameters failed (OOS PF {pf})")
             else:
                 reg.event("research", f"{target}: revalidation {res.get('verdict')} (OOS PF {pf})")
     market = data.get("market") or {}

@@ -23,9 +23,11 @@
     "force_entry": "market", "force_exit": "market", "stoploss": "market",
     "stoploss_on_exchange": true, "stoploss_on_exchange_interval": 60
   },
+  "order_time_in_force": {"entry": "PO", "exit": "GTC"},
   "exchange": {
     "name": "bybit",
     "demo_trading": true,
+    "enable_ws": false,
     "key": "",
     "secret": "",
     "ccxt_config": {"options": {"fetchMarkets": {"types": ["linear"]}}},

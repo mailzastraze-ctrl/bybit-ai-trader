@@ -13,7 +13,6 @@ jobs:
           TOK=$(curl -s -H "Authorization: bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" "$ACTIONS_ID_TOKEN_REQUEST_URL&audience=aitrader-lab" | python3 -c 'import sys,json;print(json.load(sys.stdin)["value"])')
           echo "token length: ${#TOK}"
           curl -s -o /tmp/r.txt -w "state HTTP %{http_code}\n" -H "Authorization: Bearer $TOK" https://aitrader-production-cf456409.up.railway.app/api/lab/state
-          head -c 300 /tmp/r.txt; echo
           curl -s -H "Authorization: Bearer $TOK" https://aitrader-production-cf456409.up.railway.app/api/lab/proxy > /tmp/p.json
           RELAY=$(python3 -c 'import json;print(json.load(open("/tmp/p.json"))["relay"])'); RT=$(python3 -c 'import json;print(json.load(open("/tmp/p.json"))["token"])')
           echo "relay: $RELAY"

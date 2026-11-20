@@ -49,7 +49,9 @@ def _token(key, **over):
     import jwt
     now = int(time.time())
     claims = {"iss": lab.OIDC_ISSUER, "aud": lab.AUDIENCE, "iat": now, "exp": now + 300,
-              "repository": "mailzastraze-ctrl/bybit-ai-trader", "ref": "refs/heads/main"} | over
+              "repository": "mailzastraze-ctrl/bybit-ai-trader", "ref": "refs/heads/main",
+              "repository_id": "1465223259", "event_name": "schedule",
+              "workflow_ref": f"mailzastraze-ctrl/bybit-ai-trader/{lab.WORKFLOWS[0]}@refs/heads/main"} | over
     return jwt.encode(claims, key, algorithm="RS256")
 
 
@@ -57,11 +59,12 @@ def test_oidc_accepts_only_this_repo_main_branch():
     key = _keys()
     jw = _Jwk(key.public_key())
     repo = "mailzastraze-ctrl/bybit-ai-trader"
-    assert lab.verify_oidc(_token(key), repo, jw)["repository"] == repo
+    assert lab.verify_oidc(_token(key), repo, jw, repository_id="1465223259")["repository"] == repo
     for bad in (dict(repository="someone/fork"), dict(ref="refs/heads/feature"), dict(aud="other"),
-                dict(iss="https://evil"), dict(exp=int(time.time()) - 10)):
+                dict(iss="https://evil"), dict(exp=int(time.time()) - 10), dict(repository_id="2"),
+                dict(event_name="pull_request"), dict(workflow_ref="unrelated")):
         with pytest.raises(lab.LabAuthError):
-            lab.verify_oidc(_token(key, **bad), repo, jw)
+            lab.verify_oidc(_token(key, **bad), repo, jw, repository_id="1465223259")
     with pytest.raises(lab.LabAuthError):
         lab.verify_oidc(_token(_keys()), repo, jw)  # signed by someone else
     with pytest.raises(lab.LabAuthError):
@@ -148,7 +151,7 @@ def test_cycle_state_to_import_closed_loop(env, tmp_path, monkeypatch):
     ledger.write_text(json.dumps({"trials": [{"ts": iso(), "sr": 0.01 * i} for i in range(20)]}))
     m = batch.cmd_cycle(out, budget_min=600, run_id="777", server="x", max_exp=3, ledger_path=ledger,
                         export=tmp_path / "export")
-    assert m["n_completed"] == 3 and m["n_trials_for_dsr"] == 23  # ledger trials count too
+    assert m["n_completed"] == 3 and m["n_trials_for_dsr"] == 39  # legacy, new epochs, and perturbations
     assert fake.events[0] == "start" and fake.events[-1] == "end"
     assert m["experiments_full"][0]["spec"]["revalidates"] == "prod-1"  # revalidation first
     assert {st for _, st in fake.prog} >= {"download", "hyperopt fold 1/4", "evaluated"}
@@ -203,7 +206,8 @@ def test_fold_consistency_gate():
     oos = {"trades": 80, "profit_factor": 1.5, "sharpe": 1.4, "max_drawdown": 0.05, "total_return": 0.2}
     m = {"oos": oos, "stress": {"profit_factor": 1.3}, "wfe": 0.8, "robust_frac": 1.0, "mc": {"prob_profit": 0.95},
          "dsr": 0.95}
-    assert evaluate_gates(Gates(), m)[0] == "validated"  # old results without fold data
+    assert evaluate_gates(Gates(), m)[0] == "exploratory"  # unavailable fourth-fold evidence
+    assert evaluate_gates(Gates(), {**m, "fold_pos": 0.75})[0] == "validated"
     v, g = evaluate_gates(Gates(), {**m, "fold_pos": 0.5})  # only 2 of 4 slices profitable
     assert v == "exploratory" and g["fold_consistency"]["pass"] is False
     assert evaluate_gates(Gates(), {**m, "fold_pos": 0.25})[0] == "rejected"

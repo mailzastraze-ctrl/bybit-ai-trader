@@ -37,7 +37,7 @@ FALLBACK_UNIVERSE = [
 def pair_scores(df: pd.DataFrame) -> dict:
     """Regime/affinity metrics from the last ~60 days of hourly candles."""
     df = df.tail(24 * 60).reset_index(drop=True)
-    if len(df) < 24 * 20:
+    if len(df) < 24 * 30:
         return {}
     ret = np.log(df["close"]).diff().dropna()
     er = ta.efficiency_ratio(df["close"], 24).mean()
@@ -57,6 +57,24 @@ def pair_scores(df: pd.DataFrame) -> dict:
         "ret_30d": round(float(df["close"].iloc[-1] / df["close"].iloc[-24 * 30] - 1), 4),
         "turnover_24h_est": round(notional, 0),
     }
+
+
+def training_scores(settings: Settings, pairs: list[str]) -> dict:
+    from aitrader.research.validation import walk_forward_folds
+
+    rs = settings.research
+    cutoff = walk_forward_folds(utcnow(), rs.train_days, rs.holdout_days, rs.wf_folds)[0].train_end
+    scores = {}
+    for pair in pairs:
+        path = pair_file(settings, pair)
+        if not path.is_file():
+            continue
+        try:
+            df = pd.read_feather(path)
+            scores[pair] = pair_scores(df.loc[df["date"] < cutoff])
+        except (OSError, ValueError, TypeError) as exc:
+            log.warning("Training score unavailable for %s: %s", pair, type(exc).__name__)
+    return scores
 
 
 class Scanner:

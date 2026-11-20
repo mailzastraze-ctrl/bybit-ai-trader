@@ -184,16 +184,26 @@ class Learner:
         self.evaluate_learnings(rows)
 
     def evaluate_learnings(self, rows: list[dict]) -> None:
-        """A/B: compare experiment scores with vs without each learning; prune losers."""
+        """Evaluate only complete control/treatment pairs with the same seed and market."""
         for lr in self.reg.q("SELECT * FROM learnings WHERE active=1 AND scope IN ('family','research')"):
             fam = lr["key"]
-            with_, without = [], []
+            controls, treatments = {}, {}
             for r in rows:
                 if r["family"] != fam or not isinstance(r.get("spec"), dict):
                     continue
-                sc = float(r["result"].get("score", 0.0)) if isinstance(r.get("result"), dict) else 0.0
-                (with_ if lr["id"] in r["spec"].get("used_learnings", []) else without).append(sc)
-            if len(with_) >= 3 and len(without) >= 3:
+                spec = r["spec"]
+                trial = spec.get("ab_trial")
+                if not trial or not isinstance(r.get("result"), dict):
+                    continue
+                sc = float(r["result"].get("score", 0.0))
+                if spec.get("ab_arm") == "control":
+                    controls[trial] = sc
+                elif lr["id"] in spec.get("used_learnings", []):
+                    treatments[trial] = sc
+            matched = sorted(controls.keys() & treatments.keys())
+            if len(matched) >= 3:
+                with_ = [treatments[trial] for trial in matched]
+                without = [controls[trial] for trial in matched]
                 gain = float(np.mean(with_) - np.mean(without))
                 adj = dict(lr.get("adjustment") or {})
                 adj["ab"] = {"with": round(float(np.mean(with_)), 4), "without": round(float(np.mean(without)), 4),
