@@ -301,11 +301,38 @@ function renderGoals() {
   $("#goals").innerHTML = (S.goals?.goals || []).map((g) => `<div class="goal"><span class="t">${esc(RU[g.id] || g.title)}</span><b class="num">${esc(g.value)}${g.unit === "%" ? "%" : ""}<span class="dim"> / ${esc(g.target)}${g.unit === "%" ? "%" : ""}</span></b>
     <div class="bar"><i style="width:${Math.round(Math.max(0, Math.min(1, g.progress)) * 100)}%;background:${g.progress >= 1 ? "var(--good)" : g.warning ? "var(--crit)" : "var(--blue)"}"></i></div></div>`).join("");
 }
+// журнал: сервер пишет по-английски (для отладки), пульт показывает по-русски
+const famRe = (f) => famName(f.trim());
+const RU_EVENTS = [
+  [/^lab: experiment (\S+) started — (\S+) on (\d+) pairs \((.+)\)$/, (m) => `опыт ${m[1]} начат — ${famRe(m[2])} на ${m[3]} монетах (${m[4].replace("new search", "новый поиск").replace("refines", "доработка").replace("revalidates", "перепроверка")})`],
+  [/^lab: experiment (\S+) failed: (.*)$/, (m) => `опыт ${m[1]} — ошибка: ${m[2]}`],
+  [/^lab: GitHub research run (\S+) started \((\d+) CPUs, budget (\S+) min\)$/, (m) => `запущен прогон лаборатории ${m[1]} (${m[2]} ядер, бюджет ${m[3]} мин)`],
+  [/^lab: universe refreshed on (\S+) — (\d+) pairs$/, (m) => `список монет обновлён (${m[1]}) — ${m[2]} монет`],
+  [/^lab: batch (\S+) imported — (\d+) experiments, (\d+) new candidates.*$/, (m) => `сводка прогона ${m[1]}: ${m[2]} опытов, новых кандидатов: ${m[3]}`],
+  [/^lab: forward test of (\d+) frozen strategies on unseen Bybit data — (\d+) forward trades$/, (m) => `форвард-тест: ${m[1]} стратегий проверено на новых данных — ${m[2]} сделок`],
+  [/^screener: ([\d,]+) strategy combinations tested on (\d+) .* — (\d+) stayed.*$/, (m) => `скринер: проверено ${m[1].replace(/,/g, " ")} вариантов на ${m[2]} рядах — выжило ${m[3]} → строгая проверка`],
+  [/^manifest v(\d+): (\d+) sleeves.*?(\d+) pairs.*$/, (m) => `торговый план v${m[1]}: ${m[2]} стратегий, ${m[3]} монет`],
+  [/^(\S+) (long|short): stop moved to (\S+) — profit locked \+?\$?(\S+)$/, (m) => `${m[1]} ${m[2] === "long" ? "лонг" : "шорт"}: стоп перенесён на ${m[3]} — зафиксировано +${m[4]} $`],
+  [/^synced (\d+) new closed demo trades$/, (m) => `учтено новых закрытых сделок: ${m[1]}`],
+  [/^new learning \[(.+?)\] (.*)$/, (m) => `новый вывод [${m[1]}]: ${m[2]}`],
+  [/^universe refreshed: (\d+) pairs \((.+)\)$/, (m) => `список монет обновлён: ${m[1]} (${m[2]})`],
+  [/^real-money readiness (\d+)\/(\d+) checks.*$/, (m) => `готовность к реальному счёту: ${m[1]}/${m[2]} проверок`],
+  [/^(\S+): (validated|exploratory|rejected) — OOS trades (\d+), PF (\S+).*$/, (m) => `${m[1]}: ${{validated: "прошла проверки", exploratory: "кандидат", rejected: "отсеяна"}[m[2]]} — ${m[3]} сделок, PF ${m[4]}`],
+  [/^forward test: (.*)$/, (m) => `форвард-тест: ${m[1]}`],
+  [/^manager started$/, () => "менеджер запущен"],
+  [/^research mode: remote.*$/, () => "исследования идут в лаборатории на GitHub — сервер только торгует"],
+  [/^started: (.*)$/, (m) => `система запущена: ${m[1]}`],
+  [/^self-test PASSED.*$/, () => "самопроверка пройдена"],
+  [/^execution test PASSED.*$/, () => "проверка исполнения пройдена: вход, стоп на бирже, выход"],
+  [/^control action: (.*)$/, (m) => `действие с пульта: ${m[1]}`],
+];
+const ruEvent = (msg) => { for (const [re, f] of RU_EVENTS) { const m = re.exec(msg); if (m) return f(m); } return msg; };
+
 function renderLog() {
   if (S.tab !== "overview" && S.tab !== "lab") return;
   const ev = S.ev?.events || S.ov?.events || [];
   const SRC = {research: "исследования", lifecycle: "отбор", strategy: "стратегия", manager: "менеджер", supervisor: "система", scanner: "рынок", risk: "риск", web: "пульт", learner: "обучение"};
-  $("#log").innerHTML = ev.slice(0, 60).map((e) => `<div class="${esc(e.level)}"><time class="num">${esc((e.ts || "").slice(11, 16))}</time><span class="src">${esc(SRC[e.source] || e.source)}</span><span class="msg">${esc(e.message)}</span></div>`).join("") || `<div class="empty">тихо</div>`;
+  $("#log").innerHTML = ev.slice(0, 60).map((e) => `<div class="${esc(e.level)}"><time class="num">${esc((e.ts || "").slice(11, 16))}</time><span class="src">${esc(SRC[e.source] || e.source)}</span><span class="msg">${esc(ruEvent(e.message))}</span></div>`).join("") || `<div class="empty">тихо</div>`;
 }
 function renderLearn() {
   const ln = (S.ln?.learnings || []).filter((l) => l.active).slice(0, 25);
