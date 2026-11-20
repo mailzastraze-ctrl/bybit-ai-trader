@@ -36,7 +36,8 @@ userdir must exist · absolute `file:////` pairlist URL · OOM on 1 GB · silent
 
 ## Needs the owner
 1. **Railway Hobby** (with a hard usage limit) for operation beyond the trial (~2–3 weeks of credit).
-2. **Rotate the Bybit Demo API key** (it was shared in chat) and update `BYBIT_API_KEY` and `BYBIT_API_SECRET` on Railway.
+
+Owner decision (2026-11-20): keep the current Bybit **Demo** API key; no rotation (demo funds only).
 
 ## Known limitations
 - GitHub runners can't reach Bybit (US geo-block), so bulk research uses OKX prices as a proxy. Imported candidates must pass Bybit Demo forward tests.
