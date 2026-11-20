@@ -74,6 +74,7 @@ def main() -> None:
     life, learner, scanner = Lifecycle(s, reg), Learner(s, reg), Scanner(s, reg)
     life.bootstrap()
     life.import_offline_candidates(s.app_dir / "research" / "imports")
+    life.import_external(s.app_dir / "research" / "external")
     # make sure the bot has a manifest + pairlist before it starts trading
     life.write(life.build_manifest([], set(scanner.excluded_pairs()), False), [])
     reg.event("manager", "manager started")

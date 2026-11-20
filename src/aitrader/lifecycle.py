@@ -73,6 +73,36 @@ class Lifecycle:
             self.reg.event("lifecycle", f"imported {n} offline research candidates")
         return n
 
+    def import_external(self, directory) -> int:
+        """Strategies brought in from outside (research/external/*.json, e.g. the owner's own
+        Strategy Lab). They are frozen at import and go through the same honest tests:
+        walk-forward with the fixed configuration and the forward test on unseen data."""
+        import json
+        from pathlib import Path
+        n = 0
+        for f in sorted(Path(directory).glob("*.json")):
+            try:
+                d = json.loads(f.read_text())
+                fam = FAMILIES[d["family"]]
+            except (OSError, json.JSONDecodeError, KeyError):
+                continue
+            if self.reg.one("SELECT id FROM strategies WHERE id=?", (d["id"],)):
+                continue
+            now = iso()
+            note = f"external: {d.get('source', 'outside')} – frozen at import, forward test from now"
+            self.reg.upsert("strategies", {
+                "id": d["id"], "experiment_id": "", "family": fam.name, "params": fam.normalize(d.get("params")),
+                "pairs": d.get("pairs") or [], "sides": d.get("sides") or ["long", "short"], "stage": "exploratory",
+                "score": 0.0, "oos": {"timeframe": d.get("timeframe") or "1h", "external": True,
+                                      "claimed": d.get("claimed") or {}, "source": d.get("source"),
+                                      "variant": f"{fam.name} (external, {', '.join(p.split('/')[0] for p in d.get('pairs') or [])} "
+                                                 f"{d.get('timeframe') or '1h'})"},
+                "gates": {}, "live": {}, "created": now, "updated": now, "stage_since": now,
+                "history": [{"ts": now, "to": "exploratory", "reason": note}], "note": note})
+            self.reg.event("lifecycle", f"{d['id']}: {note}", data={"strategy": d["id"]})
+            n += 1
+        return n
+
     def import_batch(self, data: dict, announce: bool = True) -> int:
         """One research batch (GitHub research lab or offline file) → candidates."""
         n = 0
@@ -201,13 +231,13 @@ class Lifecycle:
         for cand in self.reg.strategies(("validated",)):
             if n_inc >= lc.max_incubation:
                 break
-            if self._family_full(cand["family"]):
+            if not self.tradable_tf(cand) or self._family_full(cand["family"]):
                 continue
             self.reg.set_stage(cand["id"], "incubation", "validated by research gates → forward test")
             n_inc += 1
         n_exp = len(self.reg.strategies(("exploration",)))
         for cand in self.reg.strategies(("exploratory",)):
-            if self._family_full(cand["family"]):
+            if not self.tradable_tf(cand) or self._family_full(cand["family"]):
                 continue
             if n_exp >= lc.max_exploration and not self._displace_placeholder(cand):
                 break
@@ -223,6 +253,12 @@ class Lifecycle:
                                    "always-on exploration: near-miss (positive OOS, failed a strict gate)")
                 n_exp += 1
         self.ensure_activity()
+
+    @staticmethod
+    def tradable_tf(st: dict) -> bool:
+        """The demo bot trades 1h candles; strategies researched on another timeframe stay in
+        research + forward test until a bot for that timeframe runs (needs more memory)."""
+        return ((st.get("oos") or {}).get("timeframe") or "1h") == "1h"
 
     def _family_full(self, family: str, cap: int = 2) -> bool:
         """Diversification: at most `cap` deployed sleeves per strategy family."""
@@ -248,7 +284,7 @@ class Lifecycle:
         for r in self.reg.q("SELECT * FROM strategies WHERE stage='rejected' AND created >= ? "
                             "ORDER BY created DESC LIMIT 200", (cutoff,)):
             o = r.get("oos") or {}
-            if r.get("pairs") and o.get("trades", 0) >= 15 and o.get("total_return", 0) > 0 \
+            if r.get("pairs") and self.tradable_tf(r) and o.get("trades", 0) >= 15 and o.get("total_return", 0) > 0 \
                     and o.get("profit_factor", 0) >= 1.05 and o.get("sharpe", 0) >= 0.3 \
                     and not str(r["id"]).startswith("rnd-"):
                 out.append(r)

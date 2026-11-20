@@ -70,7 +70,7 @@ def cmd_run(out: Path, job: int, n: int, universe_file: Path) -> None:
 
 
 LEDGER_WINDOW_DAYS = 90
-RESULT_KEYS = ("oos", "stress", "mc", "wfe", "robust_frac", "fold_pos", "perturb_pf_median", "params", "pairs",
+RESULT_KEYS = ("oos", "stress", "mc", "wfe", "robust_frac", "fold_pos", "perturb_pf_median", "params", "pairs", "timeframe",
                "variant", "pair_stats", "exit_reasons", "epoch_sharpe_std")
 
 
@@ -132,7 +132,8 @@ def merge(dirs: list[Path], batch_id: str, ledger: dict | None = None) -> dict:
                 "sides": e["spec"].get("sides", ["long", "short"]), "stage": verdict,
                 "score": score(oos, dsr), "variant": r.get("variant", e["spec"]["family"]),
                 "oos": {**oos, "mc": r["mc"], "dsr": round(dsr, 4), "wfe": r["wfe"],
-                        "variant": r.get("variant", e["spec"]["family"])},
+                        "variant": r.get("variant", e["spec"]["family"]),
+                        "timeframe": e["spec"].get("timeframe") or "1h"},
                 "gates": gates, "experiment": e["id"],
             })
     candidates.sort(key=lambda c: -c["score"])
@@ -266,12 +267,23 @@ def probe_bybit(relay: str, token: str) -> bool:
 def plan(gen: Generator, state: dict, pairs: list[str], rng, first_rank: int = 0):
     """Endless spec stream: revalidations first, then ~25% refinements of promising
     strategies and ~75% new searches chosen by the UCB bandit (+ A/B'd learnings)."""
+    for ext in state.get("external_tests", []):  # outside strategies: fixed config, no search
+        if ext.get("family") not in FAMILIES:
+            continue
+        base = gen.next_spec(pairs, family=ext["family"])
+        own = list(ext.get("pairs") or [])
+        for ps in ([own] if own else []) + [sorted(set(base["pairs"]) - set(own))[:8]]:
+            if ps:
+                yield base | {"pairs": ps, "fixed_params": ext["params"], "sides": ext.get("sides") or base["sides"],
+                              "timeframe": ext.get("timeframe") or "1h", "external": ext["id"],
+                              "space_overrides": {}, "used_learnings": []}
     for st in state.get("revalidate", []):
         if st.get("family") in FAMILIES:
             spec = gen.next_spec(pairs, family=st["family"])
             own = [p for p in (st.get("pairs") or []) if p in pairs]
             spec["pairs"] = (own + [p for p in spec["pairs"] if p not in own])[:max(len(own), len(spec["pairs"]))]
             spec["revalidates"] = st["id"]
+            spec["timeframe"] = st.get("timeframe") or "1h"
             yield spec
     pool = [c for c in state.get("refine", []) if c.get("family") in FAMILIES]
     if first_rank:  # parallel jobs open with different families (k-th best by the bandit)
@@ -384,7 +396,8 @@ def cmd_lab_run(out: Path, job: int, jobs: int, budget_min: float, run_id: str, 
                      budget_left_min=round(budget_min - (time.time() - t0) / 60, 1))
 
     pipe = Pipeline(s, reg, on_progress=on_progress)
-    st = state if job == 0 else {**state, "revalidate": []}  # revalidations run once, on job 0
+    # revalidations and external-strategy tests run once, on job 0
+    st = state if job == 0 else {**state, "revalidate": [], "external_tests": []}
     specs = plan(gen, st, pairs, random.Random(seed), first_rank=job)
     jdir = out / f"job-{job}"
     jdir.mkdir(parents=True, exist_ok=True)

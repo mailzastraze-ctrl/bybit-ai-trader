@@ -122,7 +122,7 @@ def run_supervised(cmd: list[str], *, env: dict, cwd: Path, log_file, timeout: f
     return rc, stdout
 
 
-def research_config(settings: Settings, pairs: list[str], **aitrader: object) -> dict:
+def research_config(settings: Settings, pairs: list[str], timeframe: str | None = None, **aitrader: object) -> dict:
     lc = settings.lifecycle
     return {
         "bot_name": "aitrader-research",
@@ -134,7 +134,7 @@ def research_config(settings: Settings, pairs: list[str], **aitrader: object) ->
         "dry_run": True,
         "dry_run_wallet": 10000,
         "max_open_trades": max(4, min(len(pairs), 8)),
-        "timeframe": settings.research.timeframe,
+        "timeframe": timeframe or settings.research.timeframe,
         "dataformat_ohlcv": "feather",
         "entry_pricing": {"price_side": "other", "use_order_book": True, "order_book_top": 1},
         "exit_pricing": {"price_side": "other", "use_order_book": True, "order_book_top": 1},
@@ -225,9 +225,9 @@ class FreqtradeRunner:
         return p
 
     # ------------------------------------------------------------------ commands
-    def download(self, job: Job, config: Path, pairs: list[str], timerange: str) -> None:
+    def download(self, job: Job, config: Path, pairs: list[str], timerange: str, timeframe: str | None = None) -> None:
         self._run(["download-data", *self._common(job, [config]), "--timerange", timerange,
-                   "--timeframes", self.s.research.timeframe, "--trading-mode", "futures",
+                   "--timeframes", timeframe or self.s.research.timeframe, "--trading-mode", "futures",
                    "--pairs", *pairs], job, timeout=3 * 3600)
 
     def test_pairlist(self, job: Job, config: Path) -> list[str]:

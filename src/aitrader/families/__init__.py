@@ -236,7 +236,45 @@ FUNDING = Family(
 )
 
 
-FAMILIES: dict[str, Family] = {f.name: f for f in (TREND_EMA, MEANREV_BB, DONCHIAN, SQUEEZE, TSMOM, FUNDING)}
+# ------------------------------------------------- z-score reversion (statistical stretch)
+def _zscore_revert(df: pd.DataFrame, p: dict) -> pd.DataFrame:
+    """Distance of price from its N-bar mean in standard deviations. Buys a stretch below
+    -k sigma, sells above +k sigma, exits once price has reverted to -/+ exit sigma.
+    (Owner's Strategy Lab idea, now searched across the whole universe and timeframes.)"""
+    n = int(p["window"])
+    mean = df["close"].rolling(n, min_periods=n).mean()
+    sd = df["close"].rolling(n, min_periods=n).std().replace(0, np.nan)
+    z = (df["close"] - mean) / sd
+    k, x = p["z_entry"], p["z_exit"]
+    return pd.DataFrame(
+        {
+            "long_sig": ta.crossed_below(z, -k),
+            "short_sig": ta.crossed_above(z, k),
+            "exit_long_sig": z >= -x,
+            "exit_short_sig": z <= x,
+            "conviction": z.abs() / k,
+        }
+    )
+
+
+ZSCORE = Family(
+    name="zscore_revert",
+    title="Z-score reversion to the mean",
+    description="Fades statistical stretches: enters when price is k standard deviations away from its N-bar "
+                "mean, exits when it has reverted to the exit level.",
+    entry_params=(
+        Param("window", "int", 50, 400, 200, "buy"),
+        Param("z_entry", "float", 2.0, 4.0, 3.0, "buy", 2),
+        Param("z_exit", "float", 0.0, 2.5, 1.0, "buy", 2),
+    ),
+    signal_fn=_zscore_revert,
+    affinity="revert",
+)
+
+
+FAMILIES: dict[str, Family] = {f.name: f for f in (TREND_EMA, MEANREV_BB, DONCHIAN, SQUEEZE, TSMOM, FUNDING, ZSCORE)}
+# families researched on 15m as well as 1h (short-horizon ideas; funding needs 1h alignment)
+MULTI_TF = {"zscore_revert", "meanrev_bb", "squeeze_momentum"}
 NEEDS_FUNDING = {"funding_reversal"}
 
 # Freqtrade strategy class name used for hyperopting each family.
@@ -247,6 +285,7 @@ RESEARCH_CLASS: dict[str, str] = {
     "squeeze_momentum": "FamSqueeze",
     "tsmom": "FamTsmom",
     "funding_reversal": "FamFunding",
+    "zscore_revert": "FamZscore",
 }
 
 

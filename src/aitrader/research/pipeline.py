@@ -91,8 +91,9 @@ class Pipeline:
         job.root.mkdir(parents=True, exist_ok=True)
 
         folds = walk_forward_folds(utcnow(), rs.train_days, rs.holdout_days, rs.wf_folds)
+        tf = spec.get("timeframe") or rs.timeframe
         base_cfg = self.ft.write_config(job, "config.json",
-                                        research_config(self.s, pairs, sides=sides))
+                                        research_config(self.s, pairs, timeframe=tf, sides=sides))
         space_file = None
         if spec.get("space_overrides"):
             space_file = job.path("space.json")
@@ -101,27 +102,39 @@ class Pipeline:
         # 1) data -----------------------------------------------------------
         self._progress(eid, "download")
         data_start = folds[0].train_start - timedelta(days=35)  # + 720-candle indicator warm-up
-        self.ft.download(job, base_cfg, pairs, f"{data_start:%Y%m%d}-")
+        if tf == rs.timeframe:
+            self.ft.download(job, base_cfg, pairs, f"{data_start:%Y%m%d}-")
+        else:
+            self.ft.download(job, base_cfg, pairs, f"{data_start:%Y%m%d}-", timeframe=tf)
 
         # 2) walk-forward ---------------------------------------------------
         oos_trades, stress_trades, fold_reports, all_sharpes = [], [], [], []
         params = fam.defaults()
         is_annual = []
+        fixed = spec.get("fixed_params")
         for k, fold in enumerate(folds):
             self._progress(eid, f"hyperopt fold {k + 1}/{len(folds)}", fold=fold.train_range)
-            hdir = self.ft.hyperopt(job, [base_cfg], RESEARCH_CLASS[fam.name], fold.train_range,
-                                    int(spec.get("epochs", rs.epochs)), rs.base_fee, seed + k,
-                                    min_trades=20, space_file=space_file)
-            epochs = load_hyperopt_epochs(hdir)
-            all_sharpes += epoch_sharpes(epochs)
-            best = best_epochs(epochs, min_trades=20, top=1)
-            if not best:
-                fold_reports.append({"fold": k, "error": "no epoch with enough trades"})
-                continue
-            pins = {k: v[0] for k, v in (spec.get("space_overrides") or {}).items()
-                    if isinstance(v, (list, tuple)) and len(v) == 2 and v[0] == v[1]}
-            params = fam.normalize({**best[0]["params_dict"], **pins})
-            ism = best[0].get("results_metrics", {})
+            if fixed:  # a given configuration (e.g. the owner's): no search, just the honest test
+                params = fam.normalize(fixed)
+                tr_is = self._portfolio_backtest(job, base_cfg, fam.name, params, pairs, sides,
+                                                 fold.train_range, rs.base_fee, f"is{k}")
+                ism_s = M.summarize(tr_is, STARTING_BALANCE, fold.train_start, fold.train_end)
+                ism = {"total_trades": ism_s["trades"], "profit_total": ism_s["total_return"]}
+                all_sharpes.append(float(ism_s.get("sharpe") or 0.0))
+            else:
+                hdir = self.ft.hyperopt(job, [base_cfg], RESEARCH_CLASS[fam.name], fold.train_range,
+                                        int(spec.get("epochs", rs.epochs)), rs.base_fee, seed + k,
+                                        min_trades=20, space_file=space_file)
+                epochs = load_hyperopt_epochs(hdir)
+                all_sharpes += epoch_sharpes(epochs)
+                best = best_epochs(epochs, min_trades=20, top=1)
+                if not best:
+                    fold_reports.append({"fold": k, "error": "no epoch with enough trades"})
+                    continue
+                pins = {k: v[0] for k, v in (spec.get("space_overrides") or {}).items()
+                        if isinstance(v, (list, tuple)) and len(v) == 2 and v[0] == v[1]}
+                params = fam.normalize({**best[0]["params_dict"], **pins})
+                ism = best[0].get("results_metrics", {})
             train_days = (fold.train_end - fold.train_start).days
             is_ann = (1 + float(ism.get("profit_total", 0.0))) ** (365 / max(train_days, 1)) - 1
             is_annual.append(is_ann)
@@ -190,7 +203,7 @@ class Pipeline:
             "robust_frac": round(robust_frac, 3), "fold_pos": round(fold_pos, 3),
             "perturb_pf_median": round(float(np.median(pert_pfs)), 3) if pert_pfs else 0.0,
             "folds": fold_reports, "params": params, "pairs": good_pairs, "variant": fam.variant(params),
-            "pair_stats": pair_stats, "score": score(oos, dsr),
+            "pair_stats": pair_stats, "score": score(oos, dsr), "timeframe": tf,
             "epoch_sharpe_std": round(float(np.std(all_sharpes)), 4) if all_sharpes else None,
             "exit_reasons": (df["exit_reason"].value_counts().to_dict() if not df.empty else {}),
         }

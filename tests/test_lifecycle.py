@@ -146,7 +146,7 @@ class FakeRunner:
         p.write_text(json.dumps(cfg))
         return p
 
-    def download(self, job, config, pairs, timerange):
+    def download(self, job, config, pairs, timerange, timeframe=None):
         self.calls.append("download")
 
     def hyperopt(self, job, configs, strategy, timerange, epochs, fee, seed, min_trades, space_file):

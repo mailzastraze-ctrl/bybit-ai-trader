@@ -130,3 +130,36 @@ def test_book_includes_imported_candidate_strategies(env):
                               "stage_since": now, "history": []})
     b = forward.book(reg)
     assert b[0]["id"] == "b1-trend-00" and b[0]["kind"] == "strategy" and b[0]["freeze"] == now
+
+
+def test_external_strategy_imported_frozen_and_tested_with_fixed_config(env, tmp_path, monkeypatch):
+    import random as _r
+
+    from aitrader import lab as labmod
+    from aitrader.lifecycle import Lifecycle
+    from aitrader.research import batch
+    from aitrader.research.generator import Generator
+    from aitrader.research.pipeline import Pipeline
+    s, reg = env
+    life = Lifecycle(s, reg)
+    assert life.import_external(Path(__file__).resolve().parents[1] / "research" / "external") >= 1
+    st = reg.one("SELECT * FROM strategies WHERE id='owner-sol15m-zscore'")
+    assert st["stage"] == "exploratory" and st["oos"]["timeframe"] == "15m" and st["params"]["window"] == 200
+    assert not Lifecycle.tradable_tf(st)  # the 1h demo bot must not trade a 15m strategy
+    assert any(e["id"] == "owner-sol15m-zscore" and e["timeframe"] == "15m" for e in forward.book(reg))
+    state = labmod.build_state(s, reg)
+    ext = [e for e in state["external_tests"] if e["id"] == "owner-sol15m-zscore"]
+    assert ext
+    pairs = ["BTC/USDT:USDT", "ETH/USDT:USDT", "SOL/USDT:USDT", "XRP/USDT:USDT", "DOGE/USDT:USDT", "ADA/USDT:USDT"]
+    specs = batch.plan(Generator(s, reg, seed=1), {"external_tests": ext}, pairs, _r.Random(1))
+    a, b = next(specs), next(specs)
+    assert a["pairs"] == ["SOL/USDT:USDT"] and a["fixed_params"]["z_entry"] == 3.5 and a["timeframe"] == "15m"
+    assert "SOL/USDT:USDT" not in b["pairs"] and b["external"] == "owner-sol15m-zscore"
+    runner = FakeRunner(True)
+    res = Pipeline(s, reg, runner).run(reg.new_experiment(a["family"], a), a)
+    assert not any(c == "hyperopt" for c in runner.calls)  # fixed configuration: no search
+    assert res["params"]["window"] == 200 and res["timeframe"] == "15m"
+    labmod.apply_import(s, reg, {"batch_id": "b-ext", "experiments_full": [
+        {"id": "xext000001", "spec": a, "result": res, "finished": iso()}], "candidates": []})
+    assert "owner-sol15m-zscore" in reg.kv_get("external_tested")
+    assert not labmod.external_tests(reg)

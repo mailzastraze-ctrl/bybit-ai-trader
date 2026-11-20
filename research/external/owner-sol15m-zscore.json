@@ -1,0 +1,19 @@
+{
+  "id": "owner-sol15m-zscore",
+  "source": "Owner's Bybit Strategy Lab (auto-selection), screenshot 2026-11-20",
+  "family": "zscore_revert",
+  "timeframe": "15m",
+  "pairs": ["SOL/USDT:USDT"],
+  "sides": ["long", "short"],
+  "params": {
+    "window": 200, "z_entry": 3.5, "z_exit": 1.5,
+    "sl_atr": 3.0, "trail_rr": 0.5, "trail_atr": 3.0, "tp_rr": 5.0, "max_hold": 168,
+    "be_rr": 2.0, "lock_rr": 3.0, "lock_frac": 0.0, "conv_w": 0.0, "htf_trend": 0, "vol_regime": 0
+  },
+  "claimed": {
+    "period": "2025-11-20..2026-11-20", "total_return": 4.498, "max_drawdown": 0.2932, "sharpe": 2.64,
+    "sortino": 4.20, "profit_factor": 1.82, "trades": 84, "win_rate": 0.583, "buy_and_hold": -0.5011,
+    "last_3m_return": 0.517, "last_3m_trades": 22, "leverage": 5, "loss_per_stop": 0.152
+  },
+  "mapping_note": "Owner config: z-score vs 200-bar mean, long below -3.5 sigma / short above +3.5, exit at -/+1.5 sigma, stop 3xATR(14), trailing 3xATR from the extreme, no take-profit, no time exit. Mapped onto the system's exit model: no TP ~ tp_rr 5, no time exit ~ max_hold 168 bars (42 h; owner's average trade 3.9 h), trailing from the start ~ trail_rr 0.5, break-even/profit-lock effectively off. Sizing is the system's own risk-based sizing (not 5x of capital), so returns differ in scale; profit factor and win rate are comparable."
+}

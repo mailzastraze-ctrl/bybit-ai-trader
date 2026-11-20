@@ -12,7 +12,7 @@ from __future__ import annotations
 import math
 import random
 
-from aitrader.families import FAMILIES
+from aitrader.families import FAMILIES, MULTI_TF
 from aitrader.registry import Registry
 from aitrader.settings import Settings
 from aitrader.util import iso
@@ -118,6 +118,7 @@ class Generator:
         spec["pairs"] = sorted((own + [p for p in spec["pairs"] if p not in own])[:max(n, len(own))])
         spec["sides"] = cand.get("sides") or spec["sides"]
         spec["refines"] = cand["id"]
+        spec["timeframe"] = cand.get("timeframe") or "1h"
         return spec
 
     def next_spec(self, universe: list[str], family: str | None = None) -> dict:
@@ -153,5 +154,5 @@ class Generator:
             "used_learnings": used,
             "epochs": self.s.research.epochs,
             "seed": self.rng.randint(1, 10_000),
-            "timeframe": self.s.research.timeframe,
+            "timeframe": "15m" if family in MULTI_TF and self.rng.random() < 0.5 else self.s.research.timeframe,
         }

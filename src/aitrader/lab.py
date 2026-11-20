@@ -83,11 +83,12 @@ def revalidation_due(reg: Registry, now=None) -> list[dict]:
     now = now or utcnow()
     marks = reg.kv_get("revalidated") or {}
     out = []
-    for st in reg.q("SELECT id, family, params, pairs, sides, stage, stage_since FROM strategies "
+    for st in reg.q("SELECT id, family, params, pairs, sides, stage, stage_since, oos FROM strategies "
                     "WHERE stage IN ('production','incubation','eligible') ORDER BY score DESC"):
         ref = parse_dt(marks.get(st["id"])) or parse_dt(st.get("stage_since"))
         if ref is not None and (now - ref).days >= REVALIDATE_DAYS:
-            out.append({k: st[k] for k in ("id", "family", "params", "pairs", "sides", "stage")})
+            out.append({k: st[k] for k in ("id", "family", "params", "pairs", "sides", "stage")}
+                       | {"timeframe": (st.get("oos") or {}).get("timeframe") or "1h"})
     return out
 
 
@@ -105,7 +106,7 @@ def refine_pool(reg: Registry, k: int = 5) -> list[dict]:
             continue  # live evidence says no – don't spend compute polishing it
         prio = (1 if live.get("trades", 0) >= 5 else 0, float(r.get("score") or 0))
         out.append((prio, {k: r.get(k) for k in ("id", "family", "params", "pairs", "sides", "stage", "score")}
-                    | {"live": live}))
+                    | {"live": live, "timeframe": (r.get("oos") or {}).get("timeframe") or "1h"}))
     out.sort(key=lambda x: x[0], reverse=True)
     return [x[1] for x in out[:k]]
 
@@ -144,7 +145,20 @@ def build_state(s: Settings, reg: Registry) -> dict:
         "server_trials_90d": len(srs),
         "universe": reg.kv_get("universe"),
         "shadow": forward.book(reg),
+        "external_tests": external_tests(reg),
     }
+
+
+def external_tests(reg: Registry) -> list[dict]:
+    """External strategies (e.g. the owner's Strategy Lab) not yet walk-forward tested."""
+    done = reg.kv_get("external_tested") or {}
+    out = []
+    for st in reg.q("SELECT id, family, params, pairs, sides, oos FROM strategies WHERE stage != 'retired'"):
+        oos = st.get("oos") or {}
+        if oos.get("external") and st["id"] not in done:
+            out.append({"id": st["id"], "family": st["family"], "params": st["params"], "pairs": st["pairs"],
+                        "sides": st.get("sides"), "timeframe": oos.get("timeframe") or "1h"})
+    return out
 
 
 # ---------------------------------------------------------------------------- progress
@@ -224,6 +238,14 @@ def apply_import(s: Settings, reg: Registry, data: dict) -> dict:
                                    "finished": e.get("finished") or now, "result": res,
                                    "progress": {"stage": "done", "remote": True}})
         n_exp += 1
+        if spec.get("external"):
+            marks = reg.kv_get("external_tested") or {}
+            marks.setdefault(spec["external"], []).append(eid)
+            reg.kv_set("external_tested", marks)
+            o = res.get("oos") or {}
+            reg.event("research", f"{spec['external']}: walk-forward with its fixed configuration on "
+                      f"{len(spec.get('pairs') or [])} pair(s) — unseen-window PF {o.get('profit_factor')}, "
+                      f"{o.get('trades')} trades, verdict {res.get('verdict')}", data={"strategy": spec["external"]})
         target = spec.get("revalidates")
         if target:
             marks = reg.kv_get("revalidated") or {}

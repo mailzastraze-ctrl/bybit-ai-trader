@@ -60,7 +60,8 @@ def book(reg: Registry, limit: int = BOOK_LIMIT, max_age_days: int = BOOK_MAX_AG
                     "sides": spec.get("sides", ["long", "short"]), "freeze": r["finished"],
                     "score": float(res.get("score") or 0.0), "verdict": res.get("verdict"),
                     "bt_pf": oos.get("profit_factor"), "bt_trades": oos.get("trades"),
-                    "variant": res.get("variant") or r["family"]})
+                    "variant": res.get("variant") or r["family"],
+                    "timeframe": res.get("timeframe") or spec.get("timeframe") or "1h"})
         if len(out) >= limit:
             break
     # candidates imported as strategies (e.g. offline batches) whose experiment isn't stored here
@@ -74,7 +75,8 @@ def book(reg: Registry, limit: int = BOOK_LIMIT, max_age_days: int = BOOK_MAX_AG
         out.append({"id": st["id"], "kind": "strategy", "family": st["family"], "params": st["params"],
                     "pairs": st["pairs"][:8], "sides": st.get("sides") or ["long", "short"], "freeze": st["created"],
                     "score": float(st.get("score") or 0.0), "verdict": st.get("stage"), "bt_pf": oos.get("profit_factor"),
-                    "bt_trades": oos.get("trades"), "variant": oos.get("variant") or st["family"]})
+                    "bt_trades": oos.get("trades"), "variant": oos.get("variant") or st["family"],
+                    "timeframe": oos.get("timeframe") or "1h", "external": bool(oos.get("external"))})
     return out
 
 

@@ -31,12 +31,14 @@ def _trades_after(trades: list[dict], freeze) -> list[list]:
 
 def test_one(s: Settings, ft: FreqtradeRunner, root, e: dict) -> dict:
     freeze = parse_dt(e["freeze"])
-    base = {k: e.get(k) for k in ("id", "kind", "family", "variant", "score", "freeze", "pairs", "bt_pf", "verdict")}
+    base = {k: e.get(k) for k in ("id", "kind", "family", "variant", "score", "freeze", "pairs", "bt_pf", "verdict",
+                                  "timeframe", "external")}
     if freeze is None or utcnow() - freeze < timedelta(hours=MIN_FORWARD_H):
         return base | {"ok": True, "trades": []}
     job = Job(root / e["id"])
     try:
-        cfg = ft.write_config(job, "config.json", research_config(s, e["pairs"], sides=e.get("sides")))
+        cfg = ft.write_config(job, "config.json", research_config(s, e["pairs"], timeframe=e.get("timeframe"),
+                                                                  sides=e.get("sides")))
         man = Manifest(sleeves=[Sleeve(id=f"fw-{e['id']}", family=e["family"], params=e["params"], pairs=e["pairs"],
                                        stage="production", risk=0.01, leverage=s.lifecycle.leverage,
                                        sides=e.get("sides") or ["long", "short"])])
@@ -59,11 +61,13 @@ def run(s: Settings, entries: list[dict], out, workers: int = 4, ft: FreqtradeRu
         return []
     root = out / "fw-jobs"
     root.mkdir(parents=True, exist_ok=True)
-    pairs = sorted({p for e in entries for p in e["pairs"]})
-    start = min(parse_dt(e["freeze"]) for e in entries) - timedelta(days=35)  # + indicator warm-up
-    dl = Job(root / "_download")
-    cfg = ft.write_config(dl, "config.json", research_config(s, pairs))
-    ft.download(dl, cfg, pairs, f"{start:%Y%m%d}-")
+    for tf in sorted({e.get("timeframe") or s.research.timeframe for e in entries}):
+        group = [e for e in entries if (e.get("timeframe") or s.research.timeframe) == tf]
+        pairs = sorted({p for e in group for p in e["pairs"]})
+        start = min(parse_dt(e["freeze"]) for e in group) - timedelta(days=35)  # + indicator warm-up
+        dl = Job(root / f"_download-{tf}")
+        cfg = ft.write_config(dl, "config.json", research_config(s, pairs, timeframe=tf))
+        ft.download(dl, cfg, pairs, f"{start:%Y%m%d}-", timeframe=tf)
     results, done = [], 0
     with ThreadPoolExecutor(max_workers=workers) as pool:
         for r in pool.map(lambda e: test_one(s, ft, root, e), entries):
