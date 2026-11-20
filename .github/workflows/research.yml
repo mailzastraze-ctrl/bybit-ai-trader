@@ -107,7 +107,7 @@ jobs:
           ID="b$(date -u +%Y%m%d)-${{ github.run_id }}"
           PYTHONPATH=src python -m aitrader.research.batch merge results \
             --out "out/imports/$ID.json" --report "out/reports/$ID.md" --batch-id "$ID"
-          cat "out/reports/$ID.md" >> "$GITHUB_STEP_SUMMARY"
+          cat "out/reports/$ID.md" | tee -a "$GITHUB_STEP_SUMMARY"
       - uses: actions/upload-artifact@v4
         with:
           name: batch-report

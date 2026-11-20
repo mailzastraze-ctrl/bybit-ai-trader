@@ -19,7 +19,7 @@ from dataclasses import dataclass, field
 from aitrader.lifecycle import Lifecycle
 from aitrader.registry import Registry
 from aitrader.settings import get_settings
-from aitrader.util import iso, setup_logging
+from aitrader.util import iso, parse_dt, setup_logging, utcnow
 
 log = setup_logging("supervisor")
 
@@ -181,6 +181,15 @@ def main() -> None:
                 reg.event("supervisor", f"{p.name} exited (rc={rc}); restarting in {delay}s", "error")
             elif p.popen is None and now >= p.next_start:
                 start(p)
+        # Research liveness: a heartbeat older than 2 h means the worker is stuck → restart it.
+        rp = next((p for p in procs if p.name == "research"), None)
+        if rp and rp.popen and rp.popen.poll() is None and now - rp.started > 7200:
+            hb = reg.one("SELECT ts FROM heartbeats WHERE service='research'")
+            hb_ts = parse_dt(hb["ts"]) if hb else None
+            if hb_ts and (utcnow() - hb_ts).total_seconds() > 7200:
+                log.error("research heartbeat stale since %s – restarting research worker", hb["ts"])
+                reg.event("supervisor", f"research heartbeat stale since {hb['ts']} – worker restarted", "error")
+                rp.popen.kill()
         reg.kv_set("supervisor", {"ts": iso(), "processes": {
             p.name: {"running": p.popen is not None and p.popen.poll() is None, "restarts": p.restarts,
                      "uptime_s": int(now - p.started) if p.popen else 0} for p in procs}})

@@ -1,4 +1,3 @@
-import subprocess
 
 import pytest
 
@@ -54,7 +53,8 @@ def test_runner_raises_oom_on_sigkill(tmp_path, monkeypatch):
     from aitrader.research.ftrunner import FreqtradeOOM, FreqtradeRunner, Job
     s = Settings(data_dir=tmp_path)
     monkeypatch.setattr(memguard, "wait_for_headroom", lambda need: True)
-    monkeypatch.setattr(subprocess, "run", lambda cmd, **kw: subprocess.CompletedProcess(cmd, -9, stdout="", stderr=""))
+    from aitrader.research import ftrunner
+    monkeypatch.setattr(ftrunner, "run_supervised", lambda cmd, **kw: (-9, ""))
     with pytest.raises(FreqtradeOOM):
         FreqtradeRunner(s).backtest(Job(tmp_path / "j"), [tmp_path / "c.json"], "AIPortfolio", "20250101-", 0.001, "bt")
     monkeypatch.setattr(memguard, "wait_for_headroom", lambda need: False)
@@ -72,3 +72,23 @@ def test_housekeeping_prunes_old_rows(tmp_path):
     msgs = [r["message"] for r in reg.q("SELECT message FROM events")]
     assert "old" not in msgs and "new" in msgs
     assert reg.kv_get("vacuum_ts")
+
+
+def test_watchdog_kills_stalled_and_timed_out_processes(tmp_path):
+    import sys
+    import time
+
+    from aitrader.research.ftrunner import FreqtradeStalled, run_supervised
+    env = dict(__import__("os").environ)
+    with open(tmp_path / "log", "w") as lf:
+        t0 = time.monotonic()
+        with pytest.raises(FreqtradeStalled, match="stalled"):
+            run_supervised([sys.executable, "-c", "import time; time.sleep(30)"], env=env, cwd=tmp_path,
+                           log_file=lf, timeout=60, stall_s=1.5, poll_s=0.5)
+        assert time.monotonic() - t0 < 10
+        with pytest.raises(FreqtradeStalled, match="timeout"):
+            run_supervised([sys.executable, "-c", "while True: pass"], env=env, cwd=tmp_path,
+                           log_file=lf, timeout=2, stall_s=None, poll_s=0.5)
+        rc, out = run_supervised([sys.executable, "-c", "print('[1,2]')"], env=env, cwd=tmp_path,
+                                 log_file=lf, timeout=30, stall_s=5, poll_s=0.2)
+        assert rc == 0 and out.strip() == "[1,2]"

@@ -34,6 +34,74 @@ class FreqtradeOOM(FreqtradeError):
 
 
 HEAVY = {"hyperopt", "backtesting", "download-data", "test-pairlist"}
+STALL_CHECK = {"hyperopt", "backtesting"}  # CPU-bound: no CPU progress for long = hung
+
+
+class FreqtradeStalled(FreqtradeOOM):
+    """No CPU progress for too long (typically a worker killed under memory pressure while
+    the parent waits forever). Treated like OOM so the research load is reduced."""
+
+
+def _tree_cpu(pid: int) -> float:
+    try:
+        import psutil
+    except ImportError:
+        return -1.0
+    try:
+        root = psutil.Process(pid)
+        procs = [root, *root.children(recursive=True)]
+    except psutil.Error:
+        return -1.0
+    total = 0.0
+    for p in procs:
+        try:
+            t = p.cpu_times()
+            total += t.user + t.system
+        except psutil.Error:
+            continue
+    return total
+
+
+def run_supervised(cmd: list[str], *, env: dict, cwd: Path, log_file, timeout: float,
+                   stall_s: float | None, poll_s: float = 15.0) -> tuple[int, str]:
+    """Run a command with a watchdog. Returns (returncode, stdout).
+    Kills the whole process group on timeout or when CPU time stops increasing."""
+    import signal
+    import tempfile
+    import time as _t
+    with tempfile.TemporaryFile(mode="w+") as out:
+        proc = subprocess.Popen(cmd, stdout=out, stderr=log_file, env=env, cwd=cwd,
+                                start_new_session=True, text=True)
+        start = last_progress = _t.monotonic()
+        last_cpu = 0.0
+        reason = None
+        while True:
+            try:
+                rc = proc.wait(timeout=poll_s)
+                break
+            except subprocess.TimeoutExpired:
+                pass
+            now = _t.monotonic()
+            cpu = _tree_cpu(proc.pid)
+            if cpu < 0 or cpu > last_cpu + 1.0:
+                last_cpu, last_progress = max(cpu, last_cpu), now
+            if now - start > timeout:
+                reason = f"timeout after {timeout:.0f}s"
+            elif stall_s and now - last_progress > stall_s:
+                reason = f"stalled: no CPU progress for {now - last_progress:.0f}s"
+            if reason:
+                try:
+                    os.killpg(proc.pid, signal.SIGKILL)
+                except (ProcessLookupError, PermissionError):
+                    proc.kill()
+                proc.wait()
+                rc = -999
+                break
+        out.seek(0)
+        stdout = out.read()
+    if reason:
+        raise FreqtradeStalled(f"{cmd[1] if len(cmd) > 1 else cmd[0]} killed by watchdog ({reason})")
+    return rc, stdout
 
 
 def research_config(settings: Settings, pairs: list[str], **aitrader: object) -> dict:
@@ -109,19 +177,22 @@ class FreqtradeRunner:
             if not memguard.wait_for_headroom(need):
                 raise FreqtradeOOM(f"not enough free memory for freqtrade {args[0]} (need {need:.0f} MB)")
         log.info("freqtrade %s", " ".join(args[:3]))
+        stall = float(os.environ.get("RESEARCH_STALL_SECONDS", "600")) if args[0] in STALL_CHECK else None
         with open(job.path("freqtrade.log"), "a") as logf:
             logf.write(f"\n$ {' '.join(cmd)}\n")
             logf.flush()
-            proc = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=logf, text=True,
-                                  env=full_env, timeout=timeout, cwd=job.root)
-            logf.write(proc.stdout[-20000:])
-        memguard.release()
-        if proc.returncode in (-9, 137):
-            raise FreqtradeOOM(f"freqtrade {args[0]} was OOM-killed (rc={proc.returncode})")
-        if proc.returncode != 0:
+            try:
+                rc, stdout = run_supervised(cmd, env=full_env, cwd=job.root, log_file=logf,
+                                            timeout=timeout, stall_s=stall)
+            finally:
+                memguard.release()
+            logf.write(stdout[-20000:])
+        if rc in (-9, 137):
+            raise FreqtradeOOM(f"freqtrade {args[0]} was OOM-killed (rc={rc})")
+        if rc != 0:
             tail = job.path("freqtrade.log").read_text()[-2500:]
-            raise FreqtradeError(f"freqtrade {args[0]} failed (rc={proc.returncode}): {tail}")
-        return proc
+            raise FreqtradeError(f"freqtrade {args[0]} failed (rc={rc}): {tail}")
+        return subprocess.CompletedProcess(cmd, rc, stdout=stdout, stderr="")
 
     def _common(self, job: Job, config_files: list[Path]) -> list[str]:
         args = []
@@ -161,7 +232,7 @@ class FreqtradeRunner:
                    "--epochs", str(epochs), "--timerange", timerange, "--fee", str(fee),
                    "-j", str(self.s.research.hyperopt_jobs), "--random-state", str(seed),
                    "--min-trades", str(min_trades), "--disable-param-export", "--no-color"],
-                  job, env=env)
+                  job, env=env, timeout=max(1800, epochs * 60))
         return job.userdir / "hyperopt_results"
 
     def backtest(self, job: Job, configs: list[Path], strategy: str, timerange: str,
@@ -171,5 +242,5 @@ class FreqtradeRunner:
         self._run(["backtesting", *self._common(job, configs), "--strategy", strategy,
                    "--strategy-path", str(self.s.strategies_dir), "--timerange", timerange,
                    "--fee", str(fee), "--export", "trades", "--backtest-directory", str(out),
-                   "--cache", "none"], job, timeout=3600)
+                   "--cache", "none"], job, timeout=1200)
         return out

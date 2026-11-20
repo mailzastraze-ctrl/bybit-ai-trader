@@ -1,0 +1,37 @@
+name: import-batch
+# Merge the results of a finished bulk-research run (any run id) and commit the vetted
+# candidates + report. The live system imports research/imports/*.json on deploy.
+on:
+  workflow_dispatch:
+    inputs:
+      run_id:
+        description: "bulk-research run id"
+        required: true
+permissions:
+  contents: write
+  actions: read
+jobs:
+  merge:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with: {python-version: "3.13"}
+      - run: pip install -q pandas numpy requests
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: results-*
+          path: results
+          run-id: ${{ inputs.run_id }}
+          github-token: ${{ github.token }}
+      - name: Merge and commit
+        run: |
+          ID="b$(date -u +%Y%m%d)-${{ inputs.run_id }}"
+          PYTHONPATH=src python -m aitrader.research.batch merge results \
+            --out "research/imports/$ID.json" --report "research/reports/$ID.md" --batch-id "$ID"
+          cat "research/reports/$ID.md" | tee -a "$GITHUB_STEP_SUMMARY"
+          git config user.name "aitrader-research-bot"
+          git config user.email "aitrader-research-bot@users.noreply.github.com"
+          git add research/imports research/reports
+          git commit -m "research: import batch $ID" || exit 0
+          git pull --rebase origin main && git push origin HEAD:main
