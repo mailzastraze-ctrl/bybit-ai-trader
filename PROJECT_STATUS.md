@@ -1,6 +1,6 @@
 # PROJECT_STATUS
 
-_Last updated: 2026-11-20 16:15 CET_
+_Last updated: 2026-11-20 16:25 CET_
 
 ## Summary
 The system is **deployed and running autonomously on Bybit Demo**. It never trades real money: `demo_trading` is hard-required.
@@ -25,7 +25,33 @@ Links and rules:
 | 6 | Analyse, learn, promote only after independent validation | ✅ code / ⏳ trades | Learner (pair exclusion, MFE, time exits, side asymmetry, gate failures) with A/B pruning. Lifecycle: exploration → incubation → forward demo evidence → production. Revalidation every 14 days runs in the lab; a failed one retires the strategy |
 | 7 | Web terminal | ✅ live | **3D HQ v3**: real data on every screen (live 1h candles with entry/stop/target, live GitHub hyperopt epochs, fold results, gates, bandit, market map, goals). Company mission board, stand-up meetings built from real numbers, GitHub-lab cloud with data beam, expressive characters. Rendered headlessly on every UI change (`hq-preview` workflow, screenshots in `docs/preview/`, fails on JS errors) |
 | — | Cloud, independent of your PC | ✅ / ⚠️ | Railway **trial** credit runs out in about 15 days. Hobby is needed for indefinite operation |
-| — | GitHub + PROJECT_STATUS | ✅ | CI green with the real Freqtrade image; 83 tests |
+| — | GitHub + PROJECT_STATUS | ✅ | CI green with the real Freqtrade image; 94 tests |
+
+## Success-critical upgrades (2026-11-20, evening)
+- **Real-money readiness gate** (`readiness.py`, `/api/readiness`, HQ mission panel). It is advisory and never switches by itself. All 8 checks are evaluated on post-promotion production trades:
+  - ≥ 90 days of forward trading;
+  - ≥ 250 trades;
+  - ≥ 2 strategies with daily correlation < 0.5;
+  - t ≥ 2.5;
+  - PF ≥ 1.3;
+  - drawdown ≤ 10%;
+  - profitable in 2 of 3 time thirds;
+  - no divergence from out-of-sample results.
+- **Demo → reality haircut:** 5 bp of slippage per fill on every demo trade (the demo never touches the real book). Promotion, retirement and goals all use the realistic P&L.
+- **Active position management:** the stop is checked every ~5 s and mirrored to the exchange.
+  - It moves to break-even (+ fee buffer) at `be_rr`·R.
+  - From `lock_rr`·R a profit ratchet locks `lock_frac` of the best open profit, then the ATR trail takes over.
+  - The three thresholds are optimised exit parameters.
+  - Verified live 15:15–15:18 UTC: DOGE short #3 (entry 0.05648), stop moved to break-even at 0.05641, then ratcheted to 0.05566 (≈ +28 USDT locked).
+- **Portfolio limits:** open risk at stops ≤ 3% of equity, ≤ 7 positions per direction, ≤ 2 sleeves per family, volatility targeting (daily equity vol > 1.5% scales risk down), correlated sleeves (corr > 0.7) at half risk, exploration lane 5.
+- **Maker-first entries:** limit orders at the touch, crossing the spread after 3 min (maker 0.02% vs taker 0.055%).
+- **Stricter validation:** 365-day training, a full year of out-of-sample data as 4 unseen 90-day slices, a new fold-consistency gate (≥ 3/4 slices profitable), ≥ 760 days of history, a 40-pair research universe.
+- **Registry backup** every lab run (30-day artifact; the repo is public, so the demo data in it is visible to GitHub users).
+- **Not done yet:**
+  - Telegram alerts (need a bot token from the owner);
+  - Bybit instead of OKX research data (GitHub runners are geo-blocked by Bybit);
+  - cross-sectional momentum / open-interest data;
+  - a real-account switch procedure.
 
 ## Research lab (GitHub Actions), added 2026-11-20
 1. `GET /api/lab/state` fetches learnings, revalidations due, strategies worth refining and the family bandit stats.
