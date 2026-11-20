@@ -236,3 +236,13 @@ def test_prune_jobs_and_lite_profile(tmp_path, monkeypatch):
     monkeypatch.setenv("AITRADER_PROFILE", "lite")
     s = Settings()
     assert s.research.hyperopt_jobs == 1 and s.research.epochs == 60
+
+
+def test_trade_config_pairlist_url_is_absolute():
+    """RemotePairList does url.split('file:///')[1] → needs 4 slashes for an absolute path
+    (found on first Railway deploy: 'file:///data/...' resolved to relative 'data/...')."""
+    cfg = json.loads((Path(__file__).resolve().parents[1] / "config" / "trade.json").read_text())
+    url = cfg["pairlists"][0]["pairlist_url"]
+    path = url.split("file:///", 1)[1]
+    assert path == Settings(data_dir=Path("/data")).pairlist_path.as_posix()
+    assert cfg["exchange"]["demo_trading"] is True and cfg["dry_run"] is False

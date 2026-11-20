@@ -34,7 +34,7 @@
     "pair_blacklist": ["USDC/.*", "USDE/.*", "FDUSD/.*", "DAI/.*", "TUSD/.*", ".*(BULL|BEAR|UP|DOWN)/.*"]
   },
   "pairlists": [
-    {"method": "RemotePairList", "pairlist_url": "file:///data/aitrader/pairlist.json",
+    {"method": "RemotePairList", "pairlist_url": "file:////data/aitrader/pairlist.json",
      "mode": "whitelist", "processing_mode": "filter", "refresh_period": 300,
      "keep_pairlist_on_failure": true, "number_assets": 60}
   ],
