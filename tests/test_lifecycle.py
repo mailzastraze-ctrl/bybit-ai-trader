@@ -318,3 +318,15 @@ def test_revalidation_spec_targets_stale_live_strategy(env):
     spec = gen.revalidation_spec(["BTC/USDT:USDT", "ETH/USDT:USDT", "SOL/USDT:USDT", "XRP/USDT:USDT"])
     assert spec["revalidates"] == "old" and spec["family"] == "meanrev_bb" and spec["pairs"][0] == "BTC/USDT:USDT"
     assert gen.revalidation_spec(["BTC/USDT:USDT"]) is None  # marked, not again for 14 days
+
+
+def test_research_candidates_displace_bootstrap_placeholders(env):
+    s, reg = env
+    life = Lifecycle(s, reg)
+    life.bootstrap()  # 4 unvalidated exploration sleeves (more than max_exploration)
+    _strategy(reg, "cand1", "exploratory", ["SOL/USDT:USDT"], score=0.8)
+    _strategy(reg, "cand2", "exploratory", ["AVAX/USDT:USDT"], score=0.5)
+    life.evaluate(10_000)
+    st = {r["id"]: r["stage"] for r in reg.strategies()}
+    assert st["cand1"] == "exploration" and st["cand2"] == "exploration"
+    assert sum(1 for k, v in st.items() if k.startswith("boot-") and v == "retired") >= 2

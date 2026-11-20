@@ -185,10 +185,10 @@ class Lifecycle:
             n_inc += 1
         n_exp = len(self.reg.strategies(("exploration",)))
         for cand in self.reg.strategies(("exploratory",)):
-            if n_exp >= lc.max_exploration:
+            if n_exp >= lc.max_exploration and not self._displace_placeholder(cand):
                 break
             self.reg.set_stage(cand["id"], "exploration", "relaxed gates passed → tiny-risk live experiment")
-            n_exp += 1
+            n_exp = len(self.reg.strategies(("exploration",)))
         # Always-on learning: keep the exploration lane busy with the best recent near-misses
         # (profitable out-of-sample but failed a strict gate) so live evidence keeps flowing.
         if n_exp < lc.max_exploration:
@@ -197,6 +197,19 @@ class Lifecycle:
                                    "always-on exploration: near-miss (positive OOS, failed a strict gate)")
                 n_exp += 1
         self.ensure_activity()
+
+    def _displace_placeholder(self, cand: dict) -> bool:
+        """Research-backed candidates replace unvalidated placeholders (bootstrap defaults,
+        random explorers) unless the placeholder has already shown a live edge."""
+        for r in sorted(self.reg.strategies(("exploration",)), key=lambda x: x.get("stage_since") or ""):
+            if not (str(r["id"]).startswith("boot-") or str(r["id"]).startswith("rnd-")):
+                continue
+            live = r.get("live") or {}
+            if live.get("trades", 0) >= 10 and live.get("profit_factor", 0) >= 1.1:
+                continue  # earned its place with live evidence
+            self.reg.set_stage(r["id"], "retired", f"superseded by research candidate {cand['id']}")
+            return True
+        return False
 
     def near_misses(self, k: int, days: int = 30) -> list[dict]:
         cutoff = iso(utcnow() - timedelta(days=days))
