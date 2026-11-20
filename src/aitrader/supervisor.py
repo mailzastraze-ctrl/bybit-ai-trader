@@ -132,8 +132,21 @@ def main() -> None:
             subprocess.run([py, "-m", "aitrader.selftest", "240"], env=os.environ.copy())
         threading.Thread(target=_selftest, daemon=True).start()
 
+    last_status = 0.0
     while not stopping.is_set():
         now = time.time()
+        if now - last_status > 300:
+            last_status = now
+            try:
+                hb = {h["service"]: f"{h['status']}" for h in reg.q("SELECT service, status FROM heartbeats")}
+                u = reg.kv_get("universe") or {}
+                ex = {r["status"]: r["n"] for r in reg.q("SELECT status, COUNT(*) n FROM experiments GROUP BY status")}
+                st = {r["stage"]: r["n"] for r in reg.q("SELECT stage, COUNT(*) n FROM strategies GROUP BY stage")}
+                nt = reg.one("SELECT COUNT(*) n FROM live_trades")["n"]
+                log.info("STATUS heartbeats=%s universe=%d experiments=%s strategies=%s closed_trades=%s",
+                         hb, len(u.get("pairs") or []), ex, st, nt)
+            except Exception as e:  # noqa: BLE001
+                log.warning("status line failed: %s", e)
         for p in procs:
             rc = p.popen.poll() if p.popen else None
             if p.popen and rc is not None:

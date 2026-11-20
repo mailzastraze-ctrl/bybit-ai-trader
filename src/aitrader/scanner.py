@@ -87,6 +87,8 @@ class Scanner:
         except FreqtradeError as e:
             self.reg.event("scanner", f"download failed: {e}"[:400], "error")
         universe = pairs_with_history(self.s, liquid, rs.min_history_days)
+        log.info("scan: %d liquid pairs (%s), %d with >= %d days of data", len(liquid), source,
+                 len(universe), rs.min_history_days)
 
         now = iso()
         for p in universe:

@@ -32,7 +32,10 @@ def universe(reg: Registry, scanner: Scanner) -> list[str]:
     ts = parse_dt(u.get("ts"))
     if not u.get("pairs") or ts is None or (utcnow() - ts).total_seconds() > UNIVERSE_MAX_AGE_H * 3600:
         reg.heartbeat("research", "busy", {"stage": "market scan"})
-        return scanner.refresh()
+        log.info("market scan: refreshing universe")
+        pairs = scanner.refresh()
+        log.info("market scan done: %d pairs with enough history: %s", len(pairs), pairs)
+        return pairs
     return u["pairs"]
 
 
@@ -48,12 +51,15 @@ def main() -> None:
     reg.event("research", "research worker started")
     while True:
         try:
+            log.debug("research loop tick")
             if reg.kv_get("research_paused", False):
                 reg.heartbeat("research", "paused")
                 time.sleep(60)
                 continue
             pairs = universe(reg, scanner)
             if len(pairs) < 4:
+                log.warning("universe too small (%d pairs: %s) – forcing a rescan in 10 min", len(pairs), pairs)
+                reg.kv_set("universe", None)
                 reg.heartbeat("research", "waiting", {"reason": "universe too small", "pairs": pairs})
                 time.sleep(600)
                 continue
@@ -73,6 +79,7 @@ def main() -> None:
             learner.learn_from_research()
             prune_jobs(s.jobs_dir)
             reg.heartbeat("research", "idle", {"last_experiment": eid})
+            log.info("experiment %s finished; sleeping %ss", eid, s.research.idle_sleep_s)
             time.sleep(s.research.idle_sleep_s)
         except Exception as e:  # noqa: BLE001 – never die
             log.exception("research loop error")
