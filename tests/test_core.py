@@ -54,6 +54,9 @@ def test_family_produces_signals_and_bounded_conviction(name):
         import numpy as np
         f = 0.0001 + 0.0006 * np.sin(np.arange(len(df)) / 90.0) + np.random.default_rng(3).normal(0, 0.0001, len(df))
         df["funding"] = np.where(np.arange(len(df)) % 8 == 0, f, np.nan)
+    if name == "oi_flow":  # open interest that rises with trends and drops on reversals
+        import numpy as np
+        df["oi"] = 1e6 * np.exp(np.cumsum(np.random.default_rng(4).normal(0, 0.01, len(df))) + 0.3 * np.sin(np.arange(len(df)) / 40))
     if name == "rel_strength":  # a market (BTC) series the coin drifts against
         df["mkt_close"] = ohlcv(3000, seed=9, vol=0.008)["close"].values
     out = fam.populate(df, fam.defaults())
@@ -212,5 +215,11 @@ def test_ported_strategy_lab_families_signal_and_stay_causal():
 
 def test_relative_strength_is_silent_without_market_data():
     fam = get_family("rel_strength")
+    out = fam.populate(ohlcv(1500, seed=2), fam.defaults())
+    assert out["long_sig"].sum() + out["short_sig"].sum() == 0
+
+
+def test_oi_family_is_silent_without_open_interest():
+    fam = get_family("oi_flow")
     out = fam.populate(ohlcv(1500, seed=2), fam.defaults())
     assert out["long_sig"].sum() + out["short_sig"].sum() == 0

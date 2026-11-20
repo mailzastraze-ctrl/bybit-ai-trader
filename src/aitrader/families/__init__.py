@@ -458,14 +458,50 @@ REL_STRENGTH = Family(
     signal_fn=_rel_strength, affinity="trend")
 
 
+# ------------------------------------------------ open interest flow (who drives a move)
+def _oi_flow(df: pd.DataFrame, p: dict) -> pd.DataFrame:
+    """Price move + open-interest change. Mode 0 (confirm): a breakout carried by *new*
+    positions (OI rising) tends to continue. Mode 1 (fade): a sharp move while OI collapses
+    is positions being closed (liquidations / short covering) and tends to revert.
+    Needs an 'oi' column merged by the strategy; without it there are no signals."""
+    no = pd.Series(False, index=df.index)
+    if "oi" not in df or df["oi"].isna().all():
+        return _sig(no, no, no, no, index=df.index)
+    n = int(p["oi_len"])
+    w = max(4 * n, 200)
+    oi = df["oi"].astype(float).ffill()
+    zs = lambda x: (x - x.rolling(w, min_periods=w // 2).mean()) / x.rolling(w, min_periods=w // 2).std().replace(0, np.nan)  # noqa: E731
+    zr = zs(df["close"] / df["close"].shift(n) - 1)
+    zo = zs(oi / oi.shift(n) - 1)
+    k, m, x = p["oi_k"], p["oi_m"], p["oi_exit"]
+    if int(p["oi_mode"]) == 0:
+        long_sig, short_sig = ta.crossed_above(zr, k) & (zo > m), ta.crossed_below(zr, -k) & (zo > m)
+        exit_l, exit_s = zr < x, zr > -x
+    else:
+        long_sig, short_sig = ta.crossed_below(zr, -k) & (zo < -m), ta.crossed_above(zr, k) & (zo < -m)
+        exit_l, exit_s = zr > -x, zr < x
+    return _sig(long_sig, short_sig, exit_l, exit_s, 0.5 + zo.abs().clip(0, 2) / 2, index=df.index)
+
+
+OI_FLOW = Family(
+    name="oi_flow", title="Open-interest flow",
+    description="Combines the price move with the change in open interest: breakouts carried by new positions "
+                "(confirm mode) or sharp moves on collapsing open interest (fade mode).",
+    entry_params=(Param("oi_len", "int", 4, 96, 24, "buy"), Param("oi_k", "float", 0.5, 3.0, 1.5, "buy", 2),
+                  Param("oi_m", "float", 0.0, 2.0, 0.5, "buy", 2), Param("oi_mode", "int", 0, 1, 0, "buy"),
+                  Param("oi_exit", "float", -0.5, 1.0, 0.0, "buy", 2)),
+    signal_fn=_oi_flow, affinity="trend")
+
+
 FAMILIES: dict[str, Family] = {f.name: f for f in (TREND_EMA, MEANREV_BB, DONCHIAN, SQUEEZE, TSMOM, FUNDING, ZSCORE,
                                                    SUPERTREND, MACD, ADX_DI, HULL, RSI_REVERT, STOCH,
-                                                   EMA_CROSS, BB_REVERT, TURTLE, REL_STRENGTH)}
+                                                   EMA_CROSS, BB_REVERT, TURTLE, REL_STRENGTH, OI_FLOW)}
 # families researched on 15m as well as 1h (short-horizon ideas; funding needs 1h alignment)
 MULTI_TF = {"zscore_revert", "meanrev_bb", "squeeze_momentum", "supertrend", "macd_cross", "adx_di", "hull_turn",
             "rsi_revert", "stoch_cross", "ema_cross", "bb_revert", "turtle", "rel_strength"}
 NEEDS_FUNDING = {"funding_reversal"}
 NEEDS_MARKET = {"rel_strength"}
+NEEDS_OI = {"oi_flow"}  # hourly open interest (research downloads it; live fetches it)
 
 # Freqtrade strategy class name used for hyperopting each family.
 RESEARCH_CLASS: dict[str, str] = {
@@ -486,6 +522,7 @@ RESEARCH_CLASS: dict[str, str] = {
     "bb_revert": "FamBBRevert",
     "turtle": "FamTurtle",
     "rel_strength": "FamRelStrength",
+    "oi_flow": "FamOiFlow",
 }
 
 
@@ -496,4 +533,4 @@ def get_family(name: str) -> Family:
         raise ValueError(f"unknown family {name!r}; known: {sorted(FAMILIES)}") from e
 
 
-__all__ = ["EXIT_PARAMS", "FAMILIES", "MARKET_PAIR", "NEEDS_FUNDING", "NEEDS_MARKET", "RESEARCH_CLASS", "Family", "Param", "get_family"]
+__all__ = ["EXIT_PARAMS", "FAMILIES", "MARKET_PAIR", "NEEDS_FUNDING", "NEEDS_MARKET", "NEEDS_OI", "RESEARCH_CLASS", "Family", "Param", "get_family"]

@@ -7,7 +7,7 @@ import logging
 from concurrent.futures import ThreadPoolExecutor
 from datetime import timedelta
 
-from aitrader.families import MARKET_PAIR
+from aitrader.families import MARKET_PAIR, NEEDS_OI
 from aitrader.manifest import Manifest, Sleeve
 from aitrader.realism import real_pnl
 from aitrader.research.ftrunner import FreqtradeRunner, Job, research_config
@@ -69,6 +69,10 @@ def run(s: Settings, entries: list[dict], out, workers: int = 4, ft: FreqtradeRu
         dl = Job(root / f"_download-{tf}")
         cfg = ft.write_config(dl, "config.json", research_config(s, pairs, timeframe=tf))
         ft.download(dl, cfg, pairs, f"{start:%Y%m%d}-", timeframe=tf)
+        oi_pairs = sorted({p for e in group if e.get("family") in NEEDS_OI for p in e["pairs"]})
+        if oi_pairs:
+            from aitrader import oi as oimod
+            oimod.download(s.market_data_dir, oi_pairs, tf, start, s.research.relay, s.research.relay_token)
     results, done = [], 0
     with ThreadPoolExecutor(max_workers=workers) as pool:
         for r in pool.map(lambda e: test_one(s, ft, root, e), entries):

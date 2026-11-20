@@ -16,7 +16,7 @@ from datetime import timedelta
 import numpy as np
 import pandas as pd
 
-from aitrader.families import MARKET_PAIR, NEEDS_MARKET, RESEARCH_CLASS, get_family
+from aitrader.families import MARKET_PAIR, NEEDS_MARKET, NEEDS_OI, RESEARCH_CLASS, get_family
 from aitrader.manifest import Manifest, Sleeve
 from aitrader.registry import Registry
 from aitrader.research import metrics as M
@@ -107,6 +107,9 @@ class Pipeline:
             self.ft.download(job, base_cfg, data_pairs, f"{data_start:%Y%m%d}-")
         else:
             self.ft.download(job, base_cfg, data_pairs, f"{data_start:%Y%m%d}-", timeframe=tf)
+        if fam.name in NEEDS_OI:  # open-interest history (Bybit only; the family is silent without it)
+            from aitrader import oi as oimod
+            oimod.download(self.s.market_data_dir, pairs, tf, data_start, rs.relay, rs.relay_token)
 
         # 2) walk-forward ---------------------------------------------------
         oos_trades, stress_trades, fold_reports, all_sharpes = [], [], [], []

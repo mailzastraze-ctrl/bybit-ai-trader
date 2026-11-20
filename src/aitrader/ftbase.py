@@ -26,7 +26,15 @@ from freqtrade.strategy import (
 )
 
 from aitrader import indicators as ta
-from aitrader.families import EXIT_PARAMS, MARKET_PAIR, NEEDS_FUNDING, NEEDS_MARKET, get_family
+from aitrader import oi as oimod
+from aitrader.families import (
+    EXIT_PARAMS,
+    MARKET_PAIR,
+    NEEDS_FUNDING,
+    NEEDS_MARKET,
+    NEEDS_OI,
+    get_family,
+)
 from aitrader.manifest import ManifestWatcher, Sleeve
 from aitrader.riskcore import EntryContext, bars_held, signal_row, size_multiplier, stake_for_risk
 from aitrader.settings import MAX_LEVERAGE
@@ -122,6 +130,27 @@ class AIBase(IStrategy):
                     if sl.family in NEEDS_MARKET and self._tf(sl) != self.timeframe]
         return list(dict.fromkeys(out))
 
+    def _needs_oi(self) -> bool:
+        return bool(self.families_in_use() & NEEDS_OI)
+
+    def _merge_oi(self, dataframe: pd.DataFrame, pair: str, tf: str) -> pd.DataFrame:
+        """Open interest as of each candle's start. Backtests read the lab's downloaded
+        history; the live bot fetches recent OI (cached for 20 minutes per pair)."""
+        try:
+            if self.config.get("runmode") in (RunMode.LIVE, RunMode.DRY_RUN):
+                cache = self.__dict__.setdefault("_oi_cache", {})
+                hit = cache.get((pair, tf))
+                if hit is None or (datetime.now().timestamp() - hit[0]) > 1200:
+                    api = getattr(getattr(self.dp, "_exchange", None), "_api", None)
+                    hit = (datetime.now().timestamp(), oimod.fetch_live(api, pair, tf) if api else None)
+                    cache[(pair, tf)] = hit
+                return oimod.merge(dataframe, hit[1])
+            return oimod.merge(dataframe, oimod.load(Path(self.config.get("datadir") or "."), pair, tf))
+        except Exception as e:  # noqa: BLE001 – missing OI must never break trading
+            logger.warning("open interest unavailable for %s: %s", pair, e)
+            dataframe["oi"] = float("nan")
+            return dataframe
+
     def _needs_market(self) -> bool:
         return bool(self.families_in_use() & NEEDS_MARKET)
 
@@ -159,6 +188,8 @@ class AIBase(IStrategy):
             inf = self._merge_funding(inf, pair)
         if sleeve.family in NEEDS_MARKET:
             inf = self._merge_market(inf, tf)
+        if sleeve.family in NEEDS_OI:
+            inf = self._merge_oi(inf, pair, tf)
         res = fam.populate(inf, sleeve.params)
         keep = res[["date", "atr", "long_sig", "short_sig", "exit_long_sig", "exit_short_sig", "conviction"]].copy()
         m = merge_informative_pair(dataframe[["date"]].copy(), keep, self.timeframe, tf, ffill=True)
@@ -204,6 +235,9 @@ class AIBase(IStrategy):
             dataframe = self._merge_funding(dataframe, metadata["pair"])
         if self._needs_market():
             dataframe = self._merge_market(dataframe, self.timeframe)
+        if self._needs_oi() and any(s.family in NEEDS_OI and self._tf(s) == self.timeframe
+                                    for s in self.sleeves_for_pair(metadata["pair"])):
+            dataframe = self._merge_oi(dataframe, metadata["pair"], self.timeframe)
         return dataframe
 
     def populate_entry_trend(self, dataframe: pd.DataFrame, metadata: dict) -> pd.DataFrame:
@@ -212,7 +246,7 @@ class AIBase(IStrategy):
         sleeves = self.sleeves_for_pair(metadata["pair"])
         if not sleeves:
             return dataframe
-        cols = ["date", "open", "high", "low", "close", "volume"] + [c for c in ("funding", "mkt_close") if c in dataframe]
+        cols = ["date", "open", "high", "low", "close", "volume"] + [c for c in ("funding", "mkt_close", "oi") if c in dataframe]
         paused = self.entries_paused()
         free = pd.Series(True, index=dataframe.index)  # rows not yet claimed by a higher-priority sleeve
         for i, sleeve in enumerate(sleeves):
