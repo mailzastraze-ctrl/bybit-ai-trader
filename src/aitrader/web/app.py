@@ -130,10 +130,17 @@ def research(limit: int = 60) -> dict:
             for g, v in (res.get("gates") or {}).items():
                 if not v.get("pass"):
                     fails[g] = fails.get(g, 0) + 1
-            r["summary"] = {k: res.get(k) for k in ("verdict", "score", "dsr", "wfe", "robust_frac")}
+            r["summary"] = {k: res.get(k) for k in ("verdict", "score", "dsr", "wfe", "robust_frac", "n_trials")}
             r["oos"] = res.get("oos")
             r["gates"] = res.get("gates")
+            r["variant"] = res.get("variant")
+            r["folds"] = [{"test": f.get("test"), "trades": (f.get("oos") or {}).get("trades"),
+                           "ret": (f.get("oos") or {}).get("total_return"),
+                           "pf": (f.get("oos") or {}).get("profit_factor")} for f in (res.get("folds") or [])]
         r["pairs"] = len(spec.get("pairs", [])) if isinstance(spec, dict) else 0
+        if isinstance(spec, dict):
+            r["info"] = {k: spec.get(k) for k in ("refines", "revalidates", "remote", "epochs")} | {
+                "pair_list": (spec.get("pairs") or [])[:12]}
         r["used_learnings"] = spec.get("used_learnings", []) if isinstance(spec, dict) else []
         r["error"] = (r.get("error") or "")[:400]
         out.append(r)
@@ -146,6 +153,8 @@ def research(limit: int = 60) -> dict:
         "paused": bool(reg().kv_get("research_paused", False)),
         "scale": reg().kv_get("research_scale"),
         "universe": reg().kv_get("universe"),
+        "lab": reg().kv_get("lab"),
+        "mode": S.research.mode,
     }
 
 

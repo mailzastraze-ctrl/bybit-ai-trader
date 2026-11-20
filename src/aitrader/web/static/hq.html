@@ -65,6 +65,21 @@ html, body { margin: 0; height: 100%; overflow: hidden; background: #0b0d12; col
 #loader .bar i { display: block; height: 100%; width: 40%; background: var(--blue); animation: load 1.2s ease-in-out infinite; }
 @keyframes load { 0% { transform: translateX(-100%); } 100% { transform: translateX(260%); } }
 #err { display: none; }
+#goals { position: fixed; right: 12px; top: 84px; width: 330px; padding: 10px 12px; z-index: 4; }
+#goals .h { font-size: 9.5px; letter-spacing: .09em; text-transform: uppercase; color: var(--muted); margin-bottom: 6px; }
+#goals .g { margin: 6px 0; }
+#goals .gt { display: flex; justify-content: space-between; gap: 8px; font-size: 11px; color: var(--text2); }
+#goals .gt b { font: 600 11px var(--mono); color: var(--text); white-space: nowrap; }
+#goals .gt i { font-style: normal; color: var(--muted); }
+#goals .gb { height: 4px; background: rgba(255,255,255,.08); border-radius: 3px; overflow: hidden; margin-top: 3px; }
+#goals .gb i { display: block; height: 100%; border-radius: 3px; transition: width 1s; }
+.emote { position: absolute; transform: translate(-50%, -100%); font-size: 22px; filter: drop-shadow(0 3px 6px rgba(0,0,0,.45)); }
+.emote.on { animation: pop 2.6s ease-out forwards; }
+@keyframes pop { 0% { opacity: 0; margin-top: 10px; } 12% { opacity: 1; margin-top: -4px; } 80% { opacity: 1; margin-top: -14px; } 100% { opacity: 0; margin-top: -24px; } }
+.dots i { display: inline-block; width: 5px; height: 5px; margin: 0 1.5px; border-radius: 50%; background: #8d8c84; animation: blink 1s infinite; }
+.dots i:nth-child(2) { animation-delay: .15s; } .dots i:nth-child(3) { animation-delay: .3s; }
+@keyframes blink { 0%, 100% { opacity: .25; } 50% { opacity: 1; } }
+@media (max-width: 900px) { #goals { display: none; } }
 </style>
 <script type="importmap">
 { "imports": {
@@ -89,6 +104,7 @@ html, body { margin: 0; height: 100%; overflow: hidden; background: #0b0d12; col
   <a class="btn" href="/terminal">Terminal →</a>
 </div>
 <div id="panel" class="glass"><span class="x" id="px">✕</span><div id="pbody"></div></div>
+<div id="goals" class="glass"></div>
 <div id="feed" class="glass"><div class="h">Office chatter · live events</div></div>
 <div id="ticker" class="glass"><div class="lbl">Company log</div><div class="wrap"><div class="track" id="track">loading…</div></div></div>
 <div id="loader"><div style="letter-spacing:.12em;font-weight:600">AI TRADER HQ</div><div class="bar"><i></i></div><div id="lmsg" style="color:#8d8c84;font-size:11.5px">building the office…</div><div id="err"><a class="btn" href="/terminal">3D engine unavailable – open the terminal</a></div></div>

@@ -1,0 +1,36 @@
+name: hq-preview
+# Renders the 3D HQ in headless Chromium with demo data, fails on JavaScript errors and
+# commits screenshots to docs/preview/ (so UI changes are verified before anyone looks).
+on:
+  push:
+    branches: [main]
+    paths: ["src/aitrader/web/**", "scripts/hq_preview.py", ".github/workflows/hq-preview.yml"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: hq-preview
+  cancel-in-progress: true
+
+jobs:
+  preview:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with: {python-version: "3.13"}
+      - run: pip install -q -e . pandas numpy requests psutil fastapi uvicorn httpx playwright
+      - run: python -m playwright install --with-deps chromium
+      - name: Render HQ and take screenshots
+        run: python scripts/hq_preview.py --out docs/preview
+      - name: Commit screenshots
+        if: always()
+        run: |
+          git config user.name "aitrader-preview"
+          git config user.email "aitrader-preview@users.noreply.github.com"
+          git add docs/preview
+          git commit -q -m "HQ preview screenshots [skip ci]" || exit 0
+          for i in 1 2 3; do git pull -q --rebase origin main && git push -q origin HEAD:main && break; sleep 5; done

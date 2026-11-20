@@ -347,6 +347,44 @@ const ceoSeat = desk("ceo", 6.5, 0.8, -Math.PI / 2, {dark: true, second: true});
 // plants
 [[-21, -14], [-11.2, -4.3], [-11.2, 4.3], [-21, 14.2], [9.8, -4.3], [9.8, 4.3], [21, 14.2], [21, -2.6], [-5.6, 4.6], [5.6, 4.6], [-8.6, -13.8], [8.6, -13.8]].forEach(([x, z]) => plant(x, z, rand(0.9, 1.3)));
 
+// --- Mission board (atrium): company goals measured from real data
+const missionScr = screen(6.4, 2.25, 1024, 360);
+{
+  const mb = new THREE.Group();
+  mb.add(boxM(6.7, 2.5, 0.14, M.black, 0, 0, -0.08));
+  missionScr.mesh.position.z = 0.0; mb.add(missionScr.mesh);
+  for (const x of [-3.2, 3.2]) { const post = boxM(0.12, 3.3, 0.12, M.metal, x, -1.95 + 0.35, -0.1); mb.add(post); }
+  mb.position.set(0, 3.25, 1.6); mb.rotation.x = -0.1; scene.add(mb);
+  block(-3.4, 1.4, -3.0, 1.8); block(3.0, 1.4, 3.4, 1.8);
+}
+dept("mission", "Company Mission", 0, 1.6, 0xffffff);
+departments.mission.anchor.set(0, 4.9, 1.6);
+
+// --- GitHub research lab: the off-site compute cloud (all hyperopt/backtests run there)
+const cloud = new THREE.Group();
+const cloudMat = new THREE.MeshStandardMaterial({color: 0xf4f7fb, roughness: 0.95, emissive: 0x9fb8d8, emissiveIntensity: 0.15, transparent: true, opacity: 0.94});
+for (let i = 0; i < 11; i++) { const r = rand(1.1, 2.1); const puff = mesh(new THREE.SphereGeometry(r, 20, 14), cloudMat, false, false); puff.position.set(rand(-3.4, 3.4), rand(-0.5, 0.9), rand(-1.6, 1.6)); cloud.add(puff); }
+const coreMat = new THREE.MeshBasicMaterial({color: 0x3987e5, toneMapped: false, transparent: true, opacity: 0.9});
+const cloudCore = new THREE.Mesh(new THREE.IcosahedronGeometry(0.75, 1), coreMat); cloudCore.position.y = -1.6; cloud.add(cloudCore);
+const cloudRing = new THREE.Mesh(new THREE.TorusGeometry(1.4, 0.05, 8, 48), new THREE.MeshBasicMaterial({color: 0x7fb6ff, toneMapped: false})); cloudRing.position.y = -1.6; cloudRing.rotation.x = Math.PI / 2; cloud.add(cloudRing);
+const cloudRing2 = cloudRing.clone(); cloudRing2.scale.setScalar(0.7); cloud.add(cloudRing2);
+cloud.position.set(-27, 15, -25); scene.add(cloud);
+dept("cloud", "GitHub Research Lab", -27, -25, 0x3987e5);
+departments.cloud.anchor.set(-27, 18.2, -25);
+const beamFrom = new THREE.Vector3(-27, 13.4, -25), beamTo = new THREE.Vector3(-15.5, 3.2, -8.5);
+const beamCurve = new THREE.QuadraticBezierCurve3(beamFrom, new THREE.Vector3(-22, 12, -14), beamTo);
+const beam = new THREE.Mesh(new THREE.TubeGeometry(beamCurve, 60, 0.03, 6, false), new THREE.MeshBasicMaterial({color: 0x7fb6ff, transparent: true, opacity: 0.0, toneMapped: false}));
+scene.add(beam);
+const NB = 26, beamParts = new THREE.InstancedMesh(new THREE.SphereGeometry(0.09, 8, 6), new THREE.MeshBasicMaterial({color: 0xbfe0ff, toneMapped: false}), NB);
+const beamT = Array.from({length: NB}, (_, i) => i / NB); scene.add(beamParts);
+let labActive = false;
+const packets = [];
+function flyPacket(from, to, color = 0x7fb6ff, ms = 3200) {
+  const m = new THREE.Mesh(new THREE.BoxGeometry(0.35, 0.35, 0.35), new THREE.MeshBasicMaterial({color, toneMapped: false}));
+  const mid = from.clone().lerp(to, 0.5); mid.y = Math.max(from.y, to.y) + 4;
+  packets.push({m, curve: new THREE.QuadraticBezierCurve3(from.clone(), mid, to.clone()), s: performance.now(), ms}); scene.add(m);
+}
+
 // ============================================================== pipeline particles
 const pipeline = new THREE.CatmullRomCurve3([
   new THREE.Vector3(-19.5, 2.6, 4.5), new THREE.Vector3(-15, 3.2, 0), new THREE.Vector3(-15.5, 3.0, -6),
@@ -384,6 +422,10 @@ class Person {
     { const pelvis = mesh(new THREE.CapsuleGeometry(0.13, 0.12, 4, 10), pants); pelvis.scale.set(1.25, 1, 0.8); hips.add(pelvis); }
     const torso = new THREE.Group(); torso.position.y = 0.08; hips.add(torso); this.torso = torso;
     const chest = mesh(new THREE.CapsuleGeometry(0.17, 0.3, 4, 12), top); chest.scale.set(1.15, 1, 0.72); chest.position.y = 0.27; torso.add(chest);
+    const collar = mesh(new THREE.TorusGeometry(0.068, 0.02, 6, 18), new THREE.MeshStandardMaterial({color: new THREE.Color(top.color).multiplyScalar(0.82), roughness: 0.7}));
+    collar.rotation.x = Math.PI / 2; collar.position.y = 0.515; collar.scale.set(1, 0.8, 1); torso.add(collar);
+    const belt = mesh(new THREE.CylinderGeometry(0.168, 0.168, 0.045, 18), new THREE.MeshStandardMaterial({color: 0x2a2320, roughness: 0.5})); belt.scale.z = 0.78; belt.position.y = 0.075; hips.add(belt);
+    const buckle = boxM(0.04, 0.03, 0.01, M.metal, 0, 0.075, 0.132); hips.add(buckle);
     if (role === "research") { const coat = mesh(new THREE.CylinderGeometry(0.21, 0.25, 0.62, 14, 1, true), new THREE.MeshStandardMaterial({color: 0xfdfdfb, roughness: 0.8, side: THREE.DoubleSide})); coat.position.y = 0.12; coat.scale.z = 0.75; torso.add(coat); }
     if (role === "ceo" || role === "risk") { const tie = boxM(0.045, 0.24, 0.02, new THREE.MeshStandardMaterial({color: role === "ceo" ? 0xd55181 : 0xeda100}), 0, 0.33, 0.125); torso.add(tie); }
     if (opts.badge) { const b = boxM(0.06, 0.08, 0.01, new THREE.MeshStandardMaterial({color: 0x3987e5, emissive: 0x3987e5, emissiveIntensity: .4}), 0.09, 0.36, 0.126); torso.add(b); }
@@ -391,9 +433,18 @@ class Person {
     const head = new THREE.Group(); head.position.y = 0.6; torso.add(head); this.head = head;
     const skull = mesh(new THREE.SphereGeometry(0.115, 20, 16), skin); skull.scale.set(0.95, 1.1, 1.0); skull.position.y = 0.11; head.add(skull);
     const nose = mesh(new THREE.SphereGeometry(0.02, 8, 6), skin); nose.position.set(0, 0.1, 0.11); head.add(nose);
-    const eyeM = new THREE.MeshStandardMaterial({color: 0x15161a, roughness: 0.3});
-    this.eyes = [-0.04, 0.04].map(x => { const e = mesh(new THREE.SphereGeometry(0.014, 8, 6), eyeM, false); e.position.set(x, 0.13, 0.102); head.add(e); return e; });
-    const mouth = mesh(new THREE.BoxGeometry(0.045, 0.008, 0.01), new THREE.MeshStandardMaterial({color: 0x7a3b33})); mouth.position.set(0, 0.06, 0.108); head.add(mouth); this.mouth = mouth;
+    const white = new THREE.MeshStandardMaterial({color: 0xf7f5f0, roughness: 0.35});
+    const eyeM = new THREE.MeshStandardMaterial({color: 0x1b1a1f, roughness: 0.2});
+    this.eyes = [-0.042, 0.042].map(x => { const g = new THREE.Group(); g.position.set(x, 0.135, 0.097);
+      const w = mesh(new THREE.SphereGeometry(0.019, 12, 8), white, false); w.scale.set(1, 0.85, 0.55); g.add(w);
+      const pu = mesh(new THREE.SphereGeometry(0.0105, 10, 8), eyeM, false); pu.position.z = 0.0085; g.add(pu); g.userData.pupil = pu; head.add(g); return g; });
+    this.brows = [-0.043, 0.043].map((x, i) => { const b = boxM(0.042, 0.009, 0.012, hairM, x, 0.172, 0.104); b.castShadow = false; b.userData.side = i ? -1 : 1; head.add(b); return b; });
+    this.mouth = new THREE.Group(); this.mouth.position.set(0, 0.06, 0.104); head.add(this.mouth);
+    this.smile = mesh(new THREE.TorusGeometry(0.021, 0.0048, 6, 14, Math.PI), new THREE.MeshStandardMaterial({color: 0x8a3f37, roughness: 0.6}), false);
+    this.smile.rotation.z = Math.PI; this.mouth.add(this.smile);
+    this.mouthOpen = mesh(new THREE.SphereGeometry(0.016, 10, 8), new THREE.MeshStandardMaterial({color: 0x3a1512}), false);
+    this.mouthOpen.scale.set(1.15, 0.15, 0.4); this.mouthOpen.position.y = 0.002; this.mouth.add(this.mouthOpen);
+    [-1, 1].forEach(sd => { const e = mesh(new THREE.SphereGeometry(0.027, 10, 8), skin); e.scale.set(0.45, 1, 0.8); e.position.set(sd * 0.111, 0.118, -0.005); head.add(e); });
     const style = opts.hair ?? Math.floor(Math.random() * 4);
     const cap = mesh(new THREE.SphereGeometry(0.122, 20, 12, 0, Math.PI * 2, 0, Math.PI * 0.55), hairM); cap.position.y = 0.125; cap.scale.set(1, 1.1, 1.05); head.add(cap);
     if (style === 1) { const pony = mesh(new THREE.CapsuleGeometry(0.04, 0.14, 4, 8), hairM); pony.position.set(0, 0.08, -0.12); pony.rotation.x = 0.4; head.add(pony); }
@@ -404,6 +455,7 @@ class Person {
     if (role === "research" && Math.random() > .4) { const gl = mesh(new THREE.TorusGeometry(0.03, 0.006, 6, 14), M.black); [-0.04, 0.04].forEach(x => { const g2 = gl.clone(); g2.position.set(x, 0.13, 0.108); head.add(g2); }); }
     const arm = (side) => {
       const sh = new THREE.Group(); sh.position.set(side * 0.215, 0.43, 0); torso.add(sh);
+      const cap = mesh(new THREE.SphereGeometry(0.062, 12, 10), top); cap.scale.set(1, 0.9, 0.9); sh.add(cap);
       const upper = mesh(new THREE.CapsuleGeometry(0.048, 0.2, 4, 8), top); upper.position.y = -0.13; sh.add(upper);
       const el = new THREE.Group(); el.position.y = -0.27; sh.add(el);
       const fore = mesh(new THREE.CapsuleGeometry(0.042, 0.19, 4, 8), role === "research" ? top : skin); fore.position.y = -0.12; el.add(fore);
@@ -411,13 +463,22 @@ class Person {
       sh.rotation.z = side * 0.08; return {sh, el, hand};
     };
     this.armL = arm(1); this.armR = arm(-1);
+    // hand props (right hand): coffee cup, phone, tablet
+    const cupM = new THREE.MeshStandardMaterial({color: pick([0xffffff, 0xe66767, 0x3987e5, 0xfab219]), roughness: 0.4});
+    const cup = mesh(new THREE.CylinderGeometry(0.036, 0.03, 0.085, 14), cupM); cup.position.set(0, -0.3, 0.045);
+    const phone = rbox(0.055, 0.11, 0.012, 0.008, M.black); phone.position.set(0, -0.3, 0.035); phone.rotation.x = 0.2;
+    const tablet = new THREE.Group(); tablet.add(rbox(0.22, 0.3, 0.014, 0.015, M.black));
+    const tScr = mesh(new THREE.PlaneGeometry(0.19, 0.26), new THREE.MeshBasicMaterial({color: 0x3987e5, toneMapped: false}), false, false); tScr.position.z = 0.008; tablet.add(tScr);
+    tablet.position.set(0.02, -0.34, 0.08); tablet.rotation.set(-1.2, 0, 0);
+    this.props = {cup, phone, tablet}; for (const o of Object.values(this.props)) { o.visible = false; this.armR.el.add(o); }
     const leg = (side) => {
       const hp = new THREE.Group(); hp.position.set(side * 0.09, 0, 0); hips.add(hp);
       const thigh = mesh(new THREE.CapsuleGeometry(0.068, 0.32, 4, 8), pants); thigh.position.y = -0.21; hp.add(thigh);
       const kn = new THREE.Group(); kn.position.y = -0.43; hp.add(kn);
       const shin = mesh(new THREE.CapsuleGeometry(0.058, 0.32, 4, 8), pants); shin.position.y = -0.2; kn.add(shin);
-      const shoe = rbox(0.11, 0.07, 0.24, 0.03, shoeM); shoe.position.set(0, -0.44, 0.04); kn.add(shoe);
-      return {hp, kn};
+      const an = new THREE.Group(); an.position.y = -0.42; kn.add(an);
+      const shoe = rbox(0.11, 0.07, 0.25, 0.03, shoeM); shoe.position.set(0, -0.02, 0.045); an.add(shoe);
+      return {hp, kn, an};
     };
     this.legL = leg(1); this.legR = leg(-1);
     this.pos = (home?.approach || home?.pos || new THREE.Vector3()).clone();
@@ -431,11 +492,19 @@ class Person {
   // ---- task queue
   do(task) { this.queue.push(task); return this; }
   clear() { this.queue = []; this.task = null; return this; }
-  busy() { return !!this.task || this.queue.length > 0; }
+  busy() { return !!this.task || this.queue.length > 0 || this.locked; }
   say(text, ms = 5000) {
-    this.line = text; this.bubble.innerHTML = `<span class="who">${esc(this.name)}</span>${esc(text)}`;
-    this.bubble.classList.add("on"); this.bubbleUntil = performance.now() + ms; this.speaking = true;
+    this.line = text; clearTimeout(this._sayT);
+    this.bubble.innerHTML = `<span class="who">${esc(this.name)}</span><span class="dots"><i></i><i></i><i></i></span>`;
+    this.bubble.classList.add("on"); this.speaking = false; this.bubbleUntil = performance.now() + ms + 600;
+    this._sayT = setTimeout(() => { this.bubble.innerHTML = `<span class="who">${esc(this.name)}</span>${esc(text)}`; this.speaking = true; }, 600);
   }
+  emote(sym, ms = 2800) {
+    if (!this.emoteEl) { this.emoteEl = document.createElement("div"); this.emoteEl.className = "emote"; $("#labels").appendChild(this.emoteEl); }
+    this.emoteEl.textContent = sym; this.emoteEl.classList.remove("on"); void this.emoteEl.offsetWidth; this.emoteEl.classList.add("on");
+    this.emoteUntil = performance.now() + ms;
+  }
+  feel(m) { this.mood = clamp(m, -1, 1); }
   goTo(p) { return this.do({type: "walk", to: p.clone()}); }
   sitAt(seat) { return this.do({type: "walk", to: seat.approach}).do({type: "sit", seat}); }
   wait(ms, pose = "stand") { return this.do({type: "wait", ms, pose}); }
@@ -474,56 +543,86 @@ class Person {
   animate(dt, t, walking) {
     const R = this.root, seated = !!this.seat && !walking;
     if (!seated) this.sitBlend = damp(this.sitBlend, 0, 6, dt);
-    const sb = this.sitBlend;
-    R.position.set(this.pos.x, 0, this.pos.z); R.rotation.y = this.yaw;
-    this.phase += dt * (walking ? this.speed * 5.4 : 1);
-    const p = this.phase, sw = walking ? Math.sin(p) : 0, sw2 = walking ? Math.sin(p * 2) : 0;
-    // legs
-    const hipSit = -1.45 * sb, kneeSit = 1.5 * sb;
-    this.legL.hp.rotation.x = hipSit + sw * 0.55 * (1 - sb); this.legR.hp.rotation.x = hipSit - sw * 0.55 * (1 - sb);
-    this.legL.kn.rotation.x = kneeSit + (walking ? Math.max(0, -Math.sin(p - 0.6)) * 0.95 : 0);
-    this.legR.kn.rotation.x = kneeSit + (walking ? Math.max(0, Math.sin(p - 0.6)) * 0.95 : 0);
-    this.hips.position.y = lerp(0.92 + (walking ? Math.abs(sw2) * 0.035 : 0), 0.52, sb);
+    const sb = this.sitBlend, pose = walking ? "walk" : this.pose;
+    R.position.set(this.pos.x, 0, this.pos.z);
+    const prevYaw = R.rotation.y; R.rotation.y = this.yaw;
+    const turnRate = Math.abs(angDiff(prevYaw, this.yaw)) / Math.max(dt, 1e-3);
+    const stepping = !walking && !seated && turnRate > 1.2;
+    this.phase += dt * (walking ? this.speed * 5.6 : stepping ? 7 : 1);
+    const p = this.phase, sw = walking ? Math.sin(p) : stepping ? Math.sin(p) * 0.35 : 0, sw2 = walking ? Math.sin(p * 2) : 0;
+    // legs: hip swing, knee lift on the swing phase, heel-toe roll at the ankle
+    const hipSit = -1.45 * sb, kneeSit = 1.5 * sb, stand = 1 - sb;
+    const idleShift = !walking && !seated ? Math.sin(t * 0.45 + this.phase) : 0;
+    this.legL.hp.rotation.x = hipSit + sw * 0.55 * stand; this.legR.hp.rotation.x = hipSit - sw * 0.55 * stand;
+    this.legL.kn.rotation.x = kneeSit + (walking || stepping ? Math.max(0, -Math.sin(p - 0.6)) * 0.95 : Math.max(0, idleShift) * 0.12);
+    this.legR.kn.rotation.x = kneeSit + (walking || stepping ? Math.max(0, Math.sin(p - 0.6)) * 0.95 : Math.max(0, -idleShift) * 0.12);
+    this.legL.an.rotation.x = walking ? -Math.sin(p + 0.9) * 0.35 : -0.15 * sb;
+    this.legR.an.rotation.x = walking ? Math.sin(p + 0.9) * 0.35 : -0.15 * sb;
+    this.hips.position.y = lerp(0.92 + (walking ? Math.abs(sw2) * 0.035 : 0) - (walking ? 0.012 : 0), 0.52, sb);
     this.hips.position.z = lerp(0, -0.05, sb);
-    // torso / breathing / idle sway
+    this.hips.position.x = idleShift * 0.018;
+    this.hips.rotation.z = idleShift * 0.035; this.hips.rotation.y = walking ? sw * 0.12 : 0;
+    // torso: breathing, counter-rotation, lean
     const breath = Math.sin(t * 1.6 + this.phase) * 0.012;
-    this.torso.rotation.x = lerp(walking ? 0.06 : 0.0, 0.08, sb) + breath;
-    this.torso.rotation.y = walking ? sw * 0.08 : Math.sin(t * 0.4 + this.phase) * 0.03;
+    let lean = walking ? 0.07 : 0; if (pose === "write" || pose === "present") lean = -0.04; if (pose === "lean") lean = 0.32;
+    this.torso.rotation.x = lerp(lean, 0.1, sb) + breath;
+    this.torso.rotation.y = walking ? -sw * 0.16 : Math.sin(t * 0.4 + this.phase) * 0.03;
+    this.torso.rotation.z = -idleShift * 0.03;
     // arms
     const L = this.armL, Rr = this.armR;
-    let lSh = 0, lEl = 0, rSh = 0, rEl = 0, lZ = 0.08, rZ = -0.08;
-    if (walking) { lSh = -sw * 0.5; rSh = sw * 0.5; lEl = -0.25; rEl = -0.25; }
+    let lSh = 0, lEl = -0.08, rSh = 0, rEl = -0.08, lZ = 0.08, rZ = -0.08;
+    if (walking) { lSh = -sw * 0.55; rSh = sw * 0.55; lEl = -0.3 - Math.max(0, -sw) * 0.35; rEl = -0.3 - Math.max(0, sw) * 0.35; }
     if (this.carryObj) { lSh = rSh = -0.75; lEl = rEl = -0.9; }
-    if (seated) { // typing at the keyboard
-      const typing = this.role !== "ceo" || Math.sin(t * 0.3) > 0;
+    if (seated) {
+      const typing = this.role !== "ceo" || Math.sin(t * 0.3) > 0, fast = this.typingFast ? 1.8 : 1;
       lSh = rSh = -0.62; lEl = rEl = -1.0; lZ = 0.18; rZ = -0.18;
-      if (typing) { lEl += Math.sin(t * 17 + this.phase) * 0.07; rEl += Math.sin(t * 15 + this.phase * 2) * 0.07; }
-      if (Math.sin(t * 0.13 + this.phase) > 0.96) { lSh = rSh = -2.6; lEl = rEl = -0.6; } // stretch
+      if (typing) { lEl += Math.sin(t * 17 * fast + this.phase) * 0.07; rEl += Math.sin(t * 15 * fast + this.phase * 2) * 0.07; lSh += Math.sin(t * 3 + this.phase) * 0.03; }
+      if (Math.sin(t * 0.21 + this.phase * 3) > 0.985) { rSh = -1.2; rEl = -0.4; } // reach for the mouse / screen
+      if (Math.sin(t * 0.13 + this.phase) > 0.97) { lSh = rSh = -2.6; lEl = rEl = -0.6; } // stretch
     }
-    if (this.pose === "talk" && !walking) {
-      if (this.speaking) { const g = Math.sin(t * 3.2 + this.phase); rSh = -0.5 - Math.max(0, g) * 0.6; rEl = -1.1 + g * 0.3; rZ = -0.3; lSh = -0.2 + Math.sin(t * 2.3) * 0.15; lEl = -0.4; }
-      else { lSh = rSh = -0.05; lEl = rEl = -0.15; }
+    const talking = this.speaking && !walking;
+    if (pose === "talk") {
+      if (talking) { const g = Math.sin(t * 3.2 + this.phase), g2 = Math.sin(t * 2.1 + this.phase * 1.7); rSh = -0.55 - Math.max(0, g) * 0.6; rEl = -1.15 + g * 0.3; rZ = -0.3 - g2 * 0.1; lSh = -0.25 + Math.max(0, g2) * 0.4; lEl = -0.6 - Math.max(0, g2) * 0.4; lZ = 0.2; }
+      else { lSh = rSh = -0.08; lEl = rEl = -0.2; if (this.mood < -0.3) { lSh = rSh = -0.5; lEl = rEl = -1.9; lZ = 0.55; rZ = -0.55; } } // arms crossed when unhappy
     }
-    if (this.pose === "coffee" && !walking) { rSh = -1.25 + Math.sin(t * 0.8 + this.phase) * 0.25; rEl = -1.6; rZ = -0.25; }
-    if (this.pose === "cheer" && !walking) { lSh = rSh = -2.9 + Math.sin(t * 9) * 0.15; lEl = rEl = -0.2; lZ = 0.3; rZ = -0.3; }
-    if (this.pose === "facepalm" && !walking) { rSh = -2.2; rEl = -2.1; rZ = -0.5; }
-    if (this.pose === "think" && !walking) { rSh = -1.6; rEl = -2.3; rZ = -0.35; lSh = -0.3; lEl = -1.4; lZ = 0.5; }
-    if (this.pose === "point" && !walking) { rSh = -1.45; rEl = -0.1; rZ = -0.2; }
+    if (pose === "coffee") { rSh = -1.25 + Math.max(0, Math.sin(t * 0.8 + this.phase)) * -0.35; rEl = -1.75; rZ = -0.25; }
+    if (pose === "phone") { rSh = -1.05; rEl = -2.45; rZ = -0.9; lSh = -0.2; lEl = -1.3; lZ = 0.6; }
+    if (pose === "cheer") { lSh = rSh = -2.9 + Math.sin(t * 9) * 0.15; lEl = rEl = -0.2; lZ = 0.3; rZ = -0.3; }
+    if (pose === "clap") { const c = Math.sin(t * 16) * 0.12; lSh = rSh = -1.15; lEl = rEl = -1.25; lZ = -0.55 + c; rZ = 0.55 - c; }
+    if (pose === "highfive") { rSh = -2.6; rEl = -0.15; rZ = -0.35; }
+    if (pose === "facepalm") { rSh = -2.2; rEl = -2.1; rZ = -0.5; }
+    if (pose === "think") { rSh = -1.6; rEl = -2.3; rZ = -0.35; lSh = -0.3; lEl = -1.4; lZ = 0.5; }
+    if (pose === "point") { rSh = -1.45; rEl = -0.1; rZ = -0.2; }
+    if (pose === "present") { rSh = -1.3 + Math.sin(t * 1.3) * 0.15; rEl = -0.25; rZ = -0.55; lSh = -0.6; lEl = -0.9; lZ = 0.4; }
+    if (pose === "write") { const w = t * 5 + this.phase; rSh = -2.0 + Math.sin(w) * 0.12; rEl = -0.5 + Math.cos(w * 1.3) * 0.15; rZ = -0.25 + Math.sin(w * 0.7) * 0.12; lSh = -0.1; lEl = -0.5; }
+    if (pose === "lean") { lSh = rSh = -0.9; lEl = rEl = -0.25; lZ = 0.15; rZ = -0.15; }
     const ks = 1 - Math.exp(-12 * dt);
     L.sh.rotation.x += (lSh - L.sh.rotation.x) * ks; L.el.rotation.x += (lEl - L.el.rotation.x) * ks; L.sh.rotation.z += (lZ - L.sh.rotation.z) * ks;
     Rr.sh.rotation.x += (rSh - Rr.sh.rotation.x) * ks; Rr.el.rotation.x += (rEl - Rr.el.rotation.x) * ks; Rr.sh.rotation.z += (rZ - Rr.sh.rotation.z) * ks;
-    // head: look at partner / monitor, nod when listening, shake when upset
-    let hy = 0, hx = seated ? 0.12 : 0;
-    if (this.lookTarget) { const lt = this.lookTarget.pos || this.lookTarget; const a = Math.atan2(lt.x - this.pos.x, lt.z - this.pos.z); hy = clamp(angDiff(this.yaw, a), -1, 1); }
-    if (this.pose === "talk" && !this.speaking) hx += Math.max(0, Math.sin(t * 2.4 + this.phase)) * 0.12;
-    if (this.pose === "facepalm") hy += Math.sin(t * 7) * 0.25;
-    if (!walking && !seated && this.pose === "stand") hy += Math.sin(t * 0.5 + this.phase) * 0.35;
+    // props
+    this.props.cup.visible = pose === "coffee"; this.props.phone.visible = pose === "phone"; this.props.tablet.visible = !!this.carryTablet;
+    // head: look at partner / screen, nod while listening, head shake when upset, glance around when idle
+    let hy = 0, hx = seated ? 0.14 : 0;
+    if (this.lookTarget) { const lt = this.lookTarget.pos || this.lookTarget; const a = Math.atan2(lt.x - this.pos.x, lt.z - this.pos.z); hy = clamp(angDiff(this.yaw, a), -1.1, 1.1); hx = -0.05; }
+    if (pose === "talk" && !this.speaking) hx += Math.max(0, Math.sin(t * 2.4 + this.phase)) * 0.13;
+    if (pose === "facepalm") hy += Math.sin(t * 7) * 0.25;
+    if (pose === "write" || pose === "present") hx = -0.12;
+    if (!walking && !seated && pose === "stand" && !this.lookTarget) hy += Math.sin(t * 0.5 + this.phase) * 0.4;
+    if (walking) hx = 0.05 - sw2 * 0.02;
+    if (seated && Math.sin(t * 0.37 + this.phase * 2) > 0.93) hy = 0.6; // glance at the neighbour
     this.head.rotation.y += (hy - this.head.rotation.y) * ks; this.head.rotation.x += (hx - this.head.rotation.x) * ks;
-    // mouth + blink
-    this.mouth.scale.y = this.speaking ? 1 + Math.abs(Math.sin(t * 14)) * 3 : 1;
+    this.head.rotation.z = talking ? Math.sin(t * 2.6 + this.phase) * 0.06 : 0;
+    // face: mouth opens with speech, smile/frown with mood, brows follow emotion, blink, eyes dart
+    this.mood = damp(this.mood, 0, 0.08, dt);
+    const m = this.mood + (pose === "cheer" || pose === "highfive" || pose === "clap" ? 0.8 : 0) - (pose === "facepalm" ? 0.8 : 0);
+    this.mouthOpen.scale.y = talking ? 0.25 + Math.abs(Math.sin(t * 13 + Math.sin(t * 5))) * 0.9 : (pose === "cheer" ? 0.8 : 0.12);
+    this.smile.rotation.z = m >= 0 ? Math.PI : 0; this.smile.scale.y = 0.25 + Math.min(1, Math.abs(m)) * 0.75;
+    this.smile.position.y = m >= 0 ? 0.004 : -0.012;
+    const browLift = (talking ? Math.max(0, Math.sin(t * 2.2 + this.phase)) * 0.01 : 0) + (pose === "think" ? 0.008 : 0);
+    this.brows.forEach(b => { b.position.y = 0.172 + browLift; b.rotation.z = b.userData.side * (m < -0.2 ? -0.35 : m > 0.4 ? 0.12 : 0) * Math.min(1, Math.abs(m) + 0.3); });
     this.blinkT -= dt; const blink = this.blinkT < 0.12; if (this.blinkT < 0) this.blinkT = rand(2, 5);
-    this.eyes.forEach(e => e.scale.y = blink ? 0.1 : 1);
-    // carried object
+    const dart = Math.sin(t * 0.7 + this.phase * 5) > 0.8 ? 0.004 : 0;
+    this.eyes.forEach(e => { e.scale.y = blink ? 0.1 : 1; e.userData.pupil.position.x = dart; });
     if (this.carryObj) { this.carryObj.position.set(0, 1.08, 0.32); }
   }
 }
@@ -598,18 +697,40 @@ function wanderSomeone() {
     ops: [racks[2].position.clone().add(new THREE.Vector3(0, 0, 1.2))], learn: [new THREE.Vector3(15, 0, 13.1)], risk: [lampBar.position.clone().setZ(13.2).setY(0)], ceo: [new THREE.Vector3(0, 0, -3)]}[c.role] || [];
   if (!spots.length) return;
   const s = pick(spots);
-  c.goTo(s).do({type: "call", fn: () => { c.pose = pick(["think", "point", "stand"]); }}).wait(rand(3000, 6000), c.pose).do({type: "call", fn: () => { c.pose = "stand"; }}).sitAt(c.homeSeat);
+  const target = {research: board.mesh.position, trader: wall.mesh.position, risk: lampBar.position, ceo: new THREE.Vector3(0, 3, 1.6)}[c.role];
+  const pose = c.role === "research" ? "write" : c.role === "ceo" ? "present" : pick(["think", "point", "stand"]);
+  if (c.role === "ceo") s.set(rand(-2, 2), 0, 3.6);
+  c.goTo(s);
+  if (target) c.face(target.clone().setY(0));
+  c.do({type: "call", fn: () => { c.pose = pose; if (pose === "write") c.say(pick(boardNotes()), 4200); }}).wait(rand(4000, 7000), pose)
+   .do({type: "call", fn: () => { c.pose = "stand"; }}).sitAt(c.homeSeat);
+}
+function boardNotes() {
+  const rs = S.rs || {}, lab = rs.lab || {}, ex = (rs.experiments || []).find(e => e.oos);
+  const out = ["Note to self: only out-of-sample numbers count.", "Writing down the fold windows — no peeking at the test data."];
+  if (ex) out.push(`${ex.variant || ex.family}: OOS PF ${num(ex.oos.profit_factor)} — ${ex.summary?.verdict || ex.status}.`);
+  if (ex?.summary?.n_trials) out.push(`Deflated Sharpe now penalises ${ex.summary.n_trials} trials. Bar keeps rising.`);
+  const gf = Object.entries(rs.gate_failures || {}).sort((a, b) => b[1] - a[1])[0];
+  if (gf) out.push(`Most failed gate lately: ${gf[0]} (${gf[1]}×). Adding that to the hypothesis list.`);
+  if (lab.runs) out.push(`GitHub lab: ${lab.runs} runs so far, ${lab.experiments_total || 0} experiments imported.`);
+  return out;
 }
 setInterval(() => { if (Math.random() < 0.45) wanderSomeone(); }, 7000);
 setInterval(() => { if (Math.random() < 0.5) coffeeBreak(); }, 26000);
+setInterval(() => { if (!meetingOn) standup(); }, 270000);
+setTimeout(() => standup(), 75000);
+setInterval(() => { const c = pick(chars.filter(x => x.root.visible && !x.busy() && x.role !== "trader")); if (!c) return;
+  c.do({type: "call", fn: () => { c.pose = "phone"; c.say(pick(["Yes — demo account only, no real money.", "The GitHub runner is on it, results in a couple of hours.", "Stops are always on the exchange.", "We'll know more after the forward test."]), 5000); }}).wait(6000, "phone").do({type: "call", fn: () => { c.pose = "stand"; }}).sitAt(c.homeSeat); }, 95000);
 
 // ============================================================== data → scenes
-const S = {ov: null, rs: null, hl: null, ln: null, lastEventId: null, openIds: new Set(), first: true};
+const S = {ov: null, rs: null, hl: null, ln: null, goals: null, market: null, strats: null, candles: {}, flash: {}, lossHist: {}, lastEventId: null, openIds: new Set(), first: true};
 function onEvent(e) {
   const m = e.message || "";
+  if (e.source === "research" && /^lab: /.test(m)) { onLabEvent(e, m); return; }
   if (e.source === "research") {
     const r = pick(researchers);
-    const verdict = /: (validated|exploratory|rejected)/.exec(m)?.[1];
+    const verdict = /: (validated|exploratory|rejected)/.exec(m)?.[1] || /imported as (\w+)/.exec(m)?.[1];
+    if (verdict === "validated") setTimeout(() => celebrate(r, "✅"), 1500);
     if (verdict) {
       const reply = verdict === "validated" ? "All gates passed. Send it to incubation — small risk, forward test on Bybit Demo."
         : verdict === "exploratory" ? "Close, but not robust enough for incubation. Exploration lane at 0.1% risk."
@@ -638,83 +759,286 @@ function onTrades(open, sleeves) {
   if (!S.first) {
     for (const t of open) if (!S.openIds.has(t.trade_id)) {
       const tr = traderFor(t.enter_tag, sleeves);
-      tr.say(`Opened ${t.is_short ? "short" : "long"} ${t.pair.split(":")[0]} @ ${num(t.open_rate, 4)} — stop ${num(t.stop_loss_abs, 4)} on the exchange.`, 7000);
-      feed(tr.name, `opened ${t.is_short ? "short" : "long"} ${t.pair}`);
+      tr.say(`Opened ${t.is_short ? "short" : "long"} ${t.pair.split(":")[0]} @ ${num(t.open_rate, 4)} — stop ${num(t.stop_loss_abs, 4)} sits on the exchange.`, 7000);
+      tr.emote(t.is_short ? "📉" : "📈"); feed(tr.name, `opened ${t.is_short ? "short" : "long"} ${t.pair}`);
+      S.flash[t.enter_tag] = performance.now();
     }
-    for (const id of S.openIds) if (!ids.has(id)) {
-      const tr = pick(traders); tr.say("Position closed — logging it for the learner.", 5000); tr.pose = "stand";
-    }
+    const gone = [...S.openIds].filter(id => !ids.has(id));
+    if (gone.length) api("/api/trades?limit=20").then(d => {
+      for (const id of gone) {
+        const ct = (d.closed || []).find(x => x.trade_id === id); if (!ct) continue;
+        const tr = traderFor(ct.sleeve_id, sleeves), pnl = Number(ct.profit_abs || 0);
+        const txt = `Closed ${ct.pair.split(":")[0]} by ${ct.exit_reason}: ${pnl >= 0 ? "+" : ""}${num(pnl)} USDT (${pct(ct.profit_ratio, 2)}).`;
+        feed(tr.name, txt);
+        if (pnl >= 0) { tr.say(txt + " Logging it.", 6500); celebrate(tr, "💰"); }
+        else { tr.say(txt + " Stop did its job.", 6500); tr.feel(-0.7); tr.emote("🩹");
+          conversation(analyst, tr, [[analyst, `Loss on ${ct.pair.split("/")[0]} — I'll add it to the post-mortem: entry context, MFE, exit reason.`], [tr, "Thanks. If it repeats on this pair, exclude it for a while."]]); }
+      }
+    }).catch(() => {});
   }
   S.openIds = ids;
 }
+function celebrate(p, sym = "🎉") {
+  p.emote(sym); p.feel(1);
+  const near = chars.filter(c => c !== p && c.root.visible && !c.busy() && c.pos.distanceTo(p.pos) < 6).slice(0, 2);
+  if (!p.busy()) p.do({type: "call", fn: () => { p.pose = "cheer"; }}).wait(2200, "cheer").do({type: "call", fn: () => { p.pose = "stand"; }}).sitAt(p.homeSeat);
+  near.forEach(n => { n.feel(0.8); n.do({type: "call", fn: () => { n.pose = "clap"; n.lookTarget = p; }}).wait(2000, "clap").do({type: "call", fn: () => { n.pose = "stand"; n.lookTarget = null; }}); });
+}
+
+// ---- lab (GitHub research runs) → scenes
+function onLabEvent(e, m) {
+  const lead = researchers[0];
+  if (/run .* started/.test(m)) {
+    sre.say(m.replace("lab: ", "").slice(0, 140) + " Heavy compute stays off our server.", 7000); sre.emote("☁️");
+    feed(sre.name, m.slice(5, 140)); researchers.forEach(r => r.emote("🧪", 2000));
+  } else if (/experiment .* started/.test(m)) {
+    const r = pick(researchers); r.say(m.slice(5, 150), 6500); r.emote("🧪"); feed(r.name, m.slice(5, 150));
+  } else if (/imported/.test(m)) {
+    flyPacket(beamFrom, new THREE.Vector3(-15.5, 1.2, -8.5), 0x29d36a);
+    setTimeout(() => flyPacket(new THREE.Vector3(-15.5, 1.2, -8.5), new THREE.Vector3(0, 1.2, 9.5), 0xfab219), 3300);
+    lead.say("Results package from GitHub just landed — sending candidates to risk.", 6000); lead.emote("📦"); feed(lead.name, m.slice(5, 160));
+  } else if (/failed/.test(m)) { const r = pick(researchers); r.say(m.slice(5, 140), 6000); r.emote("⚠️"); r.feel(-0.5); feed(r.name, m.slice(5, 140)); }
+  else { lead.say(m.slice(5, 140)); feed(lead.name, m.slice(5, 140)); }
+}
+let lastNarr = 0, lastNarrKey = "";
+function narrateLab() {
+  const run = (S.rs?.experiments || []).find(e => e.status === "running");
+  for (const r of researchers) r.typingFast = !!run;
+  if (!run) return;
+  const pg = run.progress || {}; const key = `${run.id}|${pg.stage}|${pg.epoch}`;
+  if (pg.best_loss !== undefined) { const h = S.lossHist[run.id] ||= []; if (h.at(-1) !== pg.best_loss) h.push(pg.best_loss); }
+  if (key === lastNarrKey || Date.now() - lastNarr < 40000) return;
+  lastNarrKey = key; lastNarr = Date.now();
+  const r = researchers.find(x => !x.busy()) || researchers[0];
+  let txt;
+  if (String(pg.stage || "").startsWith("hyperopt") && pg.epoch) txt = `${pg.stage}: epoch ${pg.epoch}/${pg.epochs || "?"}, best so far ${pct(pg.best_profit)} on ${pg.best_trades ?? "–"} trades (in-sample — doesn't count yet).`;
+  else if (String(pg.stage || "").startsWith("oos")) txt = `${pg.stage}: testing the winner on data it has never seen.`;
+  else if (pg.stage === "robustness") txt = "Robustness check: jiggling every parameter ±10% — a real edge survives that.";
+  else if (pg.stage === "download") txt = `Fetching fresh candles for ${run.pairs} pairs on the GitHub runner…`;
+  else txt = `${run.family}: ${pg.stage || "working"}…`;
+  r.say(txt, 7000); feed(r.name, txt);
+}
+
+// ---- daily stand-up at the meeting table: every line is real data
+let meetingOn = false;
+function meeting(people, lines) {
+  const ps = people.filter(p => p && p.root.visible);
+  if (meetingOn || ps.some(p => p.busy())) return false;
+  meetingOn = true;
+  const center = table.position.clone();
+  const spots = [new THREE.Vector3(-4.1, 0, 8.6), new THREE.Vector3(0.5, 0, 8.6), new THREE.Vector3(-2.6, 0, 7.15), new THREE.Vector3(-1.0, 0, 7.15), new THREE.Vector3(-2.6, 0, 10.05), new THREE.Vector3(-1.0, 0, 10.05)];
+  ps.forEach((p, i) => { p.arrived = false; p.goTo(spots[i]).face(center).do({type: "call", fn: () => { p.pose = "stand"; p.arrived = true; }}); });
+  let started = false;
+  const start = () => {
+    if (started) return; started = true; ps.forEach(p => { p.locked = true; });
+    let t = 0;
+    for (const [who, text] of lines) {
+      const ms = clamp(1500 + text.length * 42, 2600, 8000);
+      setTimeout(() => { ps.forEach(p => { p.pose = "talk"; p.lookTarget = p === who ? center : who; }); who.say(text, ms); feed(who.name, text); }, t);
+      t += ms + 500;
+    }
+    setTimeout(() => { ps.forEach(p => { p.locked = false; p.pose = "stand"; p.lookTarget = null; p.speaking = false; p.sitAt(p.homeSeat); }); meetingOn = false; }, t + 400);
+  };
+  const poll = setInterval(() => { if (ps.every(p => p.arrived)) { clearInterval(poll); start(); } }, 300);
+  setTimeout(() => { clearInterval(poll); start(); }, 30000);
+  return true;
+}
+function standup() {
+  const G = S.goals?.goals || [], rs = S.rs || {}, hl = S.hl || {}, ln = S.ln || {};
+  if (!G.length) return;
+  const g = id => G.find(x => x.id === id) || {};
+  const ex = (rs.experiments || []).find(e => e.oos), running = (rs.experiments || []).find(e => e.status === "running");
+  const gf = Object.entries(rs.gate_failures || {}).sort((a, b) => b[1] - a[1])[0];
+  const mem = (hl.heartbeats || []).find(h => h.service === "manager")?.detail?.mem_headroom_mb;
+  const act = (ln.learnings || []).filter(l => l.active);
+  const lr = researchers.find(r => !r.busy()) || researchers[0];
+  const lines = [
+    [ceo, `Stand-up. Evidence: ${g("evidence").value ?? 0}/100 demo trades. Research: ${g("research").value ?? 0}/${g("research").target ?? "–"} experiments this week. Validated strategies: ${g("validated").value ?? 0}.`],
+    [lr, ex ? `Latest result: ${ex.variant || ex.family} — OOS PF ${num(ex.oos.profit_factor)}, Sharpe ${num(ex.oos.sharpe)}, ${ex.summary?.verdict || ex.status}. ${running ? `GitHub run live: ${running.progress?.stage || "working"}.` : "Next GitHub run is queued."}` : "No finished experiments yet — the GitHub lab is warming up."],
+    [risk, gf ? `Top failing gate: ${gf[0]} (${gf[1]}×). Deflated Sharpe counts ${ex?.summary?.n_trials ?? "all"} trials — no shortcuts.` : "No candidates to judge yet. Gates stay strict."],
+    [analyst, act.length ? `${act.length} active learnings. Newest: ${act[0].insight.slice(0, 110)}` : "No lessons yet — I need closed trades and finished experiments."],
+    [sre, `Bot ${hl.bot_up ? "up" : "DOWN"}, ${mem ? mem + " MB memory headroom" : "memory fine"}, order test ${hl.exec_test?.ok ? "passing" : "pending"}. Research runs on GitHub, not here.`],
+    [ceo, (g("validated").value || 0) < 1 ? "Priority unchanged: one strategy that passes every strict gate, then prove it live. Back to work." : "We have a validated strategy — now let the forward test speak. Back to work."],
+  ];
+  meeting([ceo, lr, risk, analyst, sre], lines);
+}
 function traderFor(tag, sleeves) { const i = Math.max(0, sleeves.findIndex(s => s.id === tag)); return traders[i % traders.length]; }
 
-// ============================================================== screens content
+// ============================================================== screens content (real data)
+const C = {bg: "#0d1420", text: "#f0efec", muted: "#8d8c84", dim: "#5a6372", blue: "#3987e5", lblue: "#7fb6ff", green: "#29d36a", red: "#e66767", amber: "#fab219"};
+function clr(sc, bg = C.bg) { const {g, c} = sc; g.fillStyle = bg; g.fillRect(0, 0, c.width, c.height); g.textAlign = "left"; return [g, c]; }
+function txt(g, s, x, y, col = C.text, font = "13px monospace") { g.fillStyle = col; g.font = font; g.fillText(String(s), x, y); }
+function bar(g, x, y, w, h, frac, col, bg = "#ffffff14") { g.fillStyle = bg; g.fillRect(x, y, w, h); g.fillStyle = col; g.fillRect(x, y, w * clamp(frac || 0, 0, 1), h); }
+function wrap(g, s, x, y, maxW, lh, maxLines = 4) {
+  const words = String(s).split(" "); let line = "", n = 0;
+  for (const w of words) { const t = line ? line + " " + w : w; if (g.measureText(t).width > maxW && line) { g.fillText(line, x, y + n * lh); line = w; if (++n >= maxLines) return; } else line = t; }
+  if (line) g.fillText(line, x, y + n * lh);
+}
+function drawCandles(g, x, y, w, h, rows, lines = []) {
+  if (!rows || rows.length < 5) { txt(g, "loading candles…", x + 4, y + h / 2, C.dim); return null; }
+  const lo0 = Math.min(...rows.map(r => r[3]), ...lines.map(l => l.v)), hi0 = Math.max(...rows.map(r => r[2]), ...lines.map(l => l.v));
+  const pad = (hi0 - lo0) * 0.06 || 1, lo = lo0 - pad, hi = hi0 + pad, Y = v => y + h - (v - lo) / (hi - lo) * h;
+  const cw = w / rows.length;
+  g.strokeStyle = "#ffffff10"; g.lineWidth = 1; for (let k = 1; k < 4; k++) { g.beginPath(); g.moveTo(x, y + k * h / 4); g.lineTo(x + w, y + k * h / 4); g.stroke(); }
+  rows.forEach((r, i) => {
+    const [, o, hh, l, c] = r, up = c >= o, cx = x + i * cw + cw / 2;
+    g.strokeStyle = up ? "#4fa3ff" : "#ff7b7b"; g.beginPath(); g.moveTo(cx, Y(hh)); g.lineTo(cx, Y(l)); g.stroke();
+    g.fillStyle = up ? "#3987e5" : "#e66767"; const yo = Y(Math.max(o, c)), hb = Math.max(1, Math.abs(Y(o) - Y(c))); g.fillRect(cx - cw * 0.35, yo, Math.max(1, cw * 0.7), hb);
+  });
+  for (const l of lines) { g.strokeStyle = l.col; g.setLineDash([4, 3]); g.beginPath(); g.moveTo(x, Y(l.v)); g.lineTo(x + w, Y(l.v)); g.stroke(); g.setLineDash([]);
+    g.fillStyle = l.col; g.font = "bold 10px monospace"; g.textAlign = "right"; g.fillText(l.label, x + w - 2, Y(l.v) - 2); g.textAlign = "left"; }
+  return rows.at(-1)[4];
+}
+function sleevePair(sl, ov) { const t = ov.open_trades.find(x => x.enter_tag === sl.id); return t ? t.pair : sl.pairs[0]; }
+function stratOf(id) { return (S.strats?.strategies || []).find(x => x.id === id) || {}; }
+
 function drawAll(t) {
   const {ov, rs, hl} = S; if (!ov) return;
   const live = ov.manifest.sleeves.filter(s => s.stage !== "closing");
+  // --- traders: real 1h candles of their pair with entry / stop / target, sleeve stats on the 2nd screen
   tradeSeats.forEach((s, i) => {
-    const sl = live[i], g = s.screen.g, c = s.screen.c;
-    g.fillStyle = "#0d1420"; g.fillRect(0, 0, c.width, c.height);
-    if (!sl) { g.fillStyle = "#3a4250"; g.font = "bold 18px monospace"; g.fillText("— idle desk —", 60, 85); s.screen.tex.needsUpdate = true; return; }
-    const col = sl.stage === "production" ? "#29d36a" : sl.stage === "incubation" ? "#3987e5" : "#fab219";
-    g.fillStyle = col; g.fillRect(0, 0, c.width, 22); g.fillStyle = "#0d1420"; g.font = "bold 13px monospace"; g.fillText(`${sl.stage.toUpperCase()} · ${(sl.risk * 100).toFixed(2)}%`, 8, 16);
-    g.fillStyle = "#f0efec"; g.font = "bold 14px monospace"; g.fillText(sl.id.slice(0, 22), 8, 42);
-    g.fillStyle = "#8d8c84"; g.font = "12px monospace"; g.fillText(sl.pairs.map(p => p.split("/")[0]).join(" ").slice(0, 30), 8, 60);
-    const pos = ov.open_trades.filter(x => x.enter_tag === sl.id);
-    if (pos.length) pos.slice(0, 2).forEach((p, k) => { g.fillStyle = p.profit_abs >= 0 ? "#7fb6ff" : "#ff8a8a"; g.font = "bold 14px monospace"; g.fillText(`${p.is_short ? "S" : "L"} ${p.pair.split("/")[0]} ${p.profit_abs >= 0 ? "+" : ""}${num(p.profit_abs)}`, 8, 88 + k * 20); });
-    else { g.fillStyle = "#5a6372"; g.font = "13px monospace"; g.fillText("waiting for signal" + ".".repeat(1 + Math.floor(t * 2) % 3), 8, 92); }
-    // animated scan line chart
-    const pts = Array.from({length: 40}, (_, k) => Math.sin(k * 0.35 + t * 0.8 + i) * 8 + Math.sin(k * 0.11 + i * 3) * 12);
-    drawSpark(g, 8, 112, 240, 40, pts, col + "99");
+    const sl = live[i]; const [g, c] = clr(s.screen);
+    if (!sl) { txt(g, "— desk free —", 70, 85, "#3a4250", "bold 18px monospace"); s.screen.tex.needsUpdate = true; if (s.screen.second) { clr(s.screen.second); s.screen.second.tex.needsUpdate = true; } return; }
+    const col = sl.stage === "production" ? C.green : sl.stage === "incubation" ? C.blue : C.amber;
+    const flash = performance.now() - (S.flash[sl.id] || 0) < 4000 && Math.sin(t * 12) > 0;
+    g.fillStyle = flash ? "#ffffff" : col; g.fillRect(0, 0, c.width, 20);
+    txt(g, `${sl.stage.toUpperCase()} · risk ${(sl.risk * 100).toFixed(2)}%`, 6, 15, C.bg, "bold 12px monospace");
+    const pair = sleevePair(sl, ov), pos = ov.open_trades.find(x => x.enter_tag === sl.id);
+    const lines = [];
+    if (pos) {
+      const dir = pos.is_short ? -1 : 1, isl = Number(pos.initial_stop_loss_abs || pos.stop_loss_abs), rr = Number(sl.params?.tp_rr || 2);
+      lines.push({v: pos.open_rate, col: C.lblue, label: "entry"}, {v: pos.stop_loss_abs, col: C.red, label: "stop"});
+      if (isl && pos.open_rate) lines.push({v: pos.open_rate + dir * rr * Math.abs(pos.open_rate - isl), col: C.green, label: "target"});
+    }
+    const last = drawCandles(g, 4, 46, 248, 92, S.candles[pair]?.rows, lines);
+    txt(g, pair.replace(":USDT", ""), 6, 38, C.text, "bold 13px monospace");
+    if (last) { g.textAlign = "right"; txt(g, num(last, last < 1 ? 5 : last < 100 ? 3 : 1), 250, 38, C.muted, "12px monospace"); g.textAlign = "left"; }
+    if (pos) txt(g, `${pos.is_short ? "SHORT" : "LONG"} ${pos.profit_abs >= 0 ? "+" : ""}${num(pos.profit_abs)} USDT`, 6, 154, pos.profit_abs >= 0 ? C.lblue : C.red, "bold 13px monospace");
+    else txt(g, "no position · waiting for a 1h signal" + ".".repeat(1 + Math.floor(t * 2) % 3), 6, 154, C.dim, "11px monospace");
     s.screen.tex.needsUpdate = true;
-    if (s.screen.second) { const g2 = s.screen.second.g, c2 = s.screen.second.c; g2.fillStyle = "#0d1420"; g2.fillRect(0, 0, c2.width, c2.height);
-      g2.fillStyle = "#8d8c84"; g2.font = "bold 12px monospace"; g2.fillText("ORDER BOOK", 8, 16);
-      for (let k = 0; k < 8; k++) { const w = 40 + Math.abs(Math.sin(t * 2 + k + i)) * 150; g2.fillStyle = k < 4 ? "#e6676755" : "#3987e555"; g2.fillRect(8, 26 + k * 16, w, 12); }
-      s.screen.second.tex.needsUpdate = true; }
+    if (s.screen.second) {
+      const [g2] = clr(s.screen.second), st = stratOf(sl.id), lv = st.live || {}, oo = st.oos || {}, pp = sl.params || {};
+      txt(g2, sl.id.slice(0, 26), 6, 16, C.text, "bold 12px monospace");
+      txt(g2, (oo.variant || sl.family).slice(0, 30), 6, 32, C.muted, "11px monospace");
+      txt(g2, `LIVE  ${lv.trades || 0} trades · PF ${lv.trades ? num(lv.profit_factor) : "–"}`, 6, 54, C.text, "12px monospace");
+      txt(g2, `      P&L ${lv.trades ? num(lv.pnl) : "–"} · win ${lv.trades ? pct(lv.win_rate, 0) : "–"}`, 6, 70, C.text, "12px monospace");
+      txt(g2, `OOS   PF ${num(oo.profit_factor)} · Sharpe ${num(oo.sharpe)}`, 6, 92, C.muted, "12px monospace");
+      txt(g2, `stop ${pp.sl_atr ?? "–"}×ATR  target ${pp.tp_rr ?? "–"}R  trail ${pp.trail_rr ?? "–"}R`, 6, 114, C.dim, "11px monospace");
+      txt(g2, `max hold ${pp.max_hold ?? "–"}h  pairs ${sl.pairs.map(p => p.split("/")[0]).join(" ")}`.slice(0, 34), 6, 130, C.dim, "11px monospace");
+      s.screen.second.tex.needsUpdate = true;
+    }
   });
-  const running = rs.experiments.filter(e => e.status === "running");
+  // --- research lab screens
+  const exps = rs.experiments || [], running = exps.find(e => e.status === "running"), done = exps.filter(e => e.oos);
   labSeats.forEach((s, i) => {
-    const g = s.screen.g, c = s.screen.c; g.fillStyle = "#0d1420"; g.fillRect(0, 0, c.width, c.height);
-    g.fillStyle = "#3987e5"; g.font = "bold 13px monospace"; g.fillText(i === 0 && running[0] ? "HYPEROPT · WALK-FORWARD" : "RESULTS", 8, 18);
-    if (i === 0 && running[0]) {
-      g.fillStyle = "#f0efec"; g.font = "13px monospace"; g.fillText(running[0].family.slice(0, 26), 8, 40); g.fillText((running[0].progress?.stage || "").slice(0, 26), 8, 58);
-      const loss = Array.from({length: 50}, (_, k) => 1 / (1 + k * 0.08) + Math.sin(k * 1.7 + t) * 0.03); drawSpark(g, 8, 70, 240, 70, loss, "#7fb6ff");
+    const [g] = clr(s.screen);
+    if (i === 0) {
+      txt(g, running ? (running.progress?.remote ? "GITHUB LAB · LIVE" : "LIVE EXPERIMENT") : "LAB · WAITING FOR RUN", 6, 16, C.blue, "bold 12px monospace");
+      if (running) {
+        const pg = running.progress || {};
+        txt(g, `${running.family} · ${running.pairs} pairs`, 6, 34); txt(g, String(pg.stage || "").slice(0, 30), 6, 50, C.amber);
+        if (pg.epoch) { txt(g, `epoch ${pg.epoch}/${pg.epochs || "?"}`, 6, 68, C.muted, "12px monospace"); bar(g, 110, 60, 140, 8, pg.epoch / (pg.epochs || 80), C.blue); }
+        if (pg.best_profit !== undefined) txt(g, `best IS ${pct(pg.best_profit)} · ${pg.best_trades ?? "–"} trades`, 6, 84, C.text, "12px monospace");
+        const h = S.lossHist[running.id] || []; if (h.length > 1) drawSpark(g, 6, 92, 244, 44, h.map(v => -v), C.lblue);
+        if (pg.budget_left_min !== undefined) txt(g, `run budget left ${Math.round(pg.budget_left_min)} min`, 6, 152, C.dim, "11px monospace");
+      } else { const lab = rs.lab || {}; txt(g, `runs ${lab.runs || 0} · imported ${lab.experiments_total || 0}`, 6, 40); txt(g, `last ${lab.last_batch || "–"}`.slice(0, 32), 6, 58, C.muted, "11px monospace"); }
+    } else if (i === 1) {
+      const e = done[0]; txt(g, "WALK-FORWARD FOLDS (OOS)", 6, 16, C.blue, "bold 12px monospace");
+      if (e) { txt(g, (e.variant || e.family).slice(0, 30), 6, 34, C.text, "12px monospace");
+        const fs = e.folds || []; const mx = Math.max(0.01, ...fs.map(f => Math.abs(f.ret || 0)));
+        fs.forEach((f, k) => { const v = f.ret || 0, hgt = Math.abs(v) / mx * 46, x = 20 + k * 110; g.fillStyle = v >= 0 ? C.blue : C.red; g.fillRect(x, v >= 0 ? 100 - hgt : 100, 70, hgt);
+          txt(g, `fold ${k + 1}: ${pct(v)}`, x - 6, 124, C.text, "11px monospace"); txt(g, `${f.trades ?? 0} tr · PF ${num(f.pf)}`, x - 6, 140, C.muted, "10px monospace"); });
+        g.strokeStyle = "#ffffff30"; g.beginPath(); g.moveTo(10, 100); g.lineTo(250, 100); g.stroke(); }
+    } else if (i === 2) {
+      const e = done[0]; txt(g, "GATES · LAST RESULT", 6, 16, C.blue, "bold 12px monospace");
+      Object.entries(e?.gates || {}).slice(0, 8).forEach(([k, v], j) => { txt(g, `${v.pass ? "✓" : "✗"} ${k}`.slice(0, 18), 6, 36 + j * 15, v.pass ? C.green : C.red, "11px monospace"); txt(g, `${typeof v.value === "number" ? num(v.value) : v.value} / ${v.threshold}`, 150, 36 + j * 15, C.muted, "11px monospace"); });
+      if (!e) txt(g, "no result yet", 6, 50, C.dim);
     } else {
-      const e = rs.experiments.filter(x => x.oos)[i - 1] || rs.experiments[i];
-      if (e) { g.fillStyle = "#f0efec"; g.font = "13px monospace"; g.fillText(e.family.slice(0, 26), 8, 40);
-        g.fillStyle = "#8d8c84"; g.fillText(`trades ${e.oos?.trades ?? "–"}  PF ${num(e.oos?.profit_factor)}`, 8, 60); g.fillText(`Sharpe ${num(e.oos?.sharpe)}  DD ${pct(e.oos?.max_drawdown)}`, 8, 78);
-        g.fillStyle = e.summary?.verdict === "validated" ? "#29d36a" : e.summary?.verdict === "exploratory" ? "#fab219" : "#e66767"; g.font = "bold 14px monospace"; g.fillText((e.summary?.verdict || e.status).toUpperCase(), 8, 104); }
+      txt(g, "FAMILY BANDIT (UCB)", 6, 16, C.blue, "bold 12px monospace");
+      const fsx = Object.entries(rs.family_stats || {}); const mx = Math.max(0.01, ...fsx.map(([, v]) => v[1]));
+      fsx.forEach(([f, [n, r]], j) => { txt(g, f.slice(0, 16), 6, 40 + j * 28, C.text, "11px monospace"); bar(g, 6, 45 + j * 28, 180, 7, r / mx, C.green); txt(g, `n=${n}`, 196, 52 + j * 28, C.muted, "11px monospace"); });
     }
     s.screen.tex.needsUpdate = true;
   });
-  // whiteboard
+  // --- whiteboard: the lab's real state
   { const g = board.g, c = board.c; g.fillStyle = "#f7f6f2"; g.fillRect(0, 0, c.width, c.height);
-    g.fillStyle = "#1f3b73"; g.font = "bold 26px sans-serif"; g.fillText("Walk-forward research pipeline", 20, 40);
-    g.font = "18px sans-serif"; g.fillStyle = "#333";
-    ["hyperopt (train) → OOS backtest → 2× cost stress", "parameter perturbation → Monte Carlo → Deflated Sharpe", `done ${rs.counts.done || 0} · failed ${rs.counts.failed || 0} · load level ${rs.scale?.level ?? "–"}`].forEach((l, k) => g.fillText(l, 20, 80 + k * 30));
-    const gf = Object.entries(rs.gate_failures || {}).sort((a, b) => b[1] - a[1]).slice(0, 4);
-    g.fillStyle = "#b03030"; g.font = "bold 16px sans-serif"; g.fillText("most failed gates: " + (gf.map(([k, v]) => `${k}×${v}`).join("  ") || "–"), 20, 190);
-    g.strokeStyle = "#1f3b73"; g.lineWidth = 3; g.beginPath(); g.moveTo(20, 215); for (let x = 0; x < 600; x += 10) g.lineTo(20 + x, 230 - Math.sin(x / 30) * 10 - x / 40); g.stroke();
+    const lab = rs.lab || {};
+    g.fillStyle = "#1f3b73"; g.font = "bold 24px sans-serif"; g.fillText("Research lab — runs on GitHub Actions", 18, 34);
+    g.font = "16px sans-serif"; g.fillStyle = "#333";
+    g.fillText(`runs ${lab.runs || 0} · ${lab.cpus || "–"} CPUs · budget ${lab.budget_min || "–"} min · status ${lab.status || "–"}`, 18, 62);
+    g.fillText(`experiments: ${rs.counts?.done || 0} done · ${rs.counts?.running || 0} running · ${rs.counts?.failed || 0} failed`, 18, 86);
+    g.fillText("walk-forward → 2× costs → ±10% params → Monte Carlo → Deflated Sharpe", 18, 110);
+    const gf = Object.entries(rs.gate_failures || {}).sort((a, b) => b[1] - a[1]).slice(0, 5), mx = Math.max(1, ...gf.map(x => x[1]));
+    g.fillStyle = "#b03030"; g.font = "bold 15px sans-serif"; g.fillText("Most failed gates", 18, 140);
+    gf.forEach(([k, v], j) => { g.fillStyle = "#b0303055"; g.fillRect(170, 128 + j * 24, 300 * v / mx, 16); g.fillStyle = "#333"; g.font = "14px sans-serif"; g.fillText(`${k} ×${v}`, 176, 141 + j * 24); });
+    g.strokeStyle = "#1f3b73"; g.lineWidth = 2; g.strokeRect(500, 128, 140, 110); g.fillStyle = "#1f3b73"; g.font = "bold 13px sans-serif"; g.fillText("hypotheses", 512, 146);
+    g.font = "12px sans-serif"; ["trend > breakout", "funding / basis?", "4h & 1d horizons", "maker entries"].forEach((h, j) => g.fillText("• " + h, 512, 168 + j * 18));
     board.tex.needsUpdate = true; }
-  // map / universe
-  { const g = mapScr.g, c = mapScr.c; g.fillStyle = "#06120e"; g.fillRect(0, 0, c.width, c.height);
-    g.strokeStyle = "#1baf7a33"; for (let r = 30; r < 300; r += 40) { g.beginPath(); g.arc(150, 120, r, 0, Math.PI * 2); g.stroke(); }
-    const ang = t * 1.2; g.strokeStyle = "#1baf7a"; g.beginPath(); g.moveTo(150, 120); g.lineTo(150 + Math.cos(ang) * 110, 120 + Math.sin(ang) * 110); g.stroke();
-    const u = rs.universe?.pairs || [];
-    u.forEach((p, k) => { const a = k / u.length * Math.PI * 2, rr = 40 + (k * 37) % 70; const x = 150 + Math.cos(a) * rr, y = 120 + Math.sin(a) * rr; g.fillStyle = "#29d36a"; g.beginPath(); g.arc(x, y, 3, 0, 7); g.fill(); });
-    g.fillStyle = "#d8f5e8"; g.font = "bold 18px monospace"; g.fillText(`UNIVERSE ${u.length} PAIRS`, 300, 36);
-    g.font = "15px monospace"; u.slice(0, 8).forEach((p, k) => g.fillText(p.replace(":USDT", ""), 300, 66 + k * 20));
+  // --- market radar: universe on a trend × mean-reversion map
+  { const [g, c] = clr(mapScr, "#06120e");
+    const ang = t * 1.2; g.strokeStyle = "#1baf7a22"; for (let r = 30; r < 300; r += 40) { g.beginPath(); g.arc(120, 114, r, 0, Math.PI * 2); g.stroke(); }
+    g.strokeStyle = "#1baf7a"; g.beginPath(); g.moveTo(120, 114); g.lineTo(120 + Math.cos(ang) * 105, 114 + Math.sin(ang) * 105); g.stroke();
+    const mk = (S.market?.pairs || []).filter(m => m.data && m.data.trend_score !== undefined);
+    const X0 = 250, Y0 = 30, PW = 280, PH = 170;
+    g.strokeStyle = "#1baf7a55"; g.strokeRect(X0, Y0, PW, PH); txt(g, "trend →", X0 + PW - 60, Y0 + PH + 16, "#8fd9b6", "11px monospace"); txt(g, "↑ mean-revert", X0, Y0 - 8, "#8fd9b6", "11px monospace");
+    if (mk.length) { const tx = mk.map(m => m.data.trend_score), ry = mk.map(m => m.data.revert_score); const [a0, a1] = [Math.min(...tx), Math.max(...tx)], [b0, b1] = [Math.min(...ry), Math.max(...ry)];
+      mk.forEach(m => { const x = X0 + 8 + (m.data.trend_score - a0) / ((a1 - a0) || 1) * (PW - 16), y = Y0 + PH - 8 - (m.data.revert_score - b0) / ((b1 - b0) || 1) * (PH - 16);
+        const vol = clamp((m.data.vol_annual || 0.5) * 3, 2, 6); g.fillStyle = (m.data.ret_30d || 0) >= 0 ? "#29d36a" : "#e66767"; g.beginPath(); g.arc(x, y, vol, 0, 7); g.fill();
+        txt(g, m.pair.split("/")[0], x + 6, y + 3, "#d8f5e8", "10px monospace"); }); }
+    txt(g, `UNIVERSE ${(rs.universe?.pairs || []).length} PAIRS · ${rs.universe?.source || ""}`, 12, 218, "#d8f5e8", "bold 13px monospace");
     mapScr.tex.needsUpdate = true; }
-  // system screen
-  { const g = sysScr.g, c = sysScr.c; g.fillStyle = "#0d1117"; g.fillRect(0, 0, c.width, c.height);
-    g.fillStyle = "#8d8c84"; g.font = "bold 16px monospace"; g.fillText("SYSTEM HEALTH", 12, 24);
+  // scanner desks: top trend / top mean-reversion pairs
+  scanSeats.forEach((s, i) => { const [g] = clr(s.screen, "#06120e"); const key = i ? "revert_score" : "trend_score";
+    txt(g, i ? "TOP MEAN-REVERSION" : "TOP TREND", 6, 16, "#29d36a", "bold 12px monospace");
+    (S.market?.pairs || []).filter(m => m.data?.[key] !== undefined).sort((a, b) => b.data[key] - a.data[key]).slice(0, 7)
+      .forEach((m, j) => { txt(g, m.pair.split("/")[0], 6, 36 + j * 17, C.text, "12px monospace"); bar(g, 80, 28 + j * 17, 120, 8, m.data[key], "#1baf7a"); txt(g, num(m.data[key], 2), 206, 36 + j * 17, C.muted, "11px monospace"); });
+    s.screen.tex.needsUpdate = true; });
+  // risk desk: last verdict
+  { const [g] = clr(riskSeat.screen); const e = done[0]; txt(g, "VALIDATION DESK", 6, 16, C.amber, "bold 12px monospace");
+    if (e) { const v = e.summary?.verdict || e.status; txt(g, (e.variant || e.family).slice(0, 30), 6, 36); txt(g, v.toUpperCase(), 6, 58, v === "validated" ? C.green : v === "exploratory" ? C.amber : C.red, "bold 16px monospace");
+      txt(g, `DSR ${num(e.summary?.dsr)} · N trials ${e.summary?.n_trials ?? "–"}`, 6, 80, C.muted, "12px monospace"); txt(g, `WFE ${num(e.summary?.wfe)} · robust ${pct(e.summary?.robust_frac, 0)}`, 6, 98, C.muted, "12px monospace");
+      const p = Object.values(e.gates || {}).filter(x => x.pass).length, n = Object.keys(e.gates || {}).length; bar(g, 6, 112, 244, 10, n ? p / n : 0, p === n ? C.green : C.amber); txt(g, `${p}/${n} gates`, 6, 140, C.text, "12px monospace"); }
+    riskSeat.screen.tex.needsUpdate = true; }
+  // learning desk
+  { const [g] = clr(learnSeat.screen); txt(g, "LEARNINGS", 6, 16, "#9085e9", "bold 12px monospace"); const L = (S.ln?.learnings || []).filter(l => l.active).slice(0, 3);
+    g.font = "11px monospace"; g.fillStyle = C.text; L.forEach((l, j) => wrap(g, "• " + l.insight, 6, 36 + j * 42, 244, 13, 3));
+    if (!L.length) txt(g, "waiting for evidence…", 6, 40, C.dim, "12px monospace"); learnSeat.screen.tex.needsUpdate = true; }
+  // CEO: goals + lifecycle funnel
+  { const [g] = clr(ceoSeat.screen); txt(g, "GOALS", 6, 16, "#d55181", "bold 12px monospace");
+    (S.goals?.goals || []).slice(0, 6).forEach((x, j) => { txt(g, x.title.slice(0, 26), 6, 34 + j * 21, C.text, "10px monospace"); bar(g, 6, 37 + j * 21, 200, 5, x.progress, x.progress >= 1 ? C.green : "#d55181"); txt(g, `${x.value}${x.unit === "%" ? "%" : ""}/${x.target}`, 210, 42 + j * 21, C.muted, "10px monospace"); });
+    ceoSeat.screen.tex.needsUpdate = true;
+    if (ceoSeat.screen.second) { const [g2] = clr(ceoSeat.screen.second); txt(g2, "STRATEGY FUNNEL", 6, 16, "#d55181", "bold 12px monospace");
+      const cnt = {}; (S.strats?.strategies || []).forEach(x => cnt[x.stage] = (cnt[x.stage] || 0) + 1);
+      ["exploratory", "exploration", "validated", "incubation", "production", "retired", "rejected"].forEach((k, j) => { const n = cnt[k] || 0; bar(g2, 100, 26 + j * 15, 100, 9, n / Math.max(1, ...Object.values(cnt)), k === "production" ? C.green : k === "rejected" || k === "retired" ? "#5a6372" : C.blue); txt(g2, k, 6, 34 + j * 15, C.muted, "10px monospace"); txt(g2, n, 206, 34 + j * 15, C.text, "10px monospace"); });
+      ceoSeat.screen.second.tex.needsUpdate = true; } }
+  // ops
+  { const [g] = clr(sysScr, "#0d1117"); txt(g, "SYSTEM HEALTH", 12, 24, C.muted, "bold 16px monospace");
     const mem = (hl.heartbeats || []).find(h => h.service === "manager")?.detail?.mem_headroom_mb;
-    const rows = [[`bot`, hl.bot_up ? "UP" : "DOWN", hl.bot_up], [`self-test`, hl.selftest?.ok ? "PASS" : "–", !!hl.selftest?.ok], [`order test`, hl.exec_test?.ok ? "PASS" : "–", !!hl.exec_test?.ok], [`free memory`, mem ? mem + " MB" : "–", !mem || mem > 150]];
-    (hl.heartbeats || []).forEach(h => rows.push([h.service, `${h.status} · ${h.age_s}s`, h.status !== "error" && (h.age_s ?? 0) < 900]));
-    rows.slice(0, 7).forEach(([k, v, ok], i) => { g.fillStyle = "#c3c2b7"; g.font = "15px monospace"; g.fillText(k, 12, 52 + i * 20); g.fillStyle = ok ? "#29d36a" : "#e66767"; g.fillText(v, 210, 52 + i * 20); });
-    sysScr.tex.needsUpdate = true; }
+    const rows = [["bot", hl.bot_up ? "UP" : "DOWN", hl.bot_up], ["self-test", hl.selftest?.ok ? "PASS" : "–", !!hl.selftest?.ok], ["order test", hl.exec_test?.ok ? "PASS" : "–", !!hl.exec_test?.ok], ["mem headroom", mem ? mem + " MB" : "–", !mem || mem > 150], ["research", rs.mode === "remote" ? "GitHub lab" : "local", true]];
+    (hl.heartbeats || []).forEach(h => rows.push([h.service, `${h.status} · ${h.age_s}s`, h.status !== "error" && ((h.age_s ?? 0) < 900 || h.detail?.remote)]));
+    rows.slice(0, 8).forEach(([k, v, ok], i) => { txt(g, k, 12, 50 + i * 18, "#c3c2b7", "14px monospace"); txt(g, v, 210, 50 + i * 18, ok ? C.green : C.red, "14px monospace"); });
+    sysScr.tex.needsUpdate = true;
+    { const [g2] = clr(opsSeat.screen); txt(g2, "PROCESSES", 6, 16, C.muted, "bold 12px monospace");
+      Object.entries(hl.supervisor?.processes || {}).forEach(([k, v], j) => { txt(g2, k, 6, 38 + j * 18, C.text, "12px monospace"); txt(g2, `${v.running ? "running" : "down"} · ${Math.round((v.uptime_s || 0) / 60)}m`, 110, 38 + j * 18, v.running ? C.green : C.red, "12px monospace"); });
+      opsSeat.screen.tex.needsUpdate = true;
+      if (opsSeat.screen.second) { const [g3] = clr(opsSeat.screen.second); txt(g3, "DISK / LAB", 6, 16, C.muted, "bold 12px monospace"); if (hl.disk) { bar(g3, 6, 26, 200, 8, hl.disk.used / hl.disk.total, C.blue); txt(g3, `${num(hl.disk.free / 1e9, 1)} GB free`, 6, 50, C.text, "12px monospace"); }
+        txt(g3, `lab run ${(rs.lab || {}).run_id || "–"}`, 6, 72, C.text, "11px monospace"); txt(g3, `${(rs.lab || {}).status || "idle"}`, 6, 88, C.muted, "11px monospace"); opsSeat.screen.second.tex.needsUpdate = true; } } }
+  drawMission(t);
   drawWall(t);
+}
+function drawMission(t) {
+  const [g, c] = clr(missionScr, "#0a0f1a"), Gs = S.goals;
+  const grd = g.createLinearGradient(0, 0, c.width, 0); grd.addColorStop(0, "#3987e522"); grd.addColorStop(1, "#d5518122"); g.fillStyle = grd; g.fillRect(0, 0, c.width, 56);
+  txt(g, "MISSION", 24, 36, "#d55181", "bold 26px sans-serif");
+  g.font = "18px sans-serif"; g.fillStyle = C.text; wrap(g, Gs?.mission || "loading…", 150, 34, 850, 20, 1);
+  (Gs?.goals || []).forEach((x, j) => {
+    const col = j % 2, row = Math.floor(j / 2), X = 24 + col * 500, Y = 92 + row * 88;
+    txt(g, x.title, X, Y, C.text, "17px sans-serif");
+    bar(g, X, Y + 14, 380, 16, x.progress, x.progress >= 1 ? C.green : x.warning ? C.red : "#3987e5", "#ffffff12");
+    const shimmer = (t * 120 + j * 70) % 460 - 40; g.fillStyle = "#ffffff18"; g.fillRect(X + clamp(shimmer, 0, 380 * clamp(x.progress, 0, 1)), Y + 14, 14, 16);
+    txt(g, `${x.value}${x.unit === "%" ? "%" : x.unit ? " " + x.unit : ""} / ${x.target}${x.unit === "%" ? "%" : ""}`, X + 392, Y + 28, C.muted, "bold 15px monospace");
+  });
+  missionScr.tex.needsUpdate = true;
 }
 function drawWall(t) {
   const {ov} = S, g = wall.g, c = wall.c;
@@ -734,7 +1058,7 @@ function drawWall(t) {
   g.fillStyle = "#8d8c84"; g.font = "bold 18px monospace"; g.fillText("OPEN POSITIONS", 830, 36);
   ov.open_trades.slice(0, 5).forEach((p, k) => { g.fillStyle = p.profit_abs >= 0 ? "#7fb6ff" : "#ff8a8a"; g.font = "17px monospace"; g.fillText(`${p.is_short ? "SHORT" : "LONG "} ${p.pair.split(":")[0].padEnd(10)} ${p.profit_abs >= 0 ? "+" : ""}${num(p.profit_abs)}`, 830, 66 + k * 24); });
   if (!ov.open_trades.length) { g.fillStyle = "#5a6372"; g.font = "17px monospace"; g.fillText("none — waiting for signals", 830, 66); }
-  g.fillStyle = "#8d8c84"; g.font = "bold 18px monospace"; g.fillText("LATEST", 830, 200);
+  const lab = S.rs?.lab || {}; g.fillStyle = "#8d8c84"; g.font = "bold 18px monospace"; g.fillText(`LATEST · GitHub lab ${lab.status === "start" ? "RUNNING" : lab.status || "idle"}`, 830, 200);
   (ov.events || []).slice(0, 4).forEach((e, k) => { g.fillStyle = "#c3c2b7"; g.font = "14px monospace"; g.fillText(`${e.ts.slice(11, 16)} ${e.message}`.slice(0, 50), 830, 226 + k * 22); });
   wall.tex.needsUpdate = true;
 }
@@ -759,8 +1083,12 @@ function applyData() {
   const live = ov.manifest.sleeves.filter(s => s.stage !== "closing");
   $("#hSl").textContent = live.length; $("#hSlS").textContent = Object.entries(live.reduce((a, s) => (a[s.stage] = (a[s.stage] || 0) + 1, a), {})).map(([k, v]) => `${v} ${k}`).join(" · ") || "none";
   const running = rs.experiments.filter(e => e.status === "running");
-  $("#hRs").textContent = rs.paused ? "paused" : running.length ? "running" : "idle"; $("#hRsS").textContent = `${rs.counts.done || 0} done · ${rs.counts.failed || 0} failed`;
-  flowSpeed = running.length ? 0.05 : 0.015;
+  const lab = rs.lab || {};
+  labActive = running.length > 0 || lab.status === "start" || lab.status === "scan";
+  $("#hRs").textContent = rs.paused ? "paused" : labActive ? "GitHub lab ▶" : "idle"; $("#hRsS").textContent = `${rs.counts.done || 0} done · ${rs.counts.failed || 0} failed · ${lab.runs || 0} runs`;
+  flowSpeed = labActive ? 0.05 : 0.015;
+  setTag("cloud", labActive ? `running · ${lab.cpus || "?"} CPUs · ${running[0]?.progress?.stage || lab.status}`.slice(0, 46) : `idle · ${lab.runs || 0} runs · next run queued`, labActive ? "good" : "warn");
+  const G = S.goals?.goals || []; setTag("mission", G.length ? `${G.filter(x => x.progress >= 1).length}/${G.length} goals reached` : "loading", "good");
   const uni = rs.universe?.pairs?.length || 0;
   setTag("scanner", `${uni} pairs in universe`, uni >= 4 ? "good" : "warn");
   setTag("research", running.length ? `${running[0].family} · ${running[0].progress?.stage || ""}`.slice(0, 44) : `${rs.counts.done || 0} experiments done`, "good");
@@ -792,8 +1120,23 @@ function applyData() {
 async function refresh() {
   try {
     const [ov, rs, hl, ln] = await Promise.all([api("/api/overview"), api("/api/research"), api("/api/health"), api("/api/learnings")]);
-    Object.assign(S, {ov, rs, hl, ln}); applyData();
+    Object.assign(S, {ov, rs, hl, ln}); applyData(); narrateLab();
   } catch (e) { $("#track").textContent = "data error: " + e.message; }
+}
+let lastSlow = 0;
+async function refreshSlow(force = false) {
+  if (!force && Date.now() - lastSlow < 55000) return; lastSlow = Date.now();
+  try {
+    const [goals, market, strats] = await Promise.all([api("/api/goals"), api("/api/market"), api("/api/strategies")]);
+    Object.assign(S, {goals, market, strats}); renderGoals();
+  } catch (e) { /* keep last */ }
+  if (!S.ov) return;
+  const pairs = [...new Set(S.ov.manifest.sleeves.filter(s => s.stage !== "closing").slice(0, 8).map(sl => sleevePair(sl, S.ov)))];
+  for (const p of pairs) { try { const d = await api("/api/candles?limit=72&pair=" + encodeURIComponent(p)); if (d.candles?.length) S.candles[p] = {ts: Date.now(), rows: d.candles}; } catch (e) { /* ignore */ } }
+}
+function renderGoals() {
+  const G = S.goals; if (!G) return;
+  $("#goals").innerHTML = `<div class="h">Company goals · measured live</div>` + G.goals.map(x => `<div class="g"><div class="gt"><span>${esc(x.title)}</span><b>${esc(x.value)}${x.unit === "%" ? "%" : ""}<i>/${esc(x.target)}${x.unit === "%" ? "%" : ""}</i></b></div><div class="gb"><i style="width:${Math.round(clamp(x.progress, 0, 1) * 100)}%;background:${x.progress >= 1 ? "var(--good)" : x.warning ? "var(--crit)" : "var(--blue)"}"></i></div></div>`).join("");
 }
 
 // ---- panels
@@ -801,7 +1144,7 @@ function openPanel(key) {
   const {ov, rs, hl, ln} = S; if (!ov) return; const d = departments[key];
   let h = `<h2>${d.name}</h2><div class="sub">${esc(d.info)}</div>`;
   const staff = chars.filter(c => ({trading: "trader", research: "research", risk: "risk", learning: "learn", ops: "ops", scanner: "scanner", ceo: "ceo"})[key] === c.role && c.root.visible);
-  h += `<div class="sub">Team: ${staff.map(s => esc(s.name)).join(", ")}</div>`;
+  if (staff.length) h += `<div class="sub">Team: ${staff.map(s => esc(s.name)).join(", ")}</div>`;
   if (key === "trading") {
     h += `<table><tr><th>Sleeve</th><th>Stage</th><th>Risk</th><th>Pairs</th></tr>${ov.manifest.sleeves.map(s => `<tr><td>${esc(s.id)}</td><td>${esc(s.stage)}</td><td>${pct(s.risk, 3)}</td><td>${esc(s.pairs.map(p => p.split("/")[0]).join(" "))}</td></tr>`).join("")}</table>`;
     h += `<h2 style="margin-top:14px">Open positions</h2><table><tr><th>Pair</th><th>Side</th><th>Entry</th><th>Stop</th><th>P&L</th></tr>${ov.open_trades.map(t => `<tr><td>${esc(t.pair)}</td><td>${t.is_short ? "short" : "long"}</td><td>${num(t.open_rate, 4)}</td><td>${num(t.stop_loss_abs, 4)}</td><td>${signed(t.profit_abs)}</td></tr>`).join("") || "<tr><td colspan=5>none</td></tr>"}</table>`;
@@ -817,22 +1160,36 @@ function openPanel(key) {
   } else if (key === "ops") {
     h += `<table><tr><th>Service</th><th>Status</th><th>Heartbeat</th></tr>${(hl.heartbeats || []).map(x => `<tr><td>${esc(x.service)}</td><td>${esc(x.status)}</td><td>${x.age_s}s ago</td></tr>`).join("")}</table>`;
     h += `<div class="kv"><span>self-test</span><span>${hl.selftest?.ok ? "passed" : "–"}</span><span>order execution test</span><span>${hl.exec_test?.ok ? "passed" : "–"}</span><span>disk free</span><span>${hl.disk ? num(hl.disk.free / 1e9, 1) + " GB" : "–"}</span></div>`;
+  } else if (key === "cloud") {
+    const lab = rs.lab || {};
+    h += `<p>All heavy research — hyperopt, walk-forward backtests, cost stress, robustness, Monte Carlo — runs on GitHub Actions runners. The trading server only receives the compact, gate-checked results.</p>`;
+    h += `<div class="kv"><span>status</span><span>${esc(lab.status || "–")}</span><span>runs</span><span>${lab.runs || 0}</span><span>CPUs / budget</span><span>${lab.cpus || "–"} / ${lab.budget_min || "–"} min</span><span>experiments imported</span><span>${lab.experiments_total || 0}</span><span>last batch</span><span>${esc(lab.last_batch || "–")}</span><span>last import</span><span>${esc((lab.last_import || "–").slice(0, 16))}</span></div>`;
+    h += `<a class="btn" target="_blank" rel="noopener" href="https://github.com/mailzastraze-ctrl/bybit-ai-trader/actions/workflows/research.yml">Open the runs on GitHub ↗</a>`;
+  } else if (key === "mission") {
+    const G = S.goals || {}; h += `<p>${esc(G.mission || "")}</p>` + (G.goals || []).map(x => `<div class="kv"><span>${esc(x.title)}</span><span>${esc(x.value)} / ${esc(x.target)}</span></div>`).join("");
+    h += `<p style="color:var(--muted)">Drawdown from peak: ${pct(G.drawdown)} · all numbers come from the live registry, nothing is simulated.</p>`;
   } else if (key === "ceo") {
     h += `<div class="kv"><span>kill-switch</span><span>${ov.kill_switch ? "ACTIVE" : "off"}</span><span>entries</span><span>${ov.entries_paused ? "paused" : "enabled"}</span><span>closed trades</span><span>${ov.closed_count}</span><span>closed P&L</span><span>${num(ov.closed_pnl)}</span></div>`;
   }
-  $("#pbody").innerHTML = h; $("#panel").style.display = "block";
+  $("#pbody").innerHTML = h; $("#panel").style.display = "block"; $("#goals").style.display = "none";
 }
 function openPerson(p) {
-  const act = p.task ? p.task.type : p.seat ? "working at desk" : p.pose;
+  const act = p.locked ? "in the stand-up meeting" : p.task ? ({walk: "walking", sit: "sitting down", wait: p.pose, call: "busy"})[p.task.type] || p.task.type : p.seat ? "working at desk" : p.pose;
   $("#pbody").innerHTML = `<h2>${esc(p.name)}</h2><div class="sub">${roleName(p.role)}</div><div class="kv"><span>activity</span><span>${esc(act)}</span></div>${p.line ? `<p>“${esc(p.line)}”</p>` : ""}<button class="btn" id="follow">Follow ${esc(p.name)}</button>`;
   $("#panel").style.display = "block"; $("#follow").onclick = () => { follow = p; tour = false; };
 }
-$("#px").onclick = () => { $("#panel").style.display = "none"; follow = null; };
+$("#px").onclick = () => { $("#panel").style.display = "none"; $("#goals").style.display = ""; follow = null; };
 
 // ============================================================== camera director
 let camTween = null, follow = null, tour = false, tourT = 0;
 function flyTo(pos, tgt, ms = 1600) { camTween = {p0: camera.position.clone(), t0: controls.target.clone(), p1: pos.clone(), t1: tgt.clone(), s: performance.now(), ms}; }
-function focusDept(key) { const d = departments[key]; follow = null; tour = false; flyTo(d.pos.clone().add(new THREE.Vector3(9, 11, 12)), d.pos.clone().setY(1)); openPanel(key); }
+function focusDept(key) {
+  const d = departments[key]; follow = null; tour = false;
+  if (key === "cloud") flyTo(cloud.position.clone().add(new THREE.Vector3(16, 2, 22)), cloud.position.clone().add(new THREE.Vector3(4, -3, 6)));
+  else if (key === "mission") flyTo(new THREE.Vector3(0, 4.5, 11), new THREE.Vector3(0, 3, 1.6));
+  else flyTo(d.pos.clone().add(new THREE.Vector3(9, 11, 12)), d.pos.clone().setY(1));
+  openPanel(key);
+}
 $("#bReset").onclick = () => { follow = null; tour = false; $("#bTour").classList.remove("on"); flyTo(HOME_POS, HOME_TGT); };
 $("#bTour").onclick = () => { tour = !tour; follow = null; $("#bTour").classList.toggle("on", tour); };
 renderer.domElement.addEventListener("pointerdown", () => { camTween = null; if (tour) { tour = false; $("#bTour").classList.remove("on"); } });
@@ -874,12 +1231,20 @@ function tick() {
   coffeeLed.material.color.setHSL(0.03, 1, 0.45 + 0.15 * Math.sin(t * 2));
   for (let i = 0; i < NP; i++) { partT[i] = (partT[i] + dt * flowSpeed) % 1; const p = pipeline.getPointAt(partT[i]); m4.makeTranslation(p.x, p.y + Math.sin(t * 3 + i) * 0.04, p.z); parts.setMatrixAt(i, m4); }
   parts.instanceMatrix.needsUpdate = true;
+  cloud.position.y = 15 + Math.sin(t * 0.4) * 0.35; cloudRing.rotation.z += dt * (labActive ? 1.6 : 0.3); cloudRing2.rotation.z -= dt * (labActive ? 2.2 : 0.4);
+  cloudCore.rotation.y += dt * (labActive ? 1.2 : 0.2); coreMat.color.setHSL(0.6, 0.75, labActive ? 0.55 + 0.12 * Math.sin(t * 5) : 0.35);
+  beam.material.opacity = damp(beam.material.opacity, labActive ? 0.45 : 0.0, 2, dt); beamParts.visible = beam.material.opacity > 0.05;
+  for (let i = 0; i < NB; i++) { beamT[i] = (beamT[i] + dt * 0.18) % 1; const bp = beamCurve.getPointAt(beamT[i]); m4.makeTranslation(bp.x, bp.y, bp.z); beamParts.setMatrixAt(i, m4); }
+  beamParts.instanceMatrix.needsUpdate = true;
+  for (let i = packets.length - 1; i >= 0; i--) { const pk = packets[i], k = (now - pk.s) / pk.ms; if (k >= 1) { scene.remove(pk.m); packets.splice(i, 1); continue; }
+    pk.m.position.copy(pk.curve.getPoint(k)); pk.m.rotation.x += dt * 3; pk.m.rotation.y += dt * 2; }
   // people
   for (const c of chars) {
     if (!c.root.visible) continue;
     c.update(dt, t);
     if (c.bubbleUntil && now > c.bubbleUntil) { c.bubble.classList.remove("on"); c.bubbleUntil = 0; c.speaking = false; }
     project(c.root.position, c.bubble, 2.15); if (hover === c) project(c.root.position, c.tagEl, 2.0);
+    if (c.emoteEl) { if (now > c.emoteUntil) c.emoteEl.style.display = "none"; else project(c.root.position, c.emoteEl, c.bubbleUntil ? 2.75 : 2.05); }
   }
   for (const dd of Object.values(departments)) project(dd.anchor, tags[dd.key]);
   if (now - lastScreens > 700) { drawAll(t); lastScreens = now; }
@@ -901,8 +1266,8 @@ function tick() {
 addEventListener("resize", () => { camera.aspect = innerWidth / innerHeight; camera.updateProjectionMatrix(); renderer.setSize(innerWidth, innerHeight); });
 
 // ============================================================== start
-await refresh();
-setInterval(refresh, 12000);
+await refresh(); await refreshSlow(true);
+setInterval(refresh, 12000); setInterval(() => refreshSlow(), 15000);
 $("#loader").style.opacity = 0; setTimeout(() => $("#loader").remove(), 900);
 flyTo(HOME_POS, HOME_TGT, 3200);
 setTimeout(() => ceo.say("Morning, team. Demo account only — we earn trust with evidence, not hope.", 6500), 2600);
