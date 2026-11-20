@@ -4,6 +4,8 @@ name: bulk-research
 # USDT perps (public API). Results are imported by the live system as validated /
 # exploratory candidates and must still pass forward tests on Bybit Demo.
 on:
+  schedule:
+    - cron: "17 2 * * 1"   # weekly, Monday 02:17 UTC (4 jobs × 4 experiments ≈ 350 runner-minutes)
   workflow_dispatch:
     inputs:
       jobs:
@@ -20,7 +22,11 @@ on:
         default: "20"
 
 permissions:
-  contents: read
+  contents: write   # merge job commits research/imports/*.json → Railway redeploys and imports
+
+concurrency:
+  group: bulk-research
+  cancel-in-progress: false
 
 env:
   RESEARCH_EXCHANGE: okx
@@ -37,12 +43,12 @@ jobs:
       - name: Market scan + history download (OKX)
         run: |
           mkdir -p work && chmod 777 work
-          docker run --rm -v "$PWD/work:/data" -e RESEARCH_EXCHANGE -e RESEARCH_UNIVERSE=${{ inputs.universe }} \
+          docker run --rm -v "$PWD/work:/data" -e RESEARCH_EXCHANGE -e RESEARCH_UNIVERSE=${{ inputs.universe || '20' }} \
             aitrader:research python -m aitrader.research.batch scan --out /data/batch
           sudo chown -R "$(id -u):$(id -g)" work
           head -c 2000 work/batch/universe.json
       - id: m
-        run: echo "matrix=$(python3 -c 'import json;print(json.dumps(list(range(int("${{ inputs.jobs }}")))))')" >> "$GITHUB_OUTPUT"
+        run: echo "matrix=$(python3 -c 'import json;print(json.dumps(list(range(int("${{ inputs.jobs || '4' }}")))))')" >> "$GITHUB_OUTPUT"
       - uses: actions/upload-artifact@v4
         with:
           name: market-data
@@ -70,9 +76,9 @@ jobs:
         run: |
           chmod -R 777 work
           docker run --rm -v "$PWD/work:/data" -e RESEARCH_EXCHANGE \
-            -e RESEARCH_EPOCHS=${{ inputs.epochs }} -e RESEARCH_JOBS=2 -e RESEARCH_IDLE_SECONDS=0 \
+            -e RESEARCH_EPOCHS=${{ inputs.epochs || '100' }} -e RESEARCH_JOBS=2 -e RESEARCH_IDLE_SECONDS=0 \
             aitrader:research python -m aitrader.research.batch run --out /data/batch/job-${{ matrix.job }} \
-              --job ${{ matrix.job }} --experiments ${{ inputs.experiments_per_job }} \
+              --job ${{ matrix.job }} --experiments ${{ inputs.experiments_per_job || '4' }} \
               --universe /data/batch/universe.json
       - if: always()
         run: sudo chown -R "$(id -u):$(id -g)" work
@@ -107,3 +113,12 @@ jobs:
           name: batch-report
           path: out
           retention-days: 30
+      - name: Commit candidates + report (live system imports them on deploy)
+        run: |
+          mkdir -p research/imports research/reports
+          cp out/imports/*.json research/imports/ && cp out/reports/*.md research/reports/
+          git config user.name "aitrader-research-bot"
+          git config user.email "aitrader-research-bot@users.noreply.github.com"
+          git add research/imports research/reports
+          git commit -m "research: batch ${{ github.run_id }} results" || exit 0
+          git pull --rebase origin main && git push origin HEAD:main
