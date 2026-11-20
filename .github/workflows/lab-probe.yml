@@ -13,6 +13,15 @@ jobs:
           TOK=$(curl -s -H "Authorization: bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" "$ACTIONS_ID_TOKEN_REQUEST_URL&audience=aitrader-lab" | python3 -c 'import sys,json;print(json.load(sys.stdin)["value"])')
           echo "token length: ${#TOK}"
           curl -s -o /tmp/r.txt -w "state HTTP %{http_code}\n" -H "Authorization: Bearer $TOK" https://aitrader-production-cf456409.up.railway.app/api/lab/state
+          python3 - <<'PY' || true
+          import json
+          s = json.load(open("/tmp/r.txt"))
+          print("STATE family_stats", s.get("family_stats"))
+          print("STATE learnings", len(s.get("learnings") or []), "revalidate", len(s.get("revalidate") or []), "refine", [r.get("id") for r in s.get("refine") or []])
+          for d in s.get("deployed") or []:
+              print("STATE deployed", d.get("id"), d.get("family"), d.get("stage"), d.get("pairs"), json.dumps(d.get("live")))
+          print("STATE universe", (s.get("universe") or {}).get("source"), len((s.get("universe") or {}).get("pairs") or []))
+          PY
           curl -s -H "Authorization: Bearer $TOK" https://aitrader-production-cf456409.up.railway.app/api/lab/proxy > /tmp/p.json
           RELAY=$(python3 -c 'import json;print(json.load(open("/tmp/p.json"))["relay"])'); RT=$(python3 -c 'import json;print(json.load(open("/tmp/p.json"))["token"])')
           echo "relay: $RELAY"
