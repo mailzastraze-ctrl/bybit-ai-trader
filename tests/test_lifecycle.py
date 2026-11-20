@@ -279,6 +279,14 @@ def test_batch_run_merge_and_import(env, tmp_path, monkeypatch):
     life = Lifecycle(s, reg)
     assert life.import_offline_candidates(imp) == len(m["candidates"])
     assert life.import_offline_candidates(imp) == 0  # idempotent
+    # a re-filtered file retracts dropped candidates that were not deployed yet
+    dropped = m["candidates"][-1]["id"]
+    refiltered = {k: v for k, v in m.items() if k != "experiments"}
+    refiltered["candidates"] = m["candidates"][:-1]
+    (imp / "b1.json").write_text(json.dumps(refiltered))
+    life.import_offline_candidates(imp)
+    if reg.one("SELECT stage FROM strategies WHERE id=?", (dropped,))["stage"] != "exploration":
+        assert reg.one("SELECT stage FROM strategies WHERE id=?", (dropped,))["stage"] == "rejected"
     st = reg.one("SELECT * FROM strategies WHERE id=?", (m["candidates"][0]["id"],))
     assert "okx data" in st["note"]
 

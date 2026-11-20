@@ -68,6 +68,13 @@ class Lifecycle:
                 data = json.loads(f.read_text())
             except (OSError, json.JSONDecodeError):
                 continue
+            batch = data.get("batch_id")
+            current = {c["id"] for c in data.get("candidates", [])}
+            if batch:  # a re-filtered batch file also retracts candidates it no longer contains
+                for r in self.reg.q("SELECT id FROM strategies WHERE id LIKE ? AND stage IN ('exploratory','validated')",
+                                    (f"{batch}-%",)):
+                    if r["id"] not in current:
+                        self.reg.set_stage(r["id"], "rejected", "retracted by stricter re-filter of its batch")
             for c in data.get("candidates", []):
                 if self.reg.one("SELECT id FROM strategies WHERE id=?", (c["id"],)):
                     continue
