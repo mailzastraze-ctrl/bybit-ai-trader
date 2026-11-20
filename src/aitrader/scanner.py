@@ -66,8 +66,11 @@ def training_scores(settings: Settings, pairs: list[str]) -> dict:
     cutoff = walk_forward_folds(utcnow(), rs.train_days, rs.holdout_days, rs.wf_folds)[0].train_end
     scores = {}
     for pair in pairs:
+        path = pair_file(settings, pair)
+        if not path.is_file():
+            continue
         try:
-            df = pd.read_feather(pair_file(settings, pair))
+            df = pd.read_feather(path)
             scores[pair] = pair_scores(df.loc[df["date"] < cutoff])
         except (OSError, ValueError, TypeError) as exc:
             log.warning("Training score unavailable for %s: %s", pair, type(exc).__name__)
