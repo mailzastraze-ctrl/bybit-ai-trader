@@ -43,6 +43,9 @@ EXIT_PARAMS: tuple[Param, ...] = (
     Param("trail_rr", "float", 0.5, 3.0, 1.5, "sell", 1),  # start trailing at this R
     Param("trail_atr", "float", 1.0, 4.0, 2.5, "sell", 1),  # trailing distance in ATRs
     Param("max_hold", "int", 12, 168, 72, "sell"),  # time exit (bars)
+    Param("be_rr", "float", 0.3, 2.0, 1.0, "sell", 2),  # move stop to break-even at this R
+    Param("lock_rr", "float", 0.5, 3.0, 1.5, "sell", 2),  # start the profit ratchet at this R
+    Param("lock_frac", "float", 0.0, 0.8, 0.4, "sell", 2),  # share of best open profit that is locked
     Param("conv_w", "float", 0.0, 1.0, 0.5, "sell", 2),  # sizing: weight on signal conviction
 )
 

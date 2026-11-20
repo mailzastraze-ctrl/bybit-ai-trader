@@ -723,7 +723,7 @@ setInterval(() => { const c = pick(chars.filter(x => x.root.visible && !x.busy()
   c.do({type: "call", fn: () => { c.pose = "phone"; c.say(pick(["Yes — demo account only, no real money.", "The GitHub runner is on it, results in a couple of hours.", "Stops are always on the exchange.", "We'll know more after the forward test."]), 5000); }}).wait(6000, "phone").do({type: "call", fn: () => { c.pose = "stand"; }}).sitAt(c.homeSeat); }, 95000);
 
 // ============================================================== data → scenes
-const S = {ov: null, rs: null, hl: null, ln: null, goals: null, market: null, strats: null, candles: {}, flash: {}, lossHist: {}, lastEventId: null, openIds: new Set(), first: true};
+const S = {ov: null, rs: null, hl: null, ln: null, goals: null, market: null, strats: null, candles: {}, flash: {}, lossHist: {}, lock: {}, lastEventId: null, openIds: new Set(), first: true};
 function onEvent(e) {
   const m = e.message || "";
   if (e.source === "research" && /^lab: /.test(m)) { onLabEvent(e, m); return; }
@@ -862,6 +862,20 @@ function standup() {
   ];
   meeting([ceo, lr, risk, analyst, sre], lines);
 }
+function lockedPnl(t) {
+  const st = Number(t.stop_loss_abs), o = Number(t.open_rate), notional = Number(t.stake_amount || 0) * Number(t.leverage || 1);
+  if (!st || !o || !notional) return null;
+  return (t.is_short ? (o - st) : (st - o)) / o * notional;
+}
+function watchProtection(open, sleeves) {
+  for (const t of open) {
+    const lk = lockedPnl(t); if (lk === null) continue;
+    const prev = S.lock[t.trade_id];
+    if (lk >= 0 && (prev === undefined || prev < 0)) { const tr = traderFor(t.enter_tag, sleeves); if (!S.first) { tr.say(`${t.pair.split(":")[0]}: stop moved to break-even — this trade can no longer turn into a loss.`, 6500); tr.emote("🔒"); feed(tr.name, `break-even stop on ${t.pair}`); } }
+    else if (prev !== undefined && prev >= 0 && lk > prev + Math.max(1, Math.abs(prev) * 0.25)) { const tr = traderFor(t.enter_tag, sleeves); if (!S.first) { tr.say(`Ratcheting the stop on ${t.pair.split(":")[0]}: +${num(lk)} USDT is now locked in.`, 6000); tr.emote("📈"); feed(tr.name, `locked +${num(lk)} on ${t.pair}`); } }
+    S.lock[t.trade_id] = lk;
+  }
+}
 function traderFor(tag, sleeves) { const i = Math.max(0, sleeves.findIndex(s => s.id === tag)); return traders[i % traders.length]; }
 
 // ============================================================== screens content (real data)
@@ -913,7 +927,8 @@ function drawAll(t) {
     const last = drawCandles(g, 4, 46, 248, 92, S.candles[pair]?.rows, lines);
     txt(g, pair.replace(":USDT", ""), 6, 38, C.text, "bold 13px monospace");
     if (last) { g.textAlign = "right"; txt(g, num(last, last < 1 ? 5 : last < 100 ? 3 : 1), 250, 38, C.muted, "12px monospace"); g.textAlign = "left"; }
-    if (pos) txt(g, `${pos.is_short ? "SHORT" : "LONG"} ${pos.profit_abs >= 0 ? "+" : ""}${num(pos.profit_abs)} USDT`, 6, 154, pos.profit_abs >= 0 ? C.lblue : C.red, "bold 13px monospace");
+    if (pos) { txt(g, `${pos.is_short ? "SHORT" : "LONG"} ${pos.profit_abs >= 0 ? "+" : ""}${num(pos.profit_abs)} USDT`, 6, 154, pos.profit_abs >= 0 ? C.lblue : C.red, "bold 13px monospace");
+      const lk = lockedPnl(pos); if (lk !== null) txt(g, lk >= 0 ? `🔒 +${num(lk)}` : `stop −${num(-lk)}`, 168, 154, lk >= 0 ? C.green : C.muted, "bold 12px monospace"); }
     else txt(g, "no position · waiting for a 1h signal" + ".".repeat(1 + Math.floor(t * 2) % 3), 6, 154, C.dim, "11px monospace");
     s.screen.tex.needsUpdate = true;
     if (s.screen.second) {
@@ -1115,7 +1130,7 @@ function applyData() {
   const evs = (ov.events || []).slice().reverse();
   if (S.lastEventId === null) { S.lastEventId = evs.length ? evs.at(-1).id : 0; evs.slice(-3).forEach(e => feed(e.source, e.message.slice(0, 110))); }
   else for (const e of evs) if (e.id > S.lastEventId) { S.lastEventId = e.id; onEvent(e); }
-  onTrades(ov.open_trades, live); S.first = false;
+  onTrades(ov.open_trades, live); watchProtection(ov.open_trades, live); S.first = false;
 }
 async function refresh() {
   try {

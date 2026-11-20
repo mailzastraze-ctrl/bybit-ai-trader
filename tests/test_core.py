@@ -79,6 +79,19 @@ def test_tsmom_follows_persistent_trend():
     assert out["short_sig"][1300:].sum() > out["long_sig"][1300:].sum()
 
 
+def test_profit_protection_breakeven_and_ratchet():
+    from aitrader.riskcore import EntryContext
+    p = {"sl_atr": 2.0, "tp_rr": 5.0, "trail_rr": 3.0, "trail_atr": 1.5, "be_rr": 0.5, "lock_rr": 1.0, "lock_frac": 0.5}
+    L = EntryContext(entry=100.0, atr=1.0, is_short=False)  # R = 2.0
+    assert L.managed_stop(p, 100.5) == 98.0  # 0.25R: initial stop
+    be = L.managed_stop(p, 101.2)  # 0.6R: break-even + fee buffer, still below best
+    assert 100.0 < be < 101.2
+    assert L.managed_stop(p, 103.0) == pytest.approx(101.5)  # 1.5R: half of +3 locked
+    S = EntryContext(entry=100.0, atr=1.0, is_short=True)
+    assert S.managed_stop(p, 97.0) == pytest.approx(98.5)
+    assert 98.8 < S.managed_stop(p, 98.8) < 100.0  # short break-even
+
+
 def test_family_normalize_and_perturb_stay_in_bounds():
     fam = get_family("trend_ema")
     p = fam.normalize({"fast": 999, "sl_atr": -5})
