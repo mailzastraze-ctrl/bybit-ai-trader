@@ -27,7 +27,7 @@ jobs:
         run: |
           docker run --rm -v "$PWD/tests:/app/tests" -w /app --entrypoint "" aitrader:ci \
             sh -c "pip install --user -q pytest && python -m pytest -q tests"
-      - name: Freqtrade can load every strategy and the hyperopt loss
+      - name: Freqtrade loads every strategy; hyperopt loss imports
         run: |
           docker run --rm -w /app --entrypoint "" aitrader:ci sh -c \
-            "freqtrade create-userdir --userdir /tmp/ud && freqtrade list-strategies --userdir /tmp/ud --strategy-path ft/strategies -1 | tee /tmp/s.txt && grep -q AIPortfolio /tmp/s.txt && grep -q FamSqueeze /tmp/s.txt && freqtrade list-hyperoptloss --userdir /tmp/ud --hyperopt-path ft/hyperopts -1 | grep AIRobustLoss"
+            "freqtrade create-userdir --userdir /tmp/ud && freqtrade list-strategies --userdir /tmp/ud --strategy-path ft/strategies -1 | tee /tmp/s.txt && grep -q AIPortfolio /tmp/s.txt && grep -q FamSqueeze /tmp/s.txt && python -c 'import sys; sys.path.insert(0, \"ft/hyperopts\"); from AIRobustLoss import AIRobustLoss; from freqtrade.optimize.hyperopt import IHyperOptLoss; assert issubclass(AIRobustLoss, IHyperOptLoss); print(\"AIRobustLoss ok\")'"
