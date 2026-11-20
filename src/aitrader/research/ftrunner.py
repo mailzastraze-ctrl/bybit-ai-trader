@@ -10,6 +10,7 @@ import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 
+from aitrader import memguard
 from aitrader.settings import Settings
 from aitrader.util import write_json_atomic
 
@@ -26,6 +27,13 @@ CCXT_LINEAR_ONLY = {"options": {"fetchMarkets": {"types": ["linear"]}}}
 
 class FreqtradeError(RuntimeError):
     pass
+
+
+class FreqtradeOOM(FreqtradeError):
+    """The freqtrade subprocess was killed by the kernel OOM killer (SIGKILL)."""
+
+
+HEAVY = {"hyperopt", "backtesting", "download-data", "test-pairlist"}
 
 
 def research_config(settings: Settings, pairs: list[str], **aitrader: object) -> dict:
@@ -96,6 +104,10 @@ class FreqtradeRunner:
                 full_env.pop(k)
         job.root.mkdir(parents=True, exist_ok=True)
         job.userdir.mkdir(parents=True, exist_ok=True)  # freqtrade refuses a missing --userdir
+        if args[0] in HEAVY:
+            need = float(os.environ.get("RESEARCH_MIN_HEADROOM_MB", "300"))
+            if not memguard.wait_for_headroom(need):
+                raise FreqtradeOOM(f"not enough free memory for freqtrade {args[0]} (need {need:.0f} MB)")
         log.info("freqtrade %s", " ".join(args[:3]))
         with open(job.path("freqtrade.log"), "a") as logf:
             logf.write(f"\n$ {' '.join(cmd)}\n")
@@ -103,6 +115,9 @@ class FreqtradeRunner:
             proc = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=logf, text=True,
                                   env=full_env, timeout=timeout, cwd=job.root)
             logf.write(proc.stdout[-20000:])
+        memguard.release()
+        if proc.returncode in (-9, 137):
+            raise FreqtradeOOM(f"freqtrade {args[0]} was OOM-killed (rc={proc.returncode})")
         if proc.returncode != 0:
             tail = job.path("freqtrade.log").read_text()[-2500:]
             raise FreqtradeError(f"freqtrade {args[0]} failed (rc={proc.returncode}): {tail}")

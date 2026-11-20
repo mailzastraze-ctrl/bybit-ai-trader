@@ -135,6 +135,7 @@ def research(limit: int = 60) -> dict:
         "gate_failures": fails,
         "family_stats": Generator(S, reg()).family_stats(),
         "paused": bool(reg().kv_get("research_paused", False)),
+        "scale": reg().kv_get("research_scale"),
         "universe": reg().kv_get("universe"),
     }
 

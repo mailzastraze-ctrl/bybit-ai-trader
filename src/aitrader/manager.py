@@ -4,7 +4,9 @@ kill-switch, runs the learning loop and the strategy lifecycle, and rewrites the
 from __future__ import annotations
 
 import time
+from datetime import timedelta
 
+from aitrader import memguard
 from aitrader.ftclient import FtClient
 from aitrader.learner import Learner
 from aitrader.lifecycle import Lifecycle
@@ -47,6 +49,23 @@ def kill_switch(reg: Registry, equity: float, limit: float, cooldown_h: float) -
     return False
 
 
+def housekeeping(reg: Registry) -> None:
+    """Keep the registry small: old events/equity rows go, VACUUM weekly."""
+    now = utcnow()
+    last = parse_dt(reg.kv_get("housekeeping_ts"))
+    if last and (now - last).total_seconds() < 86400:
+        return
+    with reg.conn() as c:
+        c.execute("DELETE FROM events WHERE ts < ?", (iso(now - timedelta(days=30)),))
+        c.execute("DELETE FROM equity WHERE ts < ?", (iso(now - timedelta(days=365))[:16],))
+    last_vac = parse_dt(reg.kv_get("vacuum_ts"))
+    if last_vac is None or (now - last_vac).days >= 7:
+        with reg.conn() as c:
+            c.execute("VACUUM")
+        reg.kv_set("vacuum_ts", iso(now))
+    reg.kv_set("housekeeping_ts", iso(now))
+
+
 def main() -> None:
     s = get_settings()
     s.ensure_dirs()
@@ -84,6 +103,11 @@ def main() -> None:
             man = life.build_manifest(open_trades, set(scanner.excluded_pairs()), paused)
             life.write(man, open_trades)
             detail.update(sleeves=len(man.sleeves), paused=paused)
+            housekeeping(reg)
+            memguard.release()
+            h = memguard.headroom_mb()
+            if h is not None:
+                detail["mem_headroom_mb"] = round(h)
             reg.heartbeat("manager", "ok" if up else "degraded", detail)
         except Exception as e:  # noqa: BLE001
             log.exception("manager loop error")

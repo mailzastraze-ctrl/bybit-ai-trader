@@ -217,6 +217,7 @@ R.Research = async v => {
     ${kpi("Experiments done", d.counts.done || 0, `${d.counts.failed || 0} failed · ${d.counts.running || 0} running`)}
     ${kpi("Universe", (d.universe?.pairs || []).length, d.universe ? `${esc(d.universe.source)} · ${ago(d.universe.ts)}` : "not scanned yet")}
     ${kpi("Research", d.paused ? "paused" : "running", `<button class="btn" id="tog">${d.paused ? "resume" : "pause"}</button>`)}
+    ${kpi("Load level", d.scale ? d.scale.level : "default", "adapts to memory: shrinks after OOM, grows after successes")}
   </div>
   <div class="card" style="margin-top:12px"><h2>Experiments</h2>${table([
       {h: "ID", k: "id"}, {h: "Created", f: r => ago(r.created)}, {h: "Family", k: "family"}, {h: "Pairs", num: 1, k: "pairs"},

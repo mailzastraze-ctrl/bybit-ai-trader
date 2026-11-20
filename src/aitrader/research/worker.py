@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
+import os
 import time
 import traceback
 
+from aitrader import memguard
 from aitrader.learner import Learner
 from aitrader.registry import Registry
+from aitrader.research.ftrunner import FreqtradeOOM
 from aitrader.research.generator import Generator
 from aitrader.research.pipeline import Pipeline
 from aitrader.scanner import Scanner
@@ -48,6 +51,9 @@ def main() -> None:
     for r in reg.q("SELECT id FROM experiments WHERE status='running'"):
         reg.update("experiments", r["id"], {"status": "failed", "error": "interrupted (restart)",
                                             "finished": iso()})
+    lite = os.environ.get("AITRADER_PROFILE", "").lower() == "lite"
+    scale = memguard.AdaptiveScale(reg, default_level=2 if lite else 4)
+    base_epochs = s.research.epochs
     reg.event("research", "research worker started")
     while True:
         try:
@@ -63,7 +69,12 @@ def main() -> None:
                 reg.heartbeat("research", "waiting", {"reason": "universe too small", "pairs": pairs})
                 time.sleep(600)
                 continue
+            n_pairs, epoch_factor, jobs = scale.params()
+            s.research.hyperopt_jobs = jobs
             spec = gen.next_spec(pairs)
+            spec["pairs"] = spec["pairs"][:n_pairs]
+            spec["epochs"] = max(30, int(base_epochs * epoch_factor))
+            spec["scale_level"] = scale.level()
             eid = reg.new_experiment(spec["family"], spec)
             reg.update("experiments", eid, {"status": "running", "started": iso()})
             log.info("experiment %s: %s on %d pairs", eid, spec["family"], len(spec["pairs"]))
@@ -71,6 +82,12 @@ def main() -> None:
                 result = pipeline.run(eid, spec)
                 reg.update("experiments", eid, {"status": "done", "finished": iso(), "result": result,
                                                 "progress": {"stage": "done"}})
+                scale.on_success()
+            except FreqtradeOOM as e:
+                log.error("experiment %s hit the memory limit: %s", eid, e)
+                reg.update("experiments", eid, {"status": "failed", "finished": iso(),
+                                                "error": f"memory: {e}"[:4000]})
+                scale.on_oom()
             except Exception as e:  # noqa: BLE001
                 log.error("experiment %s failed: %s", eid, e)
                 reg.update("experiments", eid, {"status": "failed", "finished": iso(),
@@ -78,6 +95,7 @@ def main() -> None:
                 reg.event("research", f"experiment {eid} failed: {str(e)[:300]}", "error")
             learner.learn_from_research()
             prune_jobs(s.jobs_dir)
+            memguard.release()
             reg.heartbeat("research", "idle", {"last_experiment": eid})
             log.info("experiment %s finished; sleeping %ss", eid, s.research.idle_sleep_s)
             time.sleep(s.research.idle_sleep_s)
