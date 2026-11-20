@@ -70,7 +70,7 @@ def main() -> None:
                 open_trades = ft.status()
                 equity, free = bot_equity(ft.balance())
                 reg.kv_set("last_equity", equity)
-                reg.upsert("equity", {"ts": iso()[:16], "equity": equity, "free": free,
+                reg.upsert("equity", {"ts": iso()[:15] + "0", "equity": equity, "free": free,
                                       "open_trades": len(open_trades)}, key="ts")
                 learner.sync_trades(ft.all_closed_trades())
                 detail.update(equity=round(equity, 2), open_trades=len(open_trades))
