@@ -6,6 +6,8 @@ name: research-lab
 #            strategies), picks the data source, scans the universe → plan
 #   run ×4 – four parallel runners (4 vCPU each), each a budgeted stream of walk-forward
 #            experiments opening with a different strategy family; live progress → HQ
+#   screen – stage 1: owner's Strategy Lab engine (Node) screens thousands of combinations,
+#            survivors (steady + profitable on the unseen last 40%) go to the runners first
 #   shadow – forward test: every frozen strategy on Bybit candles after its freeze time
 #   merge  – Deflated Sharpe over EVERY trial (90-day ledger + all four runners), compact
 #            results → server import + research/ commit, registry backup, next run
@@ -69,6 +71,7 @@ jobs:
             work/batch/universe.json
           key: mkt-1h-${{ github.run_id }}
           restore-keys: |
+            mkt-all-
             mkt-1h-
       - name: State, data source, universe
         run: |
@@ -94,8 +97,53 @@ jobs:
           path: work/batch/plan.json
           retention-days: 3
 
-  run:
+  screen:
+    # stage 1: the owner's Strategy Lab engine (Node) tries thousands of strategy × parameter ×
+    # exit combinations per coin and timeframe; only those that stay profitable with a steady
+    # equity curve on the unseen last 40% of the history go on to the walk-forward runners
     needs: prep
+    runs-on: ubuntu-latest
+    timeout-minutes: 75
+    steps:
+      - uses: actions/checkout@v5
+      - run: docker build -q -t aitrader:research .
+      - uses: actions/cache/restore@v4
+        with:
+          path: |
+            work/user_data/data
+            work/batch/universe.json
+          key: mkt-1h-${{ github.run_id }}
+          restore-keys: mkt-all-
+      - uses: actions/download-artifact@v4
+        with:
+          name: lab-plan
+          path: work/batch
+      - name: Bybit candles (15m + 1h) for the screener
+        run: |
+          chmod -R 777 work
+          docker run --rm -v "$PWD/work:/data" -e RESEARCH_EXCHANGE \
+            -e ACTIONS_ID_TOKEN_REQUEST_URL -e ACTIONS_ID_TOKEN_REQUEST_TOKEN \
+            aitrader:research python -m aitrader.research.batch lab-candles --out /data/batch \
+              --run-id ${{ github.run_id }} --server "$LAB_SERVER"
+          sudo chown -R "$(id -u):$(id -g)" work
+      - uses: actions/cache/save@v4
+        with:
+          path: |
+            work/user_data/data
+            work/batch/universe.json
+          key: mkt-all-${{ github.run_id }}
+      - name: Mass screening (owner's engine)
+        run: node screener/screen.js --data work/batch/candles --out work/batch/screen-results.json --combos 500 --top 4 --workers $(nproc)
+      - uses: actions/upload-artifact@v4
+        with:
+          name: lab-screen
+          path: work/batch/screen-results.json
+          retention-days: 7
+          if-no-files-found: ignore
+
+  run:
+    needs: [prep, screen]
+    if: always() && needs.prep.result == 'success'
     runs-on: ubuntu-latest
     timeout-minutes: 230
     strategy:
@@ -110,10 +158,16 @@ jobs:
           path: |
             work/user_data/data
             work/batch/universe.json
-          key: mkt-1h-${{ github.run_id }}
+          key: mkt-all-${{ github.run_id }}
+          restore-keys: mkt-1h-${{ github.run_id }}
       - uses: actions/download-artifact@v4
         with:
           name: lab-plan
+          path: work/batch
+      - uses: actions/download-artifact@v4
+        continue-on-error: true
+        with:
+          name: lab-screen
           path: work/batch
       - name: Walk-forward experiments (runner ${{ matrix.job }})
         run: |
@@ -122,7 +176,7 @@ jobs:
             -e ACTIONS_ID_TOKEN_REQUEST_URL -e ACTIONS_ID_TOKEN_REQUEST_TOKEN \
             -e RESEARCH_EPOCHS=80 -e RESEARCH_JOBS=$(nproc) -e RESEARCH_UNIVERSE=40 \
             aitrader:research python -m aitrader.research.batch lab-run --out /data/batch \
-              --job ${{ matrix.job }} --budget-min ${{ needs.prep.outputs.budget }} \
+              --job ${{ matrix.job }} --jobs ${{ strategy.job-total }} --budget-min ${{ needs.prep.outputs.budget }} \
               --run-id ${{ github.run_id }} --server "$LAB_SERVER"
       - if: always()
         run: sudo chown -R "$(id -u):$(id -g)" work
@@ -171,7 +225,7 @@ jobs:
           if-no-files-found: ignore
 
   merge:
-    needs: [prep, run, shadow]
+    needs: [prep, screen, run, shadow]
     if: always() && needs.prep.result == 'success'
     runs-on: ubuntu-latest
     timeout-minutes: 30
@@ -187,6 +241,11 @@ jobs:
         with:
           pattern: lab-results-*
           path: work/batch/results
+      - uses: actions/download-artifact@v4
+        continue-on-error: true
+        with:
+          name: lab-screen
+          path: work/batch/results/screen
       - name: Deflated Sharpe over all trials → live server
         run: |
           mkdir -p work/export work/batch/results && chmod -R 777 work
@@ -202,10 +261,11 @@ jobs:
           mkdir -p research/imports research/reports
           cp work/export/imports/*.json research/imports/ && cp work/export/reports/*.md research/reports/
           cp work/export/ledger.json research/ledger.json
+          [ -f work/export/screen.json ] && cp work/export/screen.json research/screen.json || true
           cat work/export/reports/*.md >> "$GITHUB_STEP_SUMMARY"
           git config user.name "aitrader-research-lab"
           git config user.email "aitrader-research-lab@users.noreply.github.com"
-          git add research/imports research/reports research/ledger.json
+          git add research/imports research/reports research/ledger.json research/screen.json 2>/dev/null || git add research/imports research/reports research/ledger.json
           git commit -q -m "research-lab: run ${{ github.run_id }} results [skip ci]" || exit 0
           for i in 1 2 3; do git pull -q --rebase origin main && git push -q origin HEAD:main && break; sleep 5; done
       - name: Back up the live registry (trades, strategies, learnings)

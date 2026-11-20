@@ -145,7 +145,7 @@ def research(limit: int = 60) -> dict:
                            "pf": (f.get("oos") or {}).get("profit_factor")} for f in (res.get("folds") or [])]
         r["pairs"] = len(spec.get("pairs", [])) if isinstance(spec, dict) else 0
         if isinstance(spec, dict):
-            r["info"] = {k: spec.get(k) for k in ("refines", "revalidates", "remote", "epochs")} | {
+            r["info"] = {k: spec.get(k) for k in ("refines", "revalidates", "remote", "epochs", "screen", "external")} | {
                 "pair_list": (spec.get("pairs") or [])[:12]}
         r["used_learnings"] = spec.get("used_learnings", []) if isinstance(spec, dict) else []
         r["error"] = (r.get("error") or "")[:400]
@@ -353,6 +353,12 @@ def forward_api() -> dict:
     f["book_size"] = len(forward.book(reg()))
     f["rules"] = forward.RULES
     return f
+
+
+@app.get("/api/screen", dependencies=[Depends(auth)])
+def screen_api() -> dict:
+    """Stage 1 of the lab: the owner's Strategy Lab engine screening thousands of combinations."""
+    return reg().kv_get("screen") or {"n_survivors": 0, "evaluated": 0, "top": []}
 
 
 @app.get("/api/goals", dependencies=[Depends(auth)])

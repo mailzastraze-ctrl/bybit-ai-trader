@@ -263,8 +263,8 @@ ZSCORE = Family(
     description="Fades statistical stretches: enters when price is k standard deviations away from its N-bar "
                 "mean, exits when it has reverted to the exit level.",
     entry_params=(
-        Param("window", "int", 50, 400, 200, "buy"),
-        Param("z_entry", "float", 2.0, 4.0, 3.0, "buy", 2),
+        Param("window", "int", 10, 400, 200, "buy"),
+        Param("z_entry", "float", 1.0, 4.0, 3.0, "buy", 2),
         Param("z_exit", "float", 0.0, 2.5, 1.0, "buy", 2),
     ),
     signal_fn=_zscore_revert,
@@ -305,7 +305,7 @@ def _macd_cross(df: pd.DataFrame, p: dict) -> pd.DataFrame:
 MACD = Family(
     name="macd_cross", title="MACD signal cross",
     description="MACD line crossing its signal line; optional zero-line filter (longs only above zero).",
-    entry_params=(Param("macd_fast", "int", 4, 30, 12, "buy"), Param("macd_gap", "int", 6, 60, 14, "buy"),
+    entry_params=(Param("macd_fast", "int", 4, 30, 12, "buy"), Param("macd_gap", "int", 1, 76, 14, "buy"),
                   Param("macd_signal", "int", 3, 20, 9, "buy"), Param("macd_zero", "int", 0, 1, 0, "buy")),
     signal_fn=_macd_cross, affinity="trend")
 
@@ -373,11 +373,63 @@ STOCH = Family(
     signal_fn=_stoch_cross, affinity="revert")
 
 
+def _ema_cross(df: pd.DataFrame, p: dict) -> pd.DataFrame:
+    f, sl = ta.ema(df["close"], int(p["ema_fast"])), ta.ema(df["close"], int(p["ema_slow"]))
+    if int(p["ema_fast"]) >= int(p["ema_slow"]):
+        no = pd.Series(False, index=df.index)
+        return _sig(no, no, no, no, index=df.index)
+    up, dn = ta.crossed_above(f, sl), ta.crossed_below(f, sl)
+    t = int(p["ema_trend"])
+    tr = ta.ema(df["close"], t) if t >= 20 else None
+    return _sig(up & ((df["close"] > tr) if tr is not None else True), dn & ((df["close"] < tr) if tr is not None else True),
+                dn, up, index=df.index)
+
+
+EMA_CROSS = Family(
+    name="ema_cross", title="EMA crossover",
+    description="Fast EMA crossing the slow EMA, optionally only in the direction of a long EMA trend (0 = off).",
+    entry_params=(Param("ema_fast", "int", 3, 60, 12, "buy"), Param("ema_slow", "int", 10, 200, 26, "buy"),
+                  Param("ema_trend", "int", 0, 400, 0, "buy")),
+    signal_fn=_ema_cross, affinity="trend")
+
+
+def _bb_revert(df: pd.DataFrame, p: dict) -> pd.DataFrame:
+    b = ta.bollinger(df["close"], int(p["br_len"]), p["br_mult"])
+    c = df["close"]
+    return _sig(ta.crossed_below(c, b["bb_lower"]), ta.crossed_above(c, b["bb_upper"]),
+                c >= b["bb_mid"], c <= b["bb_mid"], index=df.index)
+
+
+BB_REVERT = Family(
+    name="bb_revert", title="Bollinger band reversion (plain)",
+    description="Buys a close below the lower band, sells one above the upper band; exits at the middle line.",
+    entry_params=(Param("br_len", "int", 10, 60, 20, "buy"), Param("br_mult", "float", 1.0, 3.5, 2.0, "buy", 2)),
+    signal_fn=_bb_revert, affinity="revert")
+
+
+def _turtle(df: pd.DataFrame, p: dict) -> pd.DataFrame:
+    e, x = int(p["tt_entry"]), int(p["tt_exit"])
+    hi = df["high"].rolling(e, min_periods=e).max().shift(1)
+    lo = df["low"].rolling(e, min_periods=e).min().shift(1)
+    xhi = df["high"].rolling(x, min_periods=x).max().shift(1)
+    xlo = df["low"].rolling(x, min_periods=x).min().shift(1)
+    c = df["close"]
+    return _sig(c > hi, c < lo, c < xlo, c > xhi, index=df.index)
+
+
+TURTLE = Family(
+    name="turtle", title="Donchian turtle breakout",
+    description="Classic turtle system: enter on an N-bar channel breakout, exit on an M-bar counter-breakout.",
+    entry_params=(Param("tt_entry", "int", 5, 100, 20, "buy"), Param("tt_exit", "int", 3, 60, 10, "buy")),
+    signal_fn=_turtle, affinity="trend")
+
+
 FAMILIES: dict[str, Family] = {f.name: f for f in (TREND_EMA, MEANREV_BB, DONCHIAN, SQUEEZE, TSMOM, FUNDING, ZSCORE,
-                                                   SUPERTREND, MACD, ADX_DI, HULL, RSI_REVERT, STOCH)}
+                                                   SUPERTREND, MACD, ADX_DI, HULL, RSI_REVERT, STOCH,
+                                                   EMA_CROSS, BB_REVERT, TURTLE)}
 # families researched on 15m as well as 1h (short-horizon ideas; funding needs 1h alignment)
 MULTI_TF = {"zscore_revert", "meanrev_bb", "squeeze_momentum", "supertrend", "macd_cross", "adx_di", "hull_turn",
-            "rsi_revert", "stoch_cross"}
+            "rsi_revert", "stoch_cross", "ema_cross", "bb_revert", "turtle"}
 NEEDS_FUNDING = {"funding_reversal"}
 
 # Freqtrade strategy class name used for hyperopting each family.
@@ -395,6 +447,9 @@ RESEARCH_CLASS: dict[str, str] = {
     "hull_turn": "FamHull",
     "rsi_revert": "FamRsiRevert",
     "stoch_cross": "FamStoch",
+    "ema_cross": "FamEmaCross",
+    "bb_revert": "FamBBRevert",
+    "turtle": "FamTurtle",
 }
 
 

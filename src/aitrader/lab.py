@@ -221,6 +221,12 @@ def apply_import(s: Settings, reg: Registry, data: dict) -> dict:
     """Store finished experiments, candidates, market scores; learn; act on revalidations."""
     now = iso()
     fw = forward.apply(reg, data["shadow"]) if data.get("shadow") else None
+    if data.get("screen"):
+        sc = data["screen"]
+        reg.kv_set("screen", sc | {"ts": now})
+        reg.event("research", f"screener: {sc.get('evaluated', 0):,} strategy combinations tested on "
+                  f"{sc.get('series', 0)} coin/timeframe series — {sc.get('n_survivors', 0)} stayed profitable with a "
+                  "steady curve on the unseen last 40% → walk-forward", data={"lab": True})
     if not data.get("experiments_full") and not data.get("candidates"):
         return {"experiments": 0, "candidates": 0, "forward": fw}
     n_exp = 0
@@ -238,6 +244,11 @@ def apply_import(s: Settings, reg: Registry, data: dict) -> dict:
                                    "finished": e.get("finished") or now, "result": res,
                                    "progress": {"stage": "done", "remote": True}})
         n_exp += 1
+        if spec.get("screen"):
+            o = res.get("oos") or {}
+            reg.event("research", f"screener survivor {spec['screen']} ({spec.get('family')} {spec.get('timeframe')} "
+                      f"{', '.join(spec.get('pairs') or [])}): walk-forward PF {o.get('profit_factor')}, "
+                      f"{o.get('trades')} trades, curve R² {o.get('curve_r2')} → {res.get('verdict')}")
         if spec.get("external"):
             marks = reg.kv_get("external_tested") or {}
             marks.setdefault(spec["external"], []).append(eid)

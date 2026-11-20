@@ -34,7 +34,7 @@ def test_auth_and_endpoints(client):
     ov = client.get("/api/overview", auth=a).json()
     assert ov["bot_up"] is False and ov["open_trades"] == []
     for path in ("/api/trades", "/api/strategies", "/api/research", "/api/market",
-                 "/api/learnings", "/api/events", "/api/health", "/api/forward", "/api/goals"):
+                 "/api/learnings", "/api/events", "/api/health", "/api/forward", "/api/goals", "/api/screen"):
         r = client.get(path, auth=a)
         assert r.status_code == 200, path
     assert client.get("/api/lab/state").status_code == 401

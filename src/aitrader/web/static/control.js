@@ -6,7 +6,7 @@ const api = async (p) => { const r = await fetch(p, {cache: "no-store"}); if (!r
 const S = {eqHours: 168};
 const FAM = {trend_ema: "Trend EMA", meanrev_bb: "Mean reversion BB", donchian_breakout: "Donchian breakout",
   squeeze_momentum: "Squeeze momentum", tsmom: "Time-series momentum", funding_reversal: "Funding reversal",
-  zscore_revert: "Z-score reversion", supertrend: "SuperTrend", macd_cross: "MACD cross", adx_di: "ADX + DI",
+  zscore_revert: "Z-score reversion", ema_cross: "EMA cross", bb_revert: "Bollinger reversion", turtle: "Turtle breakout", supertrend: "SuperTrend", macd_cross: "MACD cross", adx_di: "ADX + DI",
   hull_turn: "Hull MA turn", rsi_revert: "RSI reversion", stoch_cross: "Stochastic"};
 const famName = (f) => FAM[f] || f || "—";
 const pair = (p) => String(p || "").replace("/USDT:USDT", "");
@@ -217,6 +217,23 @@ function renderForward() {
     ${f.rank_corr != null ? `Rank correlation backtest→forward: <b>${f.rank_corr}</b>.` : ""} ${pers}</p>`;
 }
 
+function renderScreen() {
+  const sc = S.scr || {}, top = sc.top || [];
+  const tested = new Map((S.rs?.experiments || []).filter((e) => e.info?.screen).map((e) => [e.info.screen, e]));
+  $("#scrSub").textContent = sc.evaluated ? `${(+sc.evaluated).toLocaleString("en-US")} combinations on ${sc.series} coin/timeframe series · ${sc.n_survivors} survivors · ${ago(sc.ts || sc.created)}` : "first screening runs with the next lab run";
+  if (!top.length) { $("#screen").innerHTML = `<div class="empty">${sc.evaluated ? "No combination stayed profitable with a steady curve on unseen data this time." : "Waiting for the first screening."}</div>`; return; }
+  const ex = (x) => `stop ${x.sl}×ATR · ${x.tp ? "TP " + x.tp + "R" : "no TP"} · ${x.tr ? "trail " + x.tr + "×ATR" : "no trail"}`;
+  $("#screen").innerHTML = `<table><thead><tr><th>Strategy</th><th>Coin · TF</th><th class="r">Unseen trades</th><th class="r">PF</th><th class="r">Return</th><th class="r">Max DD</th><th class="r">Curve R²</th><th class="r">Last 3m</th><th>Walk-forward</th></tr></thead><tbody>${top.map((x) => {
+    const e = tested.get(x.id), v = e?.summary?.verdict;
+    const wf = !e ? pill("queued", "") : e.status === "running" ? pill("testing", "blue") : pill(`${v} · PF ${e.oos?.profit_factor ?? "—"}`, {validated: "good", exploratory: "warn"}[v] || "");
+    return `<tr><td>${esc(x.name || famName(x.family))}<div class="dim mono">${esc(JSON.stringify(x.params))} · ${esc(ex(x.exits || {}))}</div></td>
+      <td>${esc(pair(x.pair))} · ${esc(x.timeframe)}</td><td class="r num">${x.B?.trades ?? "—"}</td><td class="r num pos">${x.B?.pf ?? "—"}</td>
+      <td class="r num ${cls(x.B?.net)}">${x.B?.net != null ? (x.B.net > 0 ? "+" : "") + x.B.net.toFixed(1) + "%" : "—"}</td><td class="r num">${x.B?.dd != null ? x.B.dd.toFixed(1) + "%" : "—"}</td>
+      <td class="r num">${x.r2}</td><td class="r num ${cls(x.last90)}">${x.last90 > 0 ? "+" : ""}${x.last90}%</td><td>${wf}</td></tr>`;
+  }).join("")}</tbody></table>
+  <p class="dim" style="margin:8px 0 0;font-size:12px">Returns here are 1× full-capital backtests in the owner's engine (fees + slippage). Survivors then run through the freqtrade walk-forward (4 unseen 90-day windows, double costs, Deflated Sharpe) and the forward test on live data; passing ones trade on demo at 0.1% risk.</p>`;
+}
+
 // ---------------------------------------------------------------------------- log / learnings / closed
 function renderLog() {
   const ev = S.ev?.events || S.ov?.events || [];
@@ -238,7 +255,7 @@ function renderClosed() {
 
 // ---------------------------------------------------------------------------- polling
 function safe(fn) { try { fn(); } catch (e) { console.warn(fn.name, e); } }
-function renderAll() { [renderHeader, renderKpis, renderEquity, renderPositions, renderLab, renderResults, renderFamilies, renderLifecycle, renderGoals, renderReadiness, renderForward, renderLog, renderClosed].forEach(safe); }
+function renderAll() { [renderHeader, renderKpis, renderEquity, renderPositions, renderLab, renderResults, renderFamilies, renderLifecycle, renderGoals, renderReadiness, renderForward, renderScreen, renderLog, renderClosed].forEach(safe); }
 async function fast() {
   try { const [ov, rs] = await Promise.all([api("/api/overview"), api("/api/research")]); Object.assign(S, {ov, rs}); renderAll(); }
   catch (e) { chip("#chUpd", "crit", "data error: " + e.message); }
@@ -247,8 +264,8 @@ let lastSlow = 0;
 async function slow() {
   if (Date.now() - lastSlow < 55000) return; lastSlow = Date.now();
   const get = (p) => api(p).catch(() => null);
-  const [goals, ready, strats, trades, ln, fw, ev] = await Promise.all([get("/api/goals"), get("/api/readiness"), get("/api/strategies"), get("/api/trades?limit=200"), get("/api/learnings"), get("/api/forward"), get("/api/events?limit=60")]);
-  Object.assign(S, Object.fromEntries(Object.entries({goals, ready, strats, trades, ln, fw, ev}).filter(([, v]) => v)));
+  const [goals, ready, strats, trades, ln, fw, ev, scr] = await Promise.all([get("/api/goals"), get("/api/readiness"), get("/api/strategies"), get("/api/trades?limit=200"), get("/api/learnings"), get("/api/forward"), get("/api/events?limit=60"), get("/api/screen")]);
+  Object.assign(S, Object.fromEntries(Object.entries({goals, ready, strats, trades, ln, fw, ev, scr}).filter(([, v]) => v)));
   renderAll();
 }
 async function tick() { await fast(); await slow(); window.__ready = true; }

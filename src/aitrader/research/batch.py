@@ -399,6 +399,14 @@ def cmd_lab_run(out: Path, job: int, jobs: int, budget_min: float, run_id: str, 
     # revalidations and external-strategy tests run once, on job 0
     st = state if job == 0 else {**state, "revalidate": [], "external_tests": []}
     specs = plan(gen, st, pairs, random.Random(seed), first_rank=job)
+    sfile = out / "screen-results.json"
+    if sfile.exists():  # stage 1 survivors first: their fixed configs through the full walk-forward
+        from itertools import chain
+
+        from aitrader.research import screen
+        first = screen.to_specs(json.loads(sfile.read_text()), job, max(jobs, 1))
+        log.info("job %d: %d screener survivors to walk-forward test", job, len(first))
+        specs = chain(first, specs)
     jdir = out / f"job-{job}"
     jdir.mkdir(parents=True, exist_ok=True)
     for f in jdir.glob("results-*.json"):
@@ -432,6 +440,22 @@ def cmd_lab_run(out: Path, job: int, jobs: int, budget_min: float, run_id: str, 
         prune_scratch(s.jobs_dir, keep=2)
     watcher.stop()
     return results
+
+
+def cmd_lab_candles(out: Path, run_id: str, server: str | None) -> int:
+    """Screener input: the universe's Bybit candles (15m + 1h) as compact JSON."""
+    from aitrader.research import screen
+    from aitrader.research.labclient import LabClient
+    s = get_settings()
+    s.ensure_dirs()
+    plan_doc = json.loads((out / "plan.json").read_text())
+    if plan_doc.get("paused") or plan_doc.get("error"):
+        return 0
+    if plan_doc.get("relay") and not _use_relay(s, LabClient(server, run_id)):
+        log.error("screener: Bybit relay unavailable – skipping")
+        return 0
+    s.research.exchange = plan_doc["exchange"]
+    return screen.export_candles(s, plan_doc["universe"]["pairs"], out / "candles")
 
 
 def cmd_lab_shadow(out: Path, run_id: str, server: str | None, workers: int = 4) -> list[dict]:
@@ -470,9 +494,12 @@ def cmd_lab_merge(out: Path, results_root: Path, run_id: str, server: str | None
     n = sum(len(json.loads(f.read_text()).get("experiments", [])) for f in files)
     sh = sorted(results_root.rglob("shadow-results.json"))
     shadow_res = json.loads(sh[-1].read_text()) if sh else None
+    sc = sorted(list(results_root.rglob("screen-results.json")) + list(out.glob("screen-results.json")))
+    from aitrader.research import screen as screen_mod
+    screen_sum = screen_mod.summary(json.loads(sc[-1].read_text())) if sc else None
     if not n:
-        if shadow_res:
-            log.info("forward test import: %s", lab.import_batch({"shadow": shadow_res}))
+        if shadow_res or screen_sum:
+            log.info("forward test import: %s", lab.import_batch({"shadow": shadow_res, "screen": screen_sum}))
         lab.run_event("end", experiments=0)
         return None
     ledger = json.loads(ledger_path.read_text()) if ledger_path and ledger_path.exists() else {"trials": []}
@@ -483,9 +510,13 @@ def cmd_lab_merge(out: Path, results_root: Path, run_id: str, server: str | None
     imp = {k: v for k, v in m.items() if k != "experiments"} | {"summary": m["experiments"]}
     if shadow_res:
         imp["shadow"] = shadow_res
+    if screen_sum:
+        imp["screen"] = screen_sum
     (export / "imports").mkdir(parents=True, exist_ok=True)
     (export / "reports").mkdir(parents=True, exist_ok=True)
-    write_json_atomic(export / "imports" / f"{batch_id}.json", {k: v for k, v in imp.items() if k != "shadow"})
+    write_json_atomic(export / "imports" / f"{batch_id}.json", {k: v for k, v in imp.items() if k not in ("shadow", "screen")})
+    if screen_sum:
+        write_json_atomic(export / "screen.json", screen_sum)
     (export / "reports" / f"{batch_id}.md").write_text(report_md(m))
     write_json_atomic(export / "ledger.json", update_ledger(ledger, m))
     resp = lab.import_batch(imp)
@@ -532,7 +563,7 @@ def main() -> None:
     y.add_argument("--run-id", default="local")
     y.add_argument("--server", default=None)
     y.add_argument("--ledger", type=Path, default=None)
-    for name in ("lab-prep", "lab-run", "lab-merge", "lab-shadow"):
+    for name in ("lab-prep", "lab-run", "lab-merge", "lab-shadow", "lab-candles"):
         q = sub.add_parser(name)
         q.add_argument("--out", type=Path, required=True)
         q.add_argument("--run-id", default="local")
@@ -560,6 +591,8 @@ def main() -> None:
         cmd_lab_prep(args.out, args.run_id, args.server, args.budget_min, args.jobs)
     elif args.cmd == "lab-run":
         cmd_lab_run(args.out, args.job, args.jobs, args.budget_min, args.run_id, args.server, args.max_experiments)
+    elif args.cmd == "lab-candles":
+        cmd_lab_candles(args.out, args.run_id, args.server)
     elif args.cmd == "lab-shadow":
         cmd_lab_shadow(args.out, args.run_id, args.server, args.jobs)
     elif args.cmd == "lab-merge":
