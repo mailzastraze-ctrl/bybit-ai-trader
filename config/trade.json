@@ -1,0 +1,55 @@
+{
+  "$comment": "Live (Bybit DEMO) trading config. Secrets come from FREQTRADE__* env vars set by the supervisor. demo_trading MUST stay true.",
+  "bot_name": "aitrader",
+  "strategy": "AIPortfolio",
+  "trading_mode": "futures",
+  "margin_mode": "isolated",
+  "dry_run": false,
+  "max_open_trades": 12,
+  "stake_currency": "USDT",
+  "stake_amount": "unlimited",
+  "tradable_balance_ratio": 0.9,
+  "timeframe": "1h",
+  "dataformat_ohlcv": "feather",
+  "cancel_open_orders_on_exit": false,
+  "initial_state": "running",
+  "force_entry_enable": false,
+  "unfilledtimeout": {"entry": 10, "exit": 10, "exit_timeout_count": 0, "unit": "minutes"},
+  "entry_pricing": {"price_side": "other", "use_order_book": true, "order_book_top": 1,
+                    "price_last_balance": 0.0, "check_depth_of_market": {"enabled": false, "bids_to_ask_delta": 1}},
+  "exit_pricing": {"price_side": "other", "use_order_book": true, "order_book_top": 1},
+  "order_types": {
+    "entry": "market", "exit": "market", "emergency_exit": "market",
+    "force_entry": "market", "force_exit": "market", "stoploss": "market",
+    "stoploss_on_exchange": true, "stoploss_on_exchange_interval": 60
+  },
+  "exchange": {
+    "name": "bybit",
+    "demo_trading": true,
+    "key": "",
+    "secret": "",
+    "ccxt_config": {},
+    "ccxt_async_config": {},
+    "pair_whitelist": [],
+    "pair_blacklist": ["USDC/.*", "USDE/.*", "FDUSD/.*", "DAI/.*", "TUSD/.*", ".*(BULL|BEAR|UP|DOWN)/.*"]
+  },
+  "pairlists": [
+    {"method": "RemotePairList", "pairlist_url": "file:///data/aitrader/pairlist.json",
+     "mode": "whitelist", "processing_mode": "filter", "refresh_period": 300,
+     "keep_pairlist_on_failure": true, "number_assets": 60}
+  ],
+  "api_server": {
+    "enabled": true,
+    "listen_ip_address": "127.0.0.1",
+    "listen_port": 8080,
+    "verbosity": "error",
+    "enable_openapi": false,
+    "jwt_secret_key": "",
+    "ws_token": "",
+    "CORS_origins": [],
+    "username": "",
+    "password": ""
+  },
+  "internals": {"process_throttle_secs": 5, "heartbeat_interval": 300},
+  "aitrader": {"manifest_path": "/data/aitrader/manifest.json"}
+}

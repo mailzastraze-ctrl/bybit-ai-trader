@@ -1,0 +1,12 @@
+# Local / any-VPS alternative to Railway: same single container, same volume layout.
+services:
+  aitrader:
+    build: .
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      PORT: "8000"
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./data:/data

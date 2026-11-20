@@ -1,0 +1,30 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "aitrader"
+version = "0.1.0"
+description = "Autonomous research + execution layer on top of Freqtrade for Bybit Demo"
+requires-python = ">=3.11"
+# Runtime deps (pandas, numpy, fastapi, uvicorn, requests, ccxt) are provided by the
+# freqtradeorg/freqtrade base image. Nothing extra is installed.
+dependencies = []
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+aitrader = ["web/static/*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src", "ft/strategies", "ft/hyperopts"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP"]
+ignore = ["E501", "B008", "UP017"]
