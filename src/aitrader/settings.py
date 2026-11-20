@@ -33,9 +33,11 @@ class Gates:
     min_mc_prob_profit: float = 0.80  # Monte-Carlo bootstrap probability of profit
     min_dsr: float = 0.80  # Deflated Sharpe Ratio probability
     # relaxed gates for the exploration (tiny-risk) lane
-    explore_min_trades: int = 10
-    explore_min_pf: float = 1.0
-    explore_min_stress_pf: float = 0.95
+    explore_min_trades: int = 15
+    explore_min_pf: float = 1.05
+    explore_min_stress_pf: float = 1.0
+    explore_min_sharpe: float = 0.3
+    explore_min_mc: float = 0.6
 
 
 @dataclass

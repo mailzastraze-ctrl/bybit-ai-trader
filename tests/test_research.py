@@ -85,6 +85,8 @@ def test_gates():
     assert verdict == "exploratory" and not gates["deflated_sharpe"]["pass"]
     assert evaluate_gates(g, _m(trades=5))[0] == "rejected"
     assert evaluate_gates(g, _m(pf=0.9, ret=-0.01))[0] == "rejected"
+    # weak "barely positive" results are noise, not exploration material
+    assert evaluate_gates(g, _m(pf=1.04, sharpe=0.16, spf=0.97, mc=0.55, dsr=0.01))[0] == "rejected"
 
 
 def test_ucb_pick():

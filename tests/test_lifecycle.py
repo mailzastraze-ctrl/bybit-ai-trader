@@ -292,7 +292,7 @@ def test_always_on_exploration_near_miss_and_random_explorer(env):
     assert len(rnd) == 2 and all(r["pairs"] for r in rnd)
     # a profitable near-miss gets an exploration slot
     _strategy(reg, "near", "rejected", ["SOL/USDT:USDT"])
-    reg.update("strategies", "near", {"created": iso(), "oos": {"trades": 15, "total_return": 0.03,
+    reg.update("strategies", "near", {"created": iso(), "oos": {"trades": 20, "total_return": 0.03,
                                                                  "profit_factor": 1.1, "sharpe": 0.5}})
     life.evaluate(10_000)
     assert reg.one("SELECT stage FROM strategies WHERE id='near'")["stage"] == "exploration"

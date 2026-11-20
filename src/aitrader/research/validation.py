@@ -87,5 +87,7 @@ def evaluate_gates(g: Gates, m: dict) -> tuple[str, dict]:
     explore_ok = (oos["trades"] >= g.explore_min_trades
                   and oos["profit_factor"] >= g.explore_min_pf
                   and stress["profit_factor"] >= g.explore_min_stress_pf
+                  and oos.get("sharpe", 0.0) >= g.explore_min_sharpe
+                  and mc.get("prob_profit", 0.0) >= g.explore_min_mc
                   and oos["total_return"] > 0)
     return ("exploratory" if explore_ok else "rejected"), gates

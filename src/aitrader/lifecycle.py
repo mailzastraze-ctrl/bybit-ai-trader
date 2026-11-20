@@ -204,8 +204,9 @@ class Lifecycle:
         for r in self.reg.q("SELECT * FROM strategies WHERE stage='rejected' AND created >= ? "
                             "ORDER BY created DESC LIMIT 200", (cutoff,)):
             o = r.get("oos") or {}
-            if r.get("pairs") and o.get("trades", 0) >= 10 and o.get("total_return", 0) > 0 \
-                    and o.get("profit_factor", 0) >= 1.0 and not str(r["id"]).startswith("rnd-"):
+            if r.get("pairs") and o.get("trades", 0) >= 15 and o.get("total_return", 0) > 0 \
+                    and o.get("profit_factor", 0) >= 1.05 and o.get("sharpe", 0) >= 0.3 \
+                    and not str(r["id"]).startswith("rnd-"):
                 out.append(r)
         out.sort(key=lambda r: -(r["oos"].get("sharpe", 0)))
         return out[:k]
