@@ -63,6 +63,18 @@ def book(reg: Registry, limit: int = BOOK_LIMIT, max_age_days: int = BOOK_MAX_AG
                     "variant": res.get("variant") or r["family"]})
         if len(out) >= limit:
             break
+    # candidates imported as strategies (e.g. offline batches) whose experiment isn't stored here
+    seen = {e["id"] for e in out}
+    for st in reg.q("SELECT id, experiment_id, family, params, pairs, sides, score, stage, oos, created FROM strategies "
+                    "WHERE created >= ? AND stage != 'retired' ORDER BY created DESC", (since,)):
+        if len(out) >= limit or st.get("experiment_id") in seen or not st.get("params") or not st.get("pairs") \
+                or str(st["id"]).startswith(("fw-", "boot-", "rnd-", "exec-test")):
+            continue
+        oos = st.get("oos") or {}
+        out.append({"id": st["id"], "kind": "strategy", "family": st["family"], "params": st["params"],
+                    "pairs": st["pairs"][:8], "sides": st.get("sides") or ["long", "short"], "freeze": st["created"],
+                    "score": float(st.get("score") or 0.0), "verdict": st.get("stage"), "bt_pf": oos.get("profit_factor"),
+                    "bt_trades": oos.get("trades"), "variant": oos.get("variant") or st["family"]})
     return out
 
 
@@ -211,6 +223,8 @@ def apply(reg: Registry, payload: dict) -> dict:
 def _promote(reg: Registry, rows: list[dict]) -> int:
     n, now = 0, iso()
     for r in rows:
+        if r.get("kind") == "strategy":
+            continue  # already a strategy with its own lifecycle
         xs = [t[1] for t in r.get("trades", [])]
         pf = _pf(xs)
         if len(xs) < PROMOTE["trades"] or sum(xs) <= 0 or pf is None or pf < PROMOTE["pf"]:

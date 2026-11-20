@@ -119,3 +119,14 @@ def test_shadow_counts_only_trades_after_the_freeze(env, tmp_path):
     tr = res[0]["trades"]
     assert len(tr) == 2  # the trade opened before the freeze and the force-exit are excluded
     assert abs(tr[0][1] - (5.0 - 900 * 0.0005 * 2) / 10_000) < 1e-9  # slippage haircut applied
+
+
+def test_book_includes_imported_candidate_strategies(env):
+    _, reg = env
+    now = iso(utcnow() - timedelta(hours=30))
+    reg.upsert("strategies", {"id": "b1-trend-00", "experiment_id": "x-not-here", "family": "trend_ema", "params": {"fast": 9},
+                              "pairs": ["ETH/USDT:USDT"], "sides": ["long"], "stage": "exploratory", "score": 0.4,
+                              "oos": {"profit_factor": 1.2}, "gates": {}, "live": {}, "created": now, "updated": now,
+                              "stage_since": now, "history": []})
+    b = forward.book(reg)
+    assert b[0]["id"] == "b1-trend-00" and b[0]["kind"] == "strategy" and b[0]["freeze"] == now
