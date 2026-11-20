@@ -417,6 +417,42 @@ try {
     const c = XBOT.animations.find(a => a.name === name); if (c) THREE.AnimationUtils.makeClipAdditive(c);
   }
 } catch (e) { console.warn("mocap staff unavailable, using procedural rig:", e.message); XBOT = null; }
+// Clothing shader: the mannequin's single surface is painted as skin, hair, shirt/jacket,
+// trousers, belt, shoes (and lab coat / tie) by bind-pose height, so staff read as people.
+function outfitMaterial(geo, o) {
+  geo.computeBoundingBox();
+  const bb = geo.boundingBox, H = bb.max.y - bb.min.y;
+  const mat = new THREE.MeshStandardMaterial({color: 0xffffff, roughness: 0.62, metalness: 0.0});
+  const U = {uMinY: {value: bb.min.y}, uH: {value: H}, uMidX: {value: (bb.min.x + bb.max.x) / 2}, uFrontZ: {value: (bb.min.z + bb.max.z) / 2},
+    uSkin: {value: new THREE.Color(o.skin)}, uHair: {value: new THREE.Color(o.hair)}, uShirt: {value: new THREE.Color(o.shirt)},
+    uPants: {value: new THREE.Color(o.pants)}, uShoes: {value: new THREE.Color(0x15151a)}, uTie: {value: new THREE.Color(o.tie ?? o.shirt)},
+    uCoat: {value: o.coat ? 1 : 0}, uLongHair: {value: o.longHair ? 1 : 0}, uBald: {value: o.bald ? 1 : 0}};
+  mat.onBeforeCompile = sh => {
+    Object.assign(sh.uniforms, U);
+    sh.vertexShader = "varying vec3 vBind;\n" + sh.vertexShader.replace("#include <begin_vertex>", "#include <begin_vertex>\nvBind = position;");
+    sh.fragmentShader = `varying vec3 vBind;
+uniform float uMinY, uH, uMidX, uFrontZ, uCoat, uLongHair, uBald;
+uniform vec3 uSkin, uHair, uShirt, uPants, uShoes, uTie;
+` + sh.fragmentShader.replace("vec4 diffuseColor = vec4( diffuse, opacity );", `
+float y = (vBind.y - uMinY) / uH; float ax = abs(vBind.x - uMidX) / uH; float fz = (vBind.z - uFrontZ) / uH;
+vec3 col = uShirt;
+float pantsTop = uCoat > 0.5 ? 0.33 : 0.535;
+col = mix(col, uPants, 1.0 - smoothstep(pantsTop - 0.006, pantsTop + 0.006, y));
+col = mix(col, uShoes, 1.0 - smoothstep(0.045, 0.055, y));
+float belt = (1.0 - uCoat) * smoothstep(0.528, 0.532, y) * (1.0 - smoothstep(0.546, 0.55, y));
+col = mix(col, vec3(0.09), belt);
+float tie = step(ax, 0.011) * step(0.6, y) * step(y, 0.81) * step(0.0, fz);
+col = mix(col, uTie, tie);
+float skin = max(smoothstep(0.826, 0.836, y), smoothstep(0.36, 0.37, ax) * step(0.62, y));
+col = mix(col, uSkin, skin);
+float hair = (1.0 - uBald) * smoothstep(0.94, 0.95, y) + (1.0 - uBald) * smoothstep(0.895, 0.905, y) * (1.0 - smoothstep(0.0, 0.02, fz + 0.01))
+           + uLongHair * smoothstep(0.80, 0.82, y) * step(ax, 0.06) * (1.0 - smoothstep(-0.01, 0.01, fz + 0.025));
+col = mix(col, uHair, clamp(hair, 0.0, 1.0) * step(0.8, y));
+vec4 diffuseColor = vec4( col, opacity );`);
+  };
+  mat.customProgramCacheKey = () => "outfit";
+  return mat;
+}
 const ROLE_SUIT = {trader: [0x2f4a6d, 0x3b5d86, 0x24364f], research: [0xf4f4f0], risk: [0x2b2f3a], scanner: [0x1f8a63], learn: [0x6a5fc4], ops: [0x3b3f47], ceo: [0x5a1f3a]};
 const _q1 = new THREE.Quaternion(), _q2 = new THREE.Quaternion(), _v1 = new THREE.Vector3(), _v2 = new THREE.Vector3();
 function rotWorld(bone, axis, angle) {
@@ -518,14 +554,16 @@ class Person {
   attachModel(role, opts) {
     this.root.remove(this.hips);
     const m = SkeletonUtils.clone(XBOT.scene);
-    const suit = new THREE.Color(pick(ROLE_SUIT[role] || [0x888888]));
+    const look = {skin: pick(SKIN), hair: pick(HAIR), shirt: pick(ROLE_SUIT[role] || [0x888888]), pants: pick(PANTS),
+      tie: role === "ceo" ? 0xd55181 : role === "risk" ? 0xeda100 : null, coat: role === "research",
+      longHair: (opts.hair ?? 0) % 4 === 3 || (opts.hair ?? 0) % 4 === 1, bald: (opts.hair ?? 0) === 0 && Math.random() < 0.25};
+    if (role === "research") look.shirt = 0xf6f6f2;
+    let bodyGeo = null;
+    m.traverse(o => { if (o.isMesh && !/joint/i.test(o.material?.name || o.name)) bodyGeo = o.geometry; });
     m.traverse(o => {
       if (o.isMesh) {
         o.castShadow = true; o.receiveShadow = true; o.frustumCulled = false;
-        const joints = /joint/i.test(o.material?.name || o.name);
-        o.material = new THREE.MeshPhysicalMaterial({
-          color: joints ? new THREE.Color(0x1d1f24) : suit, roughness: joints ? 0.35 : 0.55,
-          metalness: joints ? 0.6 : 0.05, clearcoat: joints ? 0.3 : 0.15, sheen: joints ? 0 : 0.6, sheenColor: new THREE.Color(0xffffff)});
+        o.material = outfitMaterial(bodyGeo || o.geometry, look);
       }
     });
     this.root.add(m); this.model = m;
