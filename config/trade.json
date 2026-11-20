@@ -28,7 +28,7 @@
     "demo_trading": true,
     "key": "",
     "secret": "",
-    "ccxt_config": {},
+    "ccxt_config": {"options": {"fetchMarkets": {"types": ["linear"]}}},
     "ccxt_async_config": {},
     "pair_whitelist": [],
     "pair_blacklist": ["USDC/.*", "USDE/.*", "FDUSD/.*", "DAI/.*", "TUSD/.*", ".*(BULL|BEAR|UP|DOWN)/.*"]

@@ -246,3 +246,10 @@ def test_trade_config_pairlist_url_is_absolute():
     path = url.split("file:///", 1)[1]
     assert path == Settings(data_dir=Path("/data")).pairlist_path.as_posix()
     assert cfg["exchange"]["demo_trading"] is True and cfg["dry_run"] is False
+
+
+def test_ccxt_loads_linear_markets_only():
+    from aitrader.research.ftrunner import research_config, scan_config
+    cfg = json.loads((Path(__file__).resolve().parents[1] / "config" / "trade.json").read_text())
+    for c in (cfg, research_config(Settings(), ["BTC/USDT:USDT"]), scan_config(Settings())):
+        assert c["exchange"]["ccxt_config"]["options"]["fetchMarkets"]["types"] == ["linear"]
