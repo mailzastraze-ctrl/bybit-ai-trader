@@ -155,3 +155,20 @@ def test_portfolio_limits_cap_same_side_and_open_risk(portfolio, monkeypatch):
     assert ok("long") is False
     portfolio.config["runmode"] = "backtest"
     assert ok("long") is True  # research backtests are single-sleeve: no account limits
+
+
+def test_maker_first_entry_then_cross(portfolio):
+    from datetime import datetime, timezone
+    portfolio.config["runmode"] = "live"
+    portfolio.dp = SimpleNamespace(orderbook=lambda pair, n: {"bids": [[99.9, 1]], "asks": [[100.1, 1]]})
+    t0 = datetime(2026, 1, 1, tzinfo=timezone.utc)
+    order = SimpleNamespace(order_date_utc=t0)
+    adj = lambda secs, prop, cur, side="long": portfolio.adjust_entry_price(  # noqa: E731
+        None, order, "BTC/USDT:USDT", t0 + timedelta(seconds=secs), prop, cur, "s1", side)
+    assert adj(30, 99.9, 99.9) == 99.9            # resting at the bid (maker)
+    assert adj(60, 99.95, 99.8) == 99.95          # follows the touch
+    assert adj(200, 99.9, 99.9) == pytest.approx(100.1 * 1.0005)   # crosses after 3 min
+    assert adj(200, 99.9, 100.1 * 1.0005) == pytest.approx(100.1 * 1.0005)  # already crossing: keep
+    assert adj(200, 100.1, 100.1, "short") == pytest.approx(99.9 * 0.9995)
+    portfolio.config["runmode"] = "backtest"
+    assert adj(200, 99.9, 99.0) == 99.0           # no repricing in backtests

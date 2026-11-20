@@ -199,6 +199,32 @@ class AIBase(IStrategy):
                 return False
         return True
 
+    # ------------------------------------------------------------------ execution
+    MAKER_WAIT_S = 180  # rest on our side of the book this long (maker fee), then cross
+
+    def adjust_entry_price(self, trade: Trade, order, pair: str, current_time: datetime,
+                           proposed_rate: float, current_order_rate: float, entry_tag: str | None,
+                           side: str, **kwargs) -> float | None:
+        """Maker-first entries: the limit order rests at the best bid (long) / ask (short)
+        and follows the touch; after MAKER_WAIT_S it crosses the spread so the signal is
+        never missed. Maker fee 0.02% vs taker 0.055% on Bybit perps."""
+        if (entry_tag or "").startswith(EXEC_TEST_TAG) or self.config.get("runmode") not in (RunMode.LIVE, RunMode.DRY_RUN):
+            return current_order_rate
+        placed = getattr(order, "order_date_utc", None) if order is not None else None
+        age = (current_time - placed).total_seconds() if placed else 0.0
+        long = side == "long"
+        if age < self.MAKER_WAIT_S:
+            if proposed_rate and current_order_rate and abs(proposed_rate / current_order_rate - 1) > 0.0005:
+                return proposed_rate  # follow the touch, stay passive
+            return current_order_rate
+        try:
+            ob = self.dp.orderbook(pair, 1)
+            px = float(ob["asks"][0][0]) * 1.0005 if long else float(ob["bids"][0][0]) * 0.9995
+        except Exception:  # noqa: BLE001
+            return current_order_rate
+        crossing = current_order_rate >= px / 1.0005 if long else current_order_rate <= px / 0.9995
+        return current_order_rate if crossing else px
+
     # ------------------------------------------------------------------ portfolio limits
     def confirm_trade_entry(self, pair: str, order_type: str, amount: float, rate: float,
                             time_in_force: str, current_time: datetime, entry_tag: str | None,
