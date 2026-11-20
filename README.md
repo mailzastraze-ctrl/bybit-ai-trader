@@ -35,6 +35,22 @@ supervisor ─┬─ freqtrade trade (AIPortfolio, Bybit demo, futures, isolated
 
 About 60 s after start, a self-test (`python -m aitrader.selftest`) checks the bot API, futures mode, an authenticated Demo balance, the whitelist, and the Freqtrade log line `Demo trading enabled`. The result appears on the **Health** tab.
 
+## Bulk research on GitHub Actions
+
+`Actions → bulk-research → Run workflow` (inputs: jobs, experiments per job, epochs, universe).
+One job scans the market and downloads history once. N parallel jobs then run the full walk-forward pipeline with the real Freqtrade image, and a merge job recomputes the **Deflated Sharpe across the whole batch** and writes `imports/<batch>.json` plus a markdown report (artifact `batch-report`).
+
+GitHub runners sit in the US, where the Bybit API is geo-blocked, so this research uses **OKX USDT perps** as a price proxy. Committing an import file into `research/imports/` makes the live system add those candidates as `validated`/`exploratory`. They still have to pass forward tests on Bybit Demo before they get production risk.
+
+## Memory management (small instances)
+
+* `memguard.wait_for_headroom`: before each heavy Freqtrade research command, waits until the container (cgroup) has `RESEARCH_MIN_HEADROOM_MB` free (default 300 MB).
+* OOM kill detected (rc -9): the research load level drops one step (pairs, epochs, hyperopt jobs). After 3 successful experiments it climbs back, never above the profile default. The current level is shown on the Research tab.
+* Research processes get `oom_score_adj=1000`, so the kernel kills them before the trading bot.
+* `gc` + `malloc_trim` after each experiment and each manager cycle; `MALLOC_ARENA_MAX=2`.
+* ccxt loads only Bybit linear markets, not spot, inverse or options.
+* Housekeeping: events older than 30 days are deleted, equity snapshots older than 1 year are deleted, the registry is VACUUMed weekly, and only the last 12 research job folders are kept.
+
 ## Local development
 
 ```
