@@ -321,9 +321,13 @@ def lab_backup(claims: dict = Depends(lab_auth)) -> Response:  # noqa: ARG001
 # ---------------------------------------------------------------------------- HQ helpers
 @app.get("/api/candles", dependencies=[Depends(auth)])
 def candles(pair: str, limit: int = 96) -> dict:
-    """Recent 1h candles for a pair the bot trades (for the HQ trader screens)."""
+    """Recent candles for a pair the bot trades (HQ trader screens): hourly where the bot
+    follows them (1h strategies), otherwise its own 15m candles."""
     c = ft()
-    data = _safe(lambda: c.pair_candles(pair, "1h", min(max(limit, 10), 200)), {}) or {}
+    n = min(max(limit, 10), 200)
+    data = _safe(lambda: c.pair_candles(pair, "1h", n), {}) or {}
+    if not data.get("data"):
+        data = _safe(lambda: c.pair_candles(pair, "15m", n), {}) or {}
     cols = data.get("columns") or []
     want = ["date", "open", "high", "low", "close", "volume"]
     idx = [cols.index(k) for k in want if k in cols]

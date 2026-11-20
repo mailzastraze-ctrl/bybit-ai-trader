@@ -208,3 +208,37 @@ def test_several_sleeves_share_a_pair(tmp_path):
     assert tags == {"a", "b"}  # both strategies trade the same pair
     assert {"xl:a", "xl:b", "cv:a", "cv:b"} <= set(df.columns)
     assert st.sleeve_by_tag(pair, "b").risk == 0.002  # sizing uses the entry's own sleeve
+
+
+def test_one_bot_two_timeframes_hourly_sleeve_on_15m_bot(tmp_path):
+    """A 1h strategy on the 15m bot fires exactly when a 1h bot would: once, on the first
+    15m candle after the hourly candle closed – and uses the hourly ATR for its stop."""
+    from AIPortfolio import AIPortfolio
+
+    from aitrader.families import get_family
+    pair = "BTC/USDT:USDT"
+    h1 = ohlcv(1500, seed=11, vol=0.012)  # hourly candles
+    rows = []
+    for _, r in h1.iterrows():  # 4 quarter-hours per hour, same OHLC path
+        for q in range(4):
+            rows.append({"date": r["date"] + pd.Timedelta(minutes=15 * q), "open": r["open"], "high": r["high"],
+                         "low": r["low"], "close": r["close"], "volume": r["volume"] / 4})
+    m15 = pd.DataFrame(rows)
+    m = Manifest(sleeves=[Sleeve(id="h", family="trend_ema", params={}, pairs=[pair], stage="exploration",
+                                 risk=0.001, timeframe="1h")])
+    path = tmp_path / "manifest.json"
+    m.save(path)
+    st = AIPortfolio({"aitrader": {"manifest_path": str(path)}, "runmode": "backtest", "exchange": {"demo_trading": True}})
+    st.timeframe = "15m"
+    st.bot_start()
+    st.dp = SimpleNamespace(get_pair_dataframe=lambda p, tf, **kw: h1 if tf == "1h" else m15,
+                            current_whitelist=lambda: [pair])
+    assert (pair, "1h") in st.informative_pairs()
+    df = _populate(st, m15, pair)
+    ref = get_family("trend_ema").populate(h1, {})
+    sig_hours = set(h1.loc[ref["long_sig"], "date"])
+    got = df.loc[df["enter_long"] == 1, "date"]
+    # the hourly candle starting at H closes at H+60m: the 15m candle H+45m (closing then) carries it
+    assert set(got - pd.Timedelta(minutes=45)) == sig_hours and len(got) == len(sig_hours)
+    i = df.index[df["date"] == h1["date"].iloc[1000] + pd.Timedelta(minutes=45)][0]
+    assert df.loc[i, "at:h"] == pytest.approx(ref["atr"].iloc[1000])  # hourly ATR drives the stop

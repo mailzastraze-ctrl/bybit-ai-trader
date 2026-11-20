@@ -9,7 +9,7 @@
   "stake_currency": "USDT",
   "stake_amount": "unlimited",
   "tradable_balance_ratio": 0.9,
-  "timeframe": "1h",
+  "timeframe": "15m",
   "dataformat_ohlcv": "feather",
   "cancel_open_orders_on_exit": false,
   "initial_state": "running",

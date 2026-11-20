@@ -17,7 +17,13 @@ from freqtrade.enums import RunMode
 from freqtrade.exceptions import OperationalException
 from freqtrade.exchange import timeframe_to_minutes
 from freqtrade.persistence import Trade
-from freqtrade.strategy import DecimalParameter, IntParameter, IStrategy, stoploss_from_absolute
+from freqtrade.strategy import (
+    DecimalParameter,
+    IntParameter,
+    IStrategy,
+    merge_informative_pair,
+    stoploss_from_absolute,
+)
 
 from aitrader import indicators as ta
 from aitrader.families import EXIT_PARAMS, NEEDS_FUNDING, get_family
@@ -91,11 +97,56 @@ class AIBase(IStrategy):
     def _needs_funding(self) -> bool:
         return self.config.get("trading_mode") == "futures" and bool(self.families_in_use() & NEEDS_FUNDING)
 
+    # ------------------------------------------------------------------ timeframes
+    def _tf(self, sleeve: Sleeve | None) -> str:
+        return (getattr(sleeve, "timeframe", "") or self.timeframe) if sleeve else self.timeframe
+
+    def all_sleeves(self) -> list[Sleeve]:
+        return []
+
     def informative_pairs(self):
-        if not self._needs_funding() or not self.dp:
+        if not self.dp:
             return []
-        tf = self._funding_tf()
-        return [(p, tf, "funding_rate") for p in self.dp.current_whitelist()]
+        out = []
+        wl = set(self.dp.current_whitelist())
+        for sl in self.all_sleeves():  # strategies researched on another (higher) timeframe
+            tf = self._tf(sl)
+            if tf != self.timeframe:
+                out += [(p, tf) for p in sl.pairs if p in wl]
+        if self._needs_funding():
+            ftf = self._funding_tf()
+            out += [(p, ftf, "funding_rate") for p in wl]
+        return list(dict.fromkeys(out))
+
+    def _sleeve_signals(self, dataframe: pd.DataFrame, pair: str, sleeve: Sleeve, cols: list[str]) -> pd.DataFrame | None:
+        """Signals of one sleeve aligned to the bot's candles. A sleeve researched on a higher
+        timeframe is computed on those candles and merged without look-ahead: the higher
+        candle becomes visible when it has closed, and its entry signal fires once (on the
+        first bot candle after that close) – exactly when a bot on that timeframe would act."""
+        fam = get_family(sleeve.family)
+        tf = self._tf(sleeve)
+        if tf == self.timeframe:
+            return fam.populate(dataframe[cols], sleeve.params)
+        if not self.dp:
+            return None
+        inf = self.dp.get_pair_dataframe(pair, tf)
+        if inf is None or inf.empty:
+            return None
+        inf = inf[["date", "open", "high", "low", "close", "volume"]].copy()
+        if "funding" in cols:
+            inf = self._merge_funding(inf, pair)
+        res = fam.populate(inf, sleeve.params)
+        keep = res[["date", "atr", "long_sig", "short_sig", "exit_long_sig", "exit_short_sig", "conviction"]].copy()
+        m = merge_informative_pair(dataframe[["date"]].copy(), keep, self.timeframe, tf, ffill=True)
+        fresh = (m[f"date_{tf}"] != m[f"date_{tf}"].shift(1)).to_numpy()
+        out = pd.DataFrame(index=dataframe.index)
+        for c in ("long_sig", "short_sig"):
+            out[c] = m[f"{c}_{tf}"].fillna(False).astype(bool).to_numpy() & fresh
+        for c in ("exit_long_sig", "exit_short_sig"):
+            out[c] = m[f"{c}_{tf}"].fillna(False).astype(bool).to_numpy()
+        out["conviction"] = m[f"conviction_{tf}"].fillna(1.0).to_numpy()
+        out["atr"] = m[f"atr_{tf}"].to_numpy()
+        return out
 
     def _merge_funding(self, dataframe: pd.DataFrame, pair: str) -> pd.DataFrame:
         """Last known funding rate at each candle (backward as-of join: no look-ahead)."""
@@ -139,13 +190,16 @@ class AIBase(IStrategy):
         paused = self.entries_paused()
         free = pd.Series(True, index=dataframe.index)  # rows not yet claimed by a higher-priority sleeve
         for i, sleeve in enumerate(sleeves):
-            res = fam_res = get_family(sleeve.family).populate(dataframe[cols], sleeve.params)  # noqa: F841
+            res = self._sleeve_signals(dataframe, metadata["pair"], sleeve, cols)
+            if res is None:
+                continue
             if i == 0:  # primary sleeve columns (single-sleeve research/backtests read these)
                 for col in ("long_sig", "short_sig", "exit_long_sig", "exit_short_sig", "conviction"):
                     dataframe[col] = res[col].values
-            dataframe[f"xl:{sleeve.id}"] = fam_res["exit_long_sig"].values
-            dataframe[f"xs:{sleeve.id}"] = fam_res["exit_short_sig"].values
-            dataframe[f"cv:{sleeve.id}"] = fam_res["conviction"].values
+            dataframe[f"xl:{sleeve.id}"] = res["exit_long_sig"].values
+            dataframe[f"xs:{sleeve.id}"] = res["exit_short_sig"].values
+            dataframe[f"cv:{sleeve.id}"] = res["conviction"].values
+            dataframe[f"at:{sleeve.id}"] = res["atr"].values  # ATR on the sleeve's own timeframe
             if paused:
                 continue
             ls = pd.Series(res["long_sig"].values, index=dataframe.index).fillna(False).astype(bool)
@@ -185,13 +239,15 @@ class AIBase(IStrategy):
         atr = self._entry_atr.get(key)
         if atr is None:
             df, _ = self.dp.get_analyzed_dataframe(pair, self.timeframe)
+            sl = None if (trade.enter_tag or "").startswith(EXEC_TEST_TAG) else self.sleeve_for_trade(trade)
+            col = f"at:{sl.id}" if sl is not None and df is not None and f"at:{sl.id}" in df else "atr"
             row = signal_row(df, trade.open_date_utc, self._tf_min)
-            if row is None or pd.isna(row.get("atr")) or row["atr"] <= 0:
-                if df is None or df.empty or pd.isna(df["atr"].iloc[-1]):
+            if row is None or pd.isna(row.get(col)) or row[col] <= 0:
+                if df is None or df.empty or pd.isna(df[col].iloc[-1]):
                     return None
-                atr = float(df["atr"].iloc[-1])
+                atr = float(df[col].iloc[-1])
             else:
-                atr = float(row["atr"])
+                atr = float(row[col])
                 self._entry_atr[key] = atr
         return EntryContext(entry=float(trade.open_rate), atr=atr, is_short=bool(trade.is_short))
 
@@ -220,7 +276,8 @@ class AIBase(IStrategy):
         stop = ctx.managed_stop(p, float(best or trade.open_rate))
         if (trade.is_short and current_rate >= stop) or (not trade.is_short and current_rate <= stop):
             return "managed_stop"
-        if bars_held(trade.open_date_utc, current_time, self._tf_min) >= int(p["max_hold"]):
+        sl = None if (trade.enter_tag or "").startswith(EXEC_TEST_TAG) else self.sleeve_for_trade(trade)
+        if bars_held(trade.open_date_utc, current_time, timeframe_to_minutes(self._tf(sl))) >= int(p["max_hold"]):
             return "time_exit"
         return None
 
@@ -345,7 +402,7 @@ class AIBase(IStrategy):
         if df is None or df.empty:
             return 0.0
         last = df.iloc[-1]
-        atr = float(last.get("atr", float("nan")))
+        atr = float(last.get(f"at:{sleeve.id}", last.get("atr", float("nan"))))
         if not atr or atr != atr or current_rate <= 0:
             return 0.0
         conviction = float(last.get(f"cv:{sleeve.id}", last.get("conviction", 1.0)) or 1.0)
@@ -462,6 +519,9 @@ class PortfolioBase(AIBase):
 
     def families_in_use(self) -> set[str]:
         return {s.family for s in self._watcher().manifest.sleeves}
+
+    def all_sleeves(self) -> list[Sleeve]:
+        return list(self._watcher().manifest.sleeves)
 
     def sleeve_for_pair(self, pair: str) -> Sleeve | None:
         return self._watcher().manifest.owner_of(pair)

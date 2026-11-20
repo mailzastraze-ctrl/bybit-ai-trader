@@ -15,6 +15,7 @@ from aitrader.settings import Settings
 from aitrader.util import iso, parse_dt, utcnow
 
 log = logging.getLogger(__name__)
+BOT_TIMEFRAMES = ("15m", "1h")  # bot candles = 15m (config/trade.json); 1h via informative
 
 BOOT_PAIRS = ["BTC/USDT:USDT", "ETH/USDT:USDT", "SOL/USDT:USDT", "XRP/USDT:USDT",
               "DOGE/USDT:USDT", "BNB/USDT:USDT", "ADA/USDT:USDT", "LINK/USDT:USDT"]
@@ -255,10 +256,14 @@ class Lifecycle:
         self.ensure_activity()
 
     @staticmethod
+    def strategy_tf(st: dict) -> str:
+        return (st.get("oos") or {}).get("timeframe") or "1h"
+
+    @staticmethod
     def tradable_tf(st: dict) -> bool:
-        """The demo bot trades 1h candles; strategies researched on another timeframe stay in
-        research + forward test until a bot for that timeframe runs (needs more memory)."""
-        return ((st.get("oos") or {}).get("timeframe") or "1h") == "1h"
+        """One demo bot runs on 15m candles and also hosts 1h strategies (computed on hourly
+        candles, merged without look-ahead), so both research timeframes can trade."""
+        return Lifecycle.strategy_tf(st) in BOT_TIMEFRAMES
 
     def _family_full(self, family: str, cap: int | None = None) -> bool:
         """Diversification: at most `max_family_sleeves` deployed sleeves per strategy family."""
@@ -394,7 +399,7 @@ class Lifecycle:
                                              * (self.risk_multiplier(r)
                                                 if r["stage"] in ("production", "incubation", "eligible") else 1.0), 6),
                                   leverage=self.lc.leverage, sides=r.get("sides") or ["long", "short"],
-                                  score=float(r.get("score") or 0.0)))
+                                  score=float(r.get("score") or 0.0), timeframe=self.strategy_tf(r)))
         # retired sleeves that still hold positions keep managing them (no new entries)
         live_ids = {s.id for s in sleeves}
         for t in open_trades:
@@ -404,7 +409,7 @@ class Lifecycle:
                 if r:
                     sleeves.append(Sleeve(id=r["id"], family=r["family"], params=r["params"],
                                           pairs=[], stage="closing", risk=0.0, leverage=self.lc.leverage,
-                                          sides=r.get("sides") or ["long", "short"]))
+                                          sides=r.get("sides") or ["long", "short"], timeframe=self.strategy_tf(r)))
                     live_ids.add(tag)
         return Manifest(sleeves=sleeves, entries_paused=paused)
 

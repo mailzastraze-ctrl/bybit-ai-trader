@@ -29,6 +29,7 @@ class Sleeve:
     sides: list[str] = field(default_factory=lambda: ["long", "short"])
     score: float = 0.0
     note: str = ""
+    timeframe: str = ""  # candles the strategy was researched on; "" = the bot's own timeframe
 
     @property
     def accept_entries(self) -> bool:

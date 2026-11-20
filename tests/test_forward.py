@@ -145,7 +145,8 @@ def test_external_strategy_imported_frozen_and_tested_with_fixed_config(env, tmp
     assert life.import_external(Path(__file__).resolve().parents[1] / "research" / "external") >= 1
     st = reg.one("SELECT * FROM strategies WHERE id='owner-sol15m-zscore'")
     assert st["stage"] == "exploratory" and st["oos"]["timeframe"] == "15m" and st["params"]["window"] == 200
-    assert not Lifecycle.tradable_tf(st)  # the 1h demo bot must not trade a 15m strategy
+    assert Lifecycle.tradable_tf(st)  # the 15m demo bot hosts 15m and 1h strategies
+    assert not Lifecycle.tradable_tf({"oos": {"timeframe": "5m"}})
     assert any(e["id"] == "owner-sol15m-zscore" and e["timeframe"] == "15m" for e in forward.book(reg))
     state = labmod.build_state(s, reg)
     ext = [e for e in state["external_tests"] if e["id"] == "owner-sol15m-zscore"]
