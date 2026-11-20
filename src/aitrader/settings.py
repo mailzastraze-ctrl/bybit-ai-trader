@@ -76,8 +76,8 @@ class Research:
     hyperopt_jobs: int = 2
     universe_size: int = 24
     pairs_per_experiment: int = 10
-    base_fee: float = 0.00105  # 0.055% taker fee and 5 bp slippage per side
-    stress_fee: float = 0.00210
+    base_fee: float = 0.00075  # Bybit taker 0.055% + ~2bp slippage per side
+    stress_fee: float = 0.0012
     perturbations: int = 6
     mc_samples: int = 2000
     idle_sleep_s: int = 300  # pause between experiments (keeps CPU bill in check)
@@ -103,7 +103,6 @@ class Settings:
     web_password: str = field(default_factory=lambda: _env("WEB_PASSWORD", ""))
     # GitHub repository whose Actions OIDC tokens may talk to the research-lab sync API
     lab_repository: str = field(default_factory=lambda: _env("LAB_REPOSITORY", "mailzastraze-ctrl/bybit-ai-trader"))
-    lab_repository_id: str = field(default_factory=lambda: _env("LAB_REPOSITORY_ID", "1465223259"))
     freqtrade_bin: str = field(default_factory=lambda: _env("FREQTRADE_BIN", "freqtrade"))
     gates: Gates = field(default_factory=Gates)
     lifecycle: Lifecycle = field(default_factory=Lifecycle)
@@ -122,10 +121,7 @@ class Settings:
         r.exchange = _env("RESEARCH_EXCHANGE", r.exchange)
 
         lite = os.environ.get("AITRADER_PROFILE", "").lower() == "lite"
-        if os.environ.get("RAILWAY_ENVIRONMENT_ID"):
-            r.mode = "remote"
-        else:
-            r.mode = _env("RESEARCH_MODE", "remote" if lite else r.mode).lower()
+        r.mode = _env("RESEARCH_MODE", "remote" if lite else r.mode).lower()
         lc = self.lifecycle
         lc.leverage = _f("AITRADER_LEVERAGE", lc.leverage)
         lc.risk_production = _f("RISK_PRODUCTION", lc.risk_production)

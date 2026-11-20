@@ -30,20 +30,21 @@ def ucb_pick(stats: dict[str, tuple[int, float]], c: float = 0.6, rng: random.Ra
 
 class Generator:
     def __init__(self, settings: Settings, registry: Registry, seed: int | None = None,
-                 stats_override: dict | None = None, training_market: dict | None = None):
+                 stats_override: dict | None = None):
         self.s = settings
         self.reg = registry
         self.rng = random.Random(seed)
         # research lab: the bandit uses the live server's full experiment history
         self.stats_override = stats_override
-        self.training_market = training_market
 
     def family_stats(self) -> dict[str, tuple[int, float]]:
-        stats = {f: (0, 0.0) for f in FAMILIES}
         if self.stats_override:
+            stats = {f: (0, 0.0) for f in FAMILIES}
             for f, v in self.stats_override.items():
                 if f in stats and isinstance(v, (list, tuple)) and len(v) == 2:
                     stats[f] = (int(v[0]), float(v[1]))
+            return stats
+        stats = {f: (0, 0.0) for f in FAMILIES}
         rows = self.reg.q("SELECT family, result, status FROM experiments WHERE status IN ('done','failed')")
         acc: dict[str, list[float]] = {f: [] for f in FAMILIES}
         for r in rows:
@@ -54,8 +55,7 @@ class Generator:
             acc[r["family"]].append(float(reward))
         for f, xs in acc.items():
             if xs:
-                n, avg = stats[f]
-                stats[f] = (n + len(xs), (n * avg + sum(xs)) / (n + len(xs)))
+                stats[f] = (len(xs), sum(xs) / len(xs))
         return stats
 
     def active_learnings(self, family: str) -> list[dict]:
@@ -69,23 +69,22 @@ class Generator:
         production/incubation strategy on its pairs with fresh data."""
         from aitrader.util import parse_dt, utcnow
         now = utcnow()
-        for st in self.reg.q("SELECT id, family, params, pairs, sides, stage_since FROM strategies "
+        for st in self.reg.q("SELECT id, family, pairs, stage_since FROM strategies "
                              "WHERE stage IN ('production','incubation','eligible') ORDER BY score DESC"):
             since = parse_dt(st.get("stage_since"))
             last = parse_dt((self.reg.kv_get("revalidated") or {}).get(st["id"]))
             ref = last or since
-            if ref is None or (now - ref).days < every_days or not st.get("pairs"):
+            if ref is None or (now - ref).days < every_days:
                 continue
+            spec = self.next_spec(universe, family=st["family"])
+            own = [p for p in (st.get("pairs") or []) if p in universe]
+            spec["pairs"] = (own + [p for p in spec["pairs"] if p not in own])[: max(len(own), self.s.research.pairs_per_experiment)]
+            spec["revalidates"] = st["id"]
             marks = self.reg.kv_get("revalidated") or {}
             marks[st["id"]] = iso()
             self.reg.kv_set("revalidated", marks)
-            return self.fixed_spec(st)
+            return spec
         return None
-
-    def fixed_spec(self, st: dict) -> dict:
-        return {"family": st["family"], "pairs": list(st["pairs"]), "sides": list(st["sides"]),
-                "fixed_params": FAMILIES[st["family"]].normalize(st.get("params")),
-                "revalidates": st["id"], "seed": self.rng.randint(1, 10_000), "timeframe": self.s.research.timeframe}
 
     def refine_spec(self, universe: list[str], cand: dict, width: float = 0.2) -> dict:
         """Exploit: re-search a narrowed space (±width of each range) around a promising
@@ -109,12 +108,10 @@ class Generator:
         spec["refines"] = cand["id"]
         return spec
 
-    def next_spec(self, universe: list[str], family: str | None = None, apply_learnings: bool = True) -> dict:
+    def next_spec(self, universe: list[str], family: str | None = None) -> dict:
         family = family or ucb_pick(self.family_stats(), rng=self.rng)
         fam = FAMILIES[family]
-        market = self.training_market
-        if market is None:
-            market = {r["pair"]: r["data"] for r in self.reg.q("SELECT pair, data FROM market")}
+        market = {r["pair"]: r["data"] for r in self.reg.q("SELECT pair, data FROM market")}
         key = "trend_score" if fam.affinity == "trend" else "revert_score"
         ranked = sorted(universe, key=lambda p: -(market.get(p, {}) or {}).get(key, 0.0))
 
@@ -123,7 +120,7 @@ class Generator:
         used: list[str] = []
         n_pairs = self.s.research.pairs_per_experiment
         sides = ["long", "short"]
-        apply = apply_learnings and bool(learnings) and self.rng.random() < 0.5
+        apply = bool(learnings) and self.rng.random() < 0.5
         if apply:
             for lr in learnings:
                 adj = lr.get("adjustment") or {}

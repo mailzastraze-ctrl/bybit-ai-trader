@@ -57,14 +57,14 @@ def load_hyperopt_epochs(results_dir: Path) -> list[dict]:
                 ep = json.loads(line.replace("NaN", "null").replace("Infinity", "1e308"))
             except json.JSONDecodeError:
                 continue
-            if isinstance(ep, dict):
+            if _finite(ep.get("loss")):
                 epochs.append(ep)
     return epochs
 
 
 def best_epochs(epochs: list[dict], min_trades: int, top: int = 5) -> list[dict]:
-    ok = [e for e in epochs if _finite(e.get("loss"))
-          and (e.get("results_metrics") or {}).get("total_trades", 0) >= min_trades]
+    ok = [e for e in epochs
+          if (e.get("results_metrics") or {}).get("total_trades", 0) >= min_trades]
     ok.sort(key=lambda e: e["loss"])
     return ok[:top]
 

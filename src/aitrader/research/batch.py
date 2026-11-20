@@ -23,7 +23,6 @@ from aitrader.registry import Registry
 from aitrader.research import metrics as M
 from aitrader.research.generator import Generator
 from aitrader.research.pipeline import Pipeline
-from aitrader.research.results import load_hyperopt_epochs
 from aitrader.research.validation import evaluate_gates, score
 from aitrader.settings import get_settings
 from aitrader.util import iso, setup_logging, write_json_atomic
@@ -64,8 +63,7 @@ def cmd_run(out: Path, job: int, n: int, universe_file: Path) -> None:
             results.append({"id": eid, "spec": spec, "result": res, "started": started, "finished": iso()})
         except Exception as e:  # noqa: BLE001
             log.error("experiment %s failed: %s", eid, e)
-            results.append({"id": eid, "spec": spec, "trial_count": failed_trials(s, eid),
-                            "error": f"{e}\n{traceback.format_exc()[-800:]}",
+            results.append({"id": eid, "spec": spec, "error": f"{e}\n{traceback.format_exc()[-800:]}",
                             "started": started, "finished": iso()})
         write_json_atomic(out / f"results-{job}.json", {"job": job, "exchange": uni.get("exchange", s.research.exchange),
                                                         "experiments": results})
@@ -73,32 +71,21 @@ def cmd_run(out: Path, job: int, n: int, universe_file: Path) -> None:
 
 LEDGER_WINDOW_DAYS = 90
 RESULT_KEYS = ("oos", "stress", "mc", "wfe", "robust_frac", "fold_pos", "perturb_pf_median", "params", "pairs",
-               "variant", "pair_stats", "exit_reasons", "protocol", "trial_count")
-
-
-def failed_trials(s, eid: str) -> int:
-    try:
-        return 1 + len(load_hyperopt_epochs(s.jobs_dir / eid / "ud" / "hyperopt_results"))
-    except (OSError, ValueError):
-        return 1
-
-
-def ledger_recent(ledger: dict | None, now=None) -> list[dict]:
-    from datetime import timedelta
-
-    from aitrader.util import parse_dt, utcnow
-    now = now or utcnow()
-    cutoff = now - timedelta(days=LEDGER_WINDOW_DAYS)
-    out = []
-    for t in (ledger or {}).get("trials", []):
-        ts = parse_dt(t.get("ts"))
-        if ts is not None and cutoff <= ts <= now:
-            out.append(t)
-    return out
+               "variant", "pair_stats", "exit_reasons", "epoch_sharpe_std")
 
 
 def ledger_trials(ledger: dict | None, now=None) -> list[float]:
-    return [float(t["sr"]) for t in ledger_recent(ledger, now) if t.get("sr") is not None]
+    """Daily Sharpe ratios of every research trial in the last 90 days (all batches)."""
+    from datetime import timedelta
+
+    from aitrader.util import parse_dt, utcnow
+    cutoff = (now or utcnow()) - timedelta(days=LEDGER_WINDOW_DAYS)
+    out = []
+    for t in (ledger or {}).get("trials", []):
+        ts = parse_dt(t.get("ts"))
+        if ts is not None and ts >= cutoff and t.get("sr") is not None:
+            out.append(float(t["sr"]))
+    return out
 
 
 def update_ledger(ledger: dict | None, m: dict) -> dict:
@@ -106,18 +93,14 @@ def update_ledger(ledger: dict | None, m: dict) -> dict:
 
     from aitrader.util import parse_dt, utcnow
     keep_after = utcnow() - timedelta(days=365)
-    trials = {t.get("id") or f"legacy-{i}": t for i, t in enumerate((ledger or {}).get("trials", []))
-              if (parse_dt(t.get("ts")) or keep_after) >= keep_after}
+    trials = [t for t in (ledger or {}).get("trials", []) if (parse_dt(t.get("ts")) or keep_after) >= keep_after]
     for e in m["experiments_full"]:
-        r = e.get("result") or {}
-        trials[e["id"]] = {"id": e["id"], "ts": e.get("finished") or m["created"], "batch": m["batch_id"],
-                           "family": e["spec"].get("family"),
-                           "trials": r.get("trial_count") or e.get("trial_count") or 1,
-                           "sr": (r.get("oos") or {}).get("daily_sharpe"),
-                           "status": "completed" if r else "failed"}
-    return {"note": "The 90-day DSR count includes completed and failed attempts, observed hyperopt epochs "
-                    "and scored perturbations. Legacy counts are lower bounds when epoch data is unavailable.",
-            "trials": list(trials.values())}
+        if e.get("result") and isinstance(e["result"].get("oos"), dict):
+            trials.append({"id": e["id"], "ts": e.get("finished") or m["created"], "batch": m["batch_id"],
+                           "family": e["spec"].get("family"), "sr": e["result"]["oos"].get("daily_sharpe", 0.0)})
+    return {"note": "Every research trial (all batches). Deflated Sharpe counts trials of the last "
+                    f"{LEDGER_WINDOW_DAYS} days, so repeated searching cannot inflate significance.",
+            "trials": trials}
 
 
 def merge(dirs: list[Path], batch_id: str, ledger: dict | None = None) -> dict:
@@ -129,13 +112,8 @@ def merge(dirs: list[Path], batch_id: str, ledger: dict | None = None) -> dict:
             exchange = data.get("exchange", exchange)
             exps += data["experiments"]
     done = [e for e in exps if "result" in e]
-    ids = {e["id"] for e in exps}
-    previous = [t for t in ledger_recent(ledger) if t.get("id") not in ids]
-    srs = [float(t["sr"]) for t in previous if t.get("sr") is not None]
-    srs += [e["result"]["oos"].get("daily_sharpe", 0.0) for e in done]
-    n_trials = sum(max(1, int(t.get("trials", 1))) for t in previous)
-    n_trials += sum(max(1, (e.get("result") or {}).get("trial_count") or e.get("trial_count") or 1) for e in exps)
-    n_trials = max(n_trials, 1)
+    srs = ledger_trials(ledger) + [e["result"]["oos"].get("daily_sharpe", 0.0) for e in done]
+    n_trials = max(len(srs), 1)
     var = statistics.pvariance(srs) if len(srs) >= 5 else 1.0 / 365.0
     candidates = []
     for idx, e in enumerate(done):
@@ -147,14 +125,13 @@ def merge(dirs: list[Path], batch_id: str, ledger: dict | None = None) -> dict:
                                                   "robust_frac": r["robust_frac"], "mc": r["mc"], "dsr": dsr,
                                                   "fold_pos": r.get("fold_pos")})
         e["batch_verdict"], e["batch_dsr"], e["batch_gates"] = verdict, round(dsr, 4), gates
-        if verdict != "rejected" and r.get("pairs") and not e["spec"].get("revalidates"):
+        if verdict != "rejected" and r.get("pairs"):
             candidates.append({
                 "id": f"{batch_id}-{e['spec']['family'][:5]}-{idx:02d}",
                 "family": e["spec"]["family"], "params": r["params"], "pairs": r["pairs"],
                 "sides": e["spec"].get("sides", ["long", "short"]), "stage": verdict,
                 "score": score(oos, dsr), "variant": r.get("variant", e["spec"]["family"]),
                 "oos": {**oos, "mc": r["mc"], "dsr": round(dsr, 4), "wfe": r["wfe"],
-                        "protocol": r.get("protocol"),
                         "variant": r.get("variant", e["spec"]["family"])},
                 "gates": gates, "experiment": e["id"],
             })
@@ -171,7 +148,6 @@ def merge(dirs: list[Path], batch_id: str, ledger: dict | None = None) -> dict:
                           for f in r.get("folds", [])]}
         else:
             row["error"] = str(e.get("error", ""))[:1500]
-            row["trial_count"] = e.get("trial_count") or 1
         full.append(row)
     return {"batch_id": batch_id, "created": iso(), "exchange": exchange, "n_experiments": len(exps),
             "n_completed": len(done), "n_trials_for_dsr": n_trials, "candidates": candidates,
@@ -186,7 +162,7 @@ def report_md(m: dict) -> str:
     lines = [f"# Research batch {m['batch_id']}", "",
              f"- Created: {m['created']} · data: **{m['exchange']}** USDT perps (1h) · "
              f"experiments: {m['n_completed']}/{m['n_experiments']} completed",
-             f"- Deflated Sharpe uses N = {m['n_trials_for_dsr']} recorded trials (rolling 90 days plus this batch).",
+             f"- Deflated Sharpe uses N = {m['n_trials_for_dsr']} trials (whole batch).",
              f"- Candidates passing gates: **{len(m['candidates'])}** "
              f"({sum(c['stage'] == 'validated' for c in m['candidates'])} validated, "
              f"{sum(c['stage'] == 'exploratory' for c in m['candidates'])} exploratory)", "",
@@ -290,35 +266,18 @@ def plan(gen: Generator, state: dict, pairs: list[str], rng):
     """Endless spec stream: revalidations first, then ~25% refinements of promising
     strategies and ~75% new searches chosen by the UCB bandit (+ A/B'd learnings)."""
     for st in state.get("revalidate", []):
-        if st.get("family") in FAMILIES and st.get("pairs"):
-            yield gen.fixed_spec(st)
+        if st.get("family") in FAMILIES:
+            spec = gen.next_spec(pairs, family=st["family"])
+            own = [p for p in (st.get("pairs") or []) if p in pairs]
+            spec["pairs"] = (own + [p for p in spec["pairs"] if p not in own])[:max(len(own), len(spec["pairs"]))]
+            spec["revalidates"] = st["id"]
+            yield spec
     pool = [c for c in state.get("refine", []) if c.get("family") in FAMILIES]
     while True:
         if pool and rng.random() < 0.25:
             yield gen.refine_spec(pairs, rng.choice(pool))
-            continue
-        base = gen.next_spec(pairs, apply_learnings=False)
-        learnings = gen.active_learnings(base["family"])
-        if not learnings or rng.random() >= 0.5:
-            yield base
-            continue
-        learning = rng.choice(learnings)
-        adj = learning.get("adjustment") or {}
-        n = gen.s.lifecycle.max_pairs_per_sleeve
-        extra = max(0, int(adj.get("extra_pairs", 0)))
-        selected = base["pairs"][:max(1, n - extra)]
-        reserved = [p for p in pairs if p not in selected][:extra]
-        trial = f"{rng.getrandbits(64):016x}"
-        control = {**base, "pairs": selected, "ab_trial": trial, "ab_arm": "control"}
-        treatment = {**control, "pairs": selected + reserved, "sides": adj.get("sides", base["sides"]),
-                     "space_overrides": adj.get("space", {}), "used_learnings": [learning["id"]],
-                     "ab_arm": "treatment"}
-        if rng.random() < 0.5:
-            yield control
-            yield treatment
         else:
-            yield treatment
-            yield control
+            yield gen.next_spec(pairs)
 
 
 def cmd_cycle(out: Path, budget_min: float, run_id: str, server: str | None, max_exp: int,
@@ -379,11 +338,8 @@ def cmd_cycle(out: Path, budget_min: float, run_id: str, server: str | None, max
         reg.upsert("market", {"pair": p, "ts": uni["ts"], "data": d}, key="pair")
     pairs = uni["pairs"]
 
-    # Current market scores feed the radar. Rank research inputs using the training cutoff.
-    from aitrader.scanner import training_scores
     seed = int("".join(ch for ch in run_id if ch.isdigit())[-6:] or 0)
-    gen = Generator(s, reg, seed=seed, stats_override=state.get("family_stats"),
-                    training_market=training_scores(s, pairs))
+    gen = Generator(s, reg, seed=seed, stats_override=state.get("family_stats"))
     watcher = EpochWatcher(s, lab).start()
 
     def on_progress(eid, stage, extra):
@@ -399,7 +355,6 @@ def cmd_cycle(out: Path, budget_min: float, run_id: str, server: str | None, max
     for f in jdir.glob("results-*.json"):
         f.unlink()
     t0, durations, results = time.time(), [], []
-    as_of = iso()
     while len(results) < max_exp:
         elapsed = (time.time() - t0) / 60
         est = statistics.median(durations) if durations else 18.0
@@ -407,7 +362,7 @@ def cmd_cycle(out: Path, budget_min: float, run_id: str, server: str | None, max
             log.info("budget: %.0f of %.0f min used, next experiment needs ~%.0f – stopping", elapsed,
                      budget_min, est)
             break
-        spec = {**next(specs), "as_of": as_of}
+        spec = next(specs)
         eid = reg.new_experiment(spec["family"], spec)
         watcher.cur.update(eid=eid, stage="download", epochs=spec.get("epochs"))
         lab.progress(eid, "download", spec=spec)
@@ -419,8 +374,7 @@ def cmd_cycle(out: Path, budget_min: float, run_id: str, server: str | None, max
             lab.progress(eid, "evaluated", verdict=res["verdict"])
         except Exception as e:  # noqa: BLE001
             log.error("experiment %s failed: %s", eid, e)
-            results.append({"id": eid, "spec": spec, "trial_count": failed_trials(s, eid),
-                            "error": f"{e}\n{traceback.format_exc()[-800:]}",
+            results.append({"id": eid, "spec": spec, "error": f"{e}\n{traceback.format_exc()[-800:]}",
                             "started": started, "finished": iso()})
             lab.progress(eid, "failed", error=str(e)[:500])
         durations.append((time.time() - t1) / 60)

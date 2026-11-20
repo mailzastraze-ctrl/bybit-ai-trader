@@ -74,7 +74,7 @@ def test_walk_forward_folds_tile_holdout():
 def _m(trades=40, pf=1.4, sharpe=1.2, dd=0.1, wfe=0.6, spf=1.2, rob=0.8, mc=0.9, dsr=0.9, ret=0.1):
     oos = {"trades": trades, "profit_factor": pf, "sharpe": sharpe, "max_drawdown": dd,
            "total_return": ret}
-    return {"oos": oos, "stress": {"profit_factor": spf}, "wfe": wfe, "robust_frac": rob, "fold_pos": 0.75,
+    return {"oos": oos, "stress": {"profit_factor": spf}, "wfe": wfe, "robust_frac": rob,
             "mc": {"prob_profit": mc}, "dsr": dsr}
 
 

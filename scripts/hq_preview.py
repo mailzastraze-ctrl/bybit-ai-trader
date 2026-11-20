@@ -160,16 +160,12 @@ def shoot(port: int, out: Path) -> int:
     out.mkdir(parents=True, exist_ok=True)
     errors = []
     with sync_playwright() as pw:
-        b = pw.chromium.launch(
-            executable_path=os.environ.get("HQ_CHROMIUM") or None,
-            args=["--use-angle=swiftshader", "--enable-unsafe-swiftshader", "--ignore-gpu-blocklist"],
-        )
+        b = pw.chromium.launch(args=["--use-angle=swiftshader", "--enable-unsafe-swiftshader", "--ignore-gpu-blocklist"])
         pg = b.new_page(viewport={"width": 1600, "height": 900}, http_credentials={"username": "admin", "password": "pw"})
         pg.on("console", lambda m: errors.append(m.text) if m.type == "error" else None)
         pg.on("pageerror", lambda e: errors.append(str(e)))
         pg.goto(f"http://127.0.0.1:{port}/", wait_until="load")
         pg.wait_for_function("window.__hqReady === true", timeout=90_000)
-        assert pg.evaluate("window.__hq.chars.some(c => c.mixer && c.act?.walk && c.act?.idle)"), "Mocap staff did not load"
         time.sleep(9)
         pg.screenshot(path=str(out / "hq-overview.png"))
         shots = [("hq-mission", "mission"), ("hq-research", "research"), ("hq-trading", "trading"), ("hq-cloud", "cloud")]

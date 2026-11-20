@@ -21,8 +21,8 @@ import time
 
 ALLOWED_HOSTS = {"api.bybit.com", "api.bytick.com"}
 ALLOWED_PATH = re.compile(r"^/v5/market/[a-z0-9\-/]+$")
-TOKEN_TTL_S = 15 * 60
-TARGET = re.compile(r"https:/+([^/]+)(/[^?]*)")
+TOKEN_TTL_S = 8 * 3600
+TARGET = re.compile(r"^https?:/+([^/]+)(/[^?]*)")
 
 
 def _secret() -> bytes:
@@ -33,8 +33,7 @@ def _secret() -> bytes:
 
 
 def issue_token(ttl_s: int = TOKEN_TTL_S, now: float | None = None) -> str:
-    current = time.time() if now is None else now
-    exp = int(current + min(ttl_s, TOKEN_TTL_S))
+    exp = int((now or time.time()) + ttl_s)
     sig = hmac.new(_secret(), f"relay|{exp}".encode(), hashlib.sha256).hexdigest()[:40]
     return f"{exp}.{sig}"
 
@@ -45,23 +44,18 @@ def verify_token(token: str | None, now: float | None = None) -> bool:
         exp = int(exp_s)
     except ValueError:
         return False
-    current = time.time() if now is None else now
-    # A signed token issued by the previous release can finish its active lab run.
-    if exp <= current:
+    if exp < (now or time.time()):
         return False
-    try:
-        good = hmac.new(_secret(), f"relay|{exp}".encode(), hashlib.sha256).hexdigest()[:40]
-    except RuntimeError:
-        return False
+    good = hmac.new(_secret(), f"relay|{exp}".encode(), hashlib.sha256).hexdigest()[:40]
     return hmac.compare_digest(sig, good)
 
 
 def target_url(rest: str, query: str) -> str | None:
     """'https:/api.bybit.com/v5/market/kline' + query → validated upstream URL or None."""
-    m = TARGET.fullmatch(rest)
+    m = TARGET.match(rest)
     if not m:
         return None
     host, path = m.group(1).lower(), m.group(2)
-    if host not in ALLOWED_HOSTS or not ALLOWED_PATH.fullmatch(path) or "//" in path or len(query) > 2048:
+    if host not in ALLOWED_HOSTS or not ALLOWED_PATH.match(path):
         return None
     return f"https://{host}{path}" + (f"?{query}" if query else "")

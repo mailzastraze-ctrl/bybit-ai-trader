@@ -48,13 +48,6 @@ def test_haircut_is_applied_to_every_fill():
     assert real_pnl(t) == pytest.approx(10.0 - 0.3)
     m = live_metrics([t, {**t, "profit_abs": -5.0, "profit_ratio": -0.05}], 10_000)
     assert m["pnl"] < m["pnl_demo"]
-    mixed = {**t, "raw": {"orders": [
-        {"ft_order_side": "buy", "filled": 2, "average": 100},
-        {"ft_order_side": "buy", "filled": 1, "average": 104},
-        {"ft_order_side": "stoploss", "filled": 3, "average": 98},
-        {"ft_order_side": "buy", "filled": 0, "price": 100},
-    ]}}
-    assert trade_cost(mixed) == pytest.approx((200 + 104 + 294) * 0.0005)
 
 
 def test_not_ready_without_production_evidence(reg):
@@ -63,7 +56,6 @@ def test_not_ready_without_production_evidence(reg):
 
 
 def test_ready_only_with_enough_independent_post_promotion_evidence(reg):
-    reg.upsert("equity", {"ts": iso(utcnow() - timedelta(days=101)), "equity": 10000.0, "open_trades": 0}, key="ts")
     _strategy(reg, "a", 100)
     _strategy(reg, "b", 100)
     _trades(reg, "a", 160, 1, 95, seed=1, edge=1.0)

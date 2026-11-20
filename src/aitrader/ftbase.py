@@ -8,7 +8,6 @@ from __future__ import annotations
 
 import json
 import logging
-import math
 import os
 from datetime import datetime
 from pathlib import Path
@@ -23,14 +22,7 @@ from freqtrade.strategy import DecimalParameter, IntParameter, IStrategy, stoplo
 from aitrader import indicators as ta
 from aitrader.families import EXIT_PARAMS, NEEDS_FUNDING, get_family
 from aitrader.manifest import ManifestWatcher, Sleeve
-from aitrader.riskcore import (
-    ROUND_TRIP_COST,
-    EntryContext,
-    bars_held,
-    signal_row,
-    size_multiplier,
-    stake_for_risk,
-)
+from aitrader.riskcore import EntryContext, bars_held, signal_row, size_multiplier, stake_for_risk
 
 logger = logging.getLogger(__name__)
 
@@ -154,8 +146,7 @@ class AIBase(IStrategy):
         if not hasattr(self, "_entry_atr"):
             self.bot_start()
         key = (trade.id, pair, str(trade.open_date_utc))
-        read_saved = getattr(trade, "get_custom_data", None) if self.config.get("runmode") == RunMode.LIVE else None
-        atr = self._entry_atr.get(key) or (read_saved("entry_atr") if read_saved else None)
+        atr = self._entry_atr.get(key)
         if atr is None:
             df, _ = self.dp.get_analyzed_dataframe(pair, self.timeframe)
             row = signal_row(df, trade.open_date_utc, self._tf_min)
@@ -166,8 +157,6 @@ class AIBase(IStrategy):
             else:
                 atr = float(row["atr"])
                 self._entry_atr[key] = atr
-                if read_saved:
-                    trade.set_custom_data("entry_atr", atr)
         return EntryContext(entry=float(trade.open_rate), atr=atr, is_short=bool(trade.is_short))
 
     # ------------------------------------------------------------------ exits
@@ -180,9 +169,6 @@ class AIBase(IStrategy):
         p = self._params(trade)
         best = trade.min_rate if trade.is_short else trade.max_rate
         stop = ctx.managed_stop(p, float(best or trade.open_rate))
-        current_stop = getattr(trade, "stop_loss", None)
-        if self.config.get("runmode") == RunMode.LIVE and current_stop:
-            stop = min(stop, current_stop) if trade.is_short else max(stop, current_stop)
         return stoploss_from_absolute(stop, current_rate, is_short=trade.is_short,
                                       leverage=trade.leverage or 1.0)
 
@@ -213,29 +199,33 @@ class AIBase(IStrategy):
                 return False
         return True
 
-    # ------------------------------------------------------------------ portfolio limits
-    def _open_risk(self, trade: Trade) -> float:
-        entry = float(trade.open_rate or 0)
-        if not entry:
-            return math.inf
-        stops = [o.safe_placement_price for o in getattr(trade, "open_sl_orders", [])]
-        stop = (max(stops) if trade.is_short else min(stops)) if stops else (
-            getattr(trade, "initial_stop_loss", None) or trade.stop_loss
-        )
-        if not stop:
-            return math.inf
-        direction = -1 if trade.is_short else 1
-        loss = max(direction * (entry - stop) / entry, 0.0)
-        filled = getattr(trade, "amount", None)
-        notional = filled * entry if filled is not None else float(trade.stake_amount or 0) * float(trade.leverage or 1)
-        risk = notional * (loss + ROUND_TRIP_COST)
-        for order in getattr(trade, "open_orders", []):
-            if order.ft_order_side == trade.entry_side:
-                ctx = self._ctx(trade.pair, trade)
-                pct = ctx.sl_distance(self._params(trade)) / entry if ctx else abs(self.stoploss) / float(trade.leverage or 1)
-                risk += order.safe_remaining * (pct * entry + ROUND_TRIP_COST * order.safe_placement_price)
-        return risk
+    # ------------------------------------------------------------------ execution
+    MAKER_WAIT_S = 180  # rest on our side of the book this long (maker fee), then cross
 
+    def adjust_entry_price(self, trade: Trade, order, pair: str, current_time: datetime,
+                           proposed_rate: float, current_order_rate: float, entry_tag: str | None,
+                           side: str, **kwargs) -> float | None:
+        """Maker-first entries: the limit order rests at the best bid (long) / ask (short)
+        and follows the touch; after MAKER_WAIT_S it crosses the spread so the signal is
+        never missed. Maker fee 0.02% vs taker 0.055% on Bybit perps."""
+        if (entry_tag or "").startswith(EXEC_TEST_TAG) or self.config.get("runmode") not in (RunMode.LIVE, RunMode.DRY_RUN):
+            return current_order_rate
+        placed = getattr(order, "order_date_utc", None) if order is not None else None
+        age = (current_time - placed).total_seconds() if placed else 0.0
+        long = side == "long"
+        if age < self.MAKER_WAIT_S:
+            if proposed_rate and current_order_rate and abs(proposed_rate / current_order_rate - 1) > 0.0005:
+                return proposed_rate  # follow the touch, stay passive
+            return current_order_rate
+        try:
+            ob = self.dp.orderbook(pair, 1)
+            px = float(ob["asks"][0][0]) * 1.0005 if long else float(ob["bids"][0][0]) * 0.9995
+        except Exception:  # noqa: BLE001
+            return current_order_rate
+        crossing = current_order_rate >= px / 1.0005 if long else current_order_rate <= px / 0.9995
+        return current_order_rate if crossing else px
+
+    # ------------------------------------------------------------------ portfolio limits
     def confirm_trade_entry(self, pair: str, order_type: str, amount: float, rate: float,
                             time_in_force: str, current_time: datetime, entry_tag: str | None,
                             side: str, **kwargs) -> bool:
@@ -245,40 +235,29 @@ class AIBase(IStrategy):
             return True
         if self.config.get("runmode") not in (RunMode.LIVE, RunMode.DRY_RUN):
             return True
-        if self.entries_paused():
-            return False
-        sleeve = self.sleeve_for_pair(pair)
-        if sleeve is None or sleeve.id != entry_tag or not getattr(self, "dp", None) or not self.wallets:
-            return False
-        df, _ = self.dp.get_analyzed_dataframe(pair, self.timeframe)
-        if df is None or df.empty or rate <= 0:
-            return False
-        atr = float(df.iloc[-1].get("atr", 0))
-        if not math.isfinite(atr) or atr <= 0:
-            return False
         cfg = self.config.get("aitrader", {})
-        max_risk = min(float(cfg.get("max_open_risk", 0.03)), 0.03)
-        max_side = min(int(cfg.get("max_same_side", 7)), 7)
+        max_risk = float(cfg.get("max_open_risk", 0.03))
+        max_side = int(cfg.get("max_same_side", 7))
         trades = Trade.get_open_trades()
         short = side == "short"
         if sum(1 for t in trades if bool(t.is_short) == short) >= max_side:
             logger.info("portfolio limit: %s %s skipped (%d %s positions already open)", side, pair, max_side, side)
             return False
-        equity = float(self.wallets.get_total_stake_amount())
-        if not math.isfinite(equity) or equity <= 0:
-            return False
-        try:
-            open_risk = sum(self._open_risk(t) for t in trades)
-        except Exception:  # noqa: BLE001
-            logger.exception("Could not price open portfolio risk")
-            return False
-        stop_distance = get_family(sleeve.family).normalize(sleeve.params)["sl_atr"] * atr
-        new_risk = amount * (stop_distance + rate * ROUND_TRIP_COST)
-        fits = new_risk <= sleeve.risk * equity + 1e-8 and open_risk + new_risk <= max_risk * equity
-        if not fits:
-            logger.info("portfolio limit: %s %s skipped (projected risk %.2f%%, cap %.1f%%)", side, pair,
-                        100 * (open_risk + new_risk) / equity, 100 * max_risk)
-        return fits
+        equity = float(self.wallets.get_total_stake_amount()) if self.wallets else 0.0
+        if equity > 0:
+            open_risk = 0.0
+            for t in trades:
+                if not t.open_rate or not t.stop_loss:
+                    continue
+                loss_frac = (t.stop_loss - t.open_rate) / t.open_rate if t.is_short else (t.open_rate - t.stop_loss) / t.open_rate
+                open_risk += max(loss_frac, 0.0) * float(t.stake_amount or 0) * float(t.leverage or 1)
+            sleeve = self.sleeve_for_pair(pair)
+            new_risk = (sleeve.risk if sleeve else 0.0) * equity
+            if open_risk + new_risk > max_risk * equity:
+                logger.info("portfolio limit: %s %s skipped (open risk %.2f%% of equity, cap %.1f%%)", side, pair,
+                            100 * open_risk / equity, 100 * max_risk)
+                return False
+        return True
 
     # ------------------------------------------------------------------ sizing
     def custom_stake_amount(self, pair: str, current_time: datetime, current_rate: float,
@@ -301,16 +280,15 @@ class AIBase(IStrategy):
             return 0.0
         conviction = float(last.get("conviction", 1.0) or 1.0)
         equity = float(self.wallets.get_total_stake_amount())
-        multiplier = size_multiplier(conviction, p["conv_w"])
         return stake_for_risk(
             equity=equity,
             risk=sleeve.risk,
-            sl_distance_pct=float(p["sl_atr"]) * atr / current_rate + ROUND_TRIP_COST,
+            sl_distance_pct=float(p["sl_atr"]) * atr / current_rate,
             leverage=max(leverage, 1.0),
-            multiplier=min(multiplier, 1.0),
+            multiplier=size_multiplier(conviction, p["conv_w"]),
             min_stake=min_stake,
             max_stake=max_stake,
-            max_notional_frac=0.5,
+            max_notional_frac=0.5 * max(leverage, 1.0),  # notional ≤ 50% of equity per trade
         )
 
     def leverage(self, pair: str, current_time: datetime, current_rate: float,

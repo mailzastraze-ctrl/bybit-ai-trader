@@ -17,7 +17,6 @@ import time
 from dataclasses import dataclass, field
 
 from aitrader.lifecycle import Lifecycle
-from aitrader.manifest import Manifest
 from aitrader.registry import Registry
 from aitrader.settings import get_settings
 from aitrader.util import iso, parse_dt, setup_logging, utcnow
@@ -88,7 +87,7 @@ def main() -> None:
 
     web_pw = persistent_secret(sd / "web_password", "WEB_PASSWORD")
     if not os.environ.get("WEB_PASSWORD"):
-        log.warning("WEB_PASSWORD not set – generated one, stored in %s", sd / "web_password")
+        log.warning("WEB_PASSWORD not set – generated one, stored in %s: %s", sd / "web_password", web_pw)
     api_pw = persistent_secret(sd / "ft_api_password", "FT_API_PASSWORD")
     jwt = persistent_secret(sd / "ft_jwt_secret", "FT_JWT_SECRET")
     ws = persistent_secret(sd / "ft_ws_token", "FT_WS_TOKEN")
@@ -102,14 +101,14 @@ def main() -> None:
     life = Lifecycle(s, reg)
     life.bootstrap()
     if not s.manifest_path.exists():
-        life.write(life.build_manifest([], set(), True), [])
+        life.write(life.build_manifest([], set(), False), [])
 
     key, secret = os.environ.get("BYBIT_API_KEY", ""), os.environ.get("BYBIT_API_SECRET", "")
     py = sys.executable
     procs: list[Proc] = []
     if key and secret:
         procs.append(Proc("freqtrade", [
-            py, "-m", "aitrader.demo", "--config", str(s.config_dir / "trade.json"),
+            s.freqtrade_bin, "trade", "--config", str(s.config_dir / "trade.json"),
             "--userdir", str(s.user_data), "--strategy-path", str(s.strategies_dir),
             "--db-url", f"sqlite:///{s.state_dir / 'trades.sqlite'}",
             "--logfile", str(s.user_data / "logs" / "freqtrade.log")],
@@ -147,10 +146,7 @@ def main() -> None:
 
     def start(p: Proc) -> None:
         log.info("starting %s", p.name)
-        env = {k: v for k, v in os.environ.items()
-               if not k.startswith("FREQTRADE__")
-               and k not in {"BYBIT_API_KEY", "BYBIT_API_SECRET"}}
-        p.popen = subprocess.Popen(p.cmd, env={**env, **p.env},
+        p.popen = subprocess.Popen(p.cmd, env={**os.environ, **p.env},
                                    preexec_fn=_oom_adj(p.oom_score) if p.oom_score else None)
         p.started = time.time()
 
@@ -192,23 +188,6 @@ def main() -> None:
                 reg.event("supervisor", f"{p.name} exited (rc={rc}); restarting in {delay}s", "error")
             elif p.popen is None and now >= p.next_start:
                 start(p)
-        if now - last_status < 5:
-            manager_proc = next((p for p in procs if p.name == ("web" if lite else "manager")), None)
-            if manager_proc and manager_proc.popen and now - manager_proc.started > 600:
-                hb = reg.one("SELECT ts FROM heartbeats WHERE service='manager'")
-                ts = parse_dt(hb["ts"]) if hb else None
-                if ts is None or (utcnow() - ts).total_seconds() > 600:
-                    manifest = Manifest.load(s.manifest_path)
-                    manifest.entries_paused = True
-                    manifest.save(s.manifest_path)
-                    reg.event("supervisor", "Manager heartbeat stale, pausing entries and restarting", "error")
-                    manager_proc.popen.kill()
-            ft_proc = next((p for p in procs if p.name == "freqtrade"), None)
-            ft_log = s.user_data / "logs" / "freqtrade.log"
-            if ft_proc and ft_proc.popen and now - ft_proc.started > 660:
-                if not ft_log.exists() or now - ft_log.stat().st_mtime > 660:
-                    reg.event("supervisor", "Freqtrade worker stopped logging, restarting", "error")
-                    ft_proc.popen.kill()
         # Research liveness: a heartbeat older than 2 h means the worker is stuck → restart it.
         rp = next((p for p in procs if p.name == "research"), None)
         if rp and rp.popen and rp.popen.poll() is None and now - rp.started > 7200:

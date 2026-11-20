@@ -13,16 +13,13 @@ name: research-lab
 # (short-lived credentials via OIDC). Fallback: OKX data if the proxy is unavailable.
 # Auth to the server: GitHub OIDC token (no secrets stored anywhere).
 on:
-  push:
-    branches: [main]
-    paths: ["src/aitrader/research/**", "ft/**", ".github/workflows/research.yml"]
   schedule:
-    - cron: "17 2,14 * * *"
+    - cron: "17 2,14 * * *"          # base cadence (also fits private-repo free minutes)
     - cron: "41 5,8,11,17,20,23 * * *" # extra restarts for public repos (chain watchdog)
   workflow_dispatch:
     inputs:
       budget_minutes:
-        description: "Research time budget in minutes (25–170, default 170)"
+        description: "Research time budget (empty = auto: 170 public / 22 private)"
         default: ""
       chain:
         description: "Start the next run when done (public repos)"
@@ -43,20 +40,20 @@ env:
 
 jobs:
   lab:
-    if: github.ref == 'refs/heads/main' && github.event.repository.private == false
+    if: github.event_name != 'schedule' || github.event.schedule == '17 2,14 * * *' || github.event.repository.private == false
     runs-on: ubuntu-latest
     timeout-minutes: 240
     steps:
       - uses: actions/checkout@v5
       - id: plan
-        env:
-          REQUESTED_BUDGET: ${{ inputs.budget_minutes }}
         run: |
-          BUDGET="${REQUESTED_BUDGET:-170}"
-          [[ "$BUDGET" =~ ^[1-9][0-9]{1,2}$ ]] && (( BUDGET >= 25 && BUDGET <= 170 ))
+          PRIVATE="${{ github.event.repository.private }}"
+          if [ "$PRIVATE" = "false" ]; then PUBLIC=true; BUDGET=170; else PUBLIC=false; BUDGET=22; fi
+          [ -n "${{ inputs.budget_minutes }}" ] && BUDGET="${{ inputs.budget_minutes }}"
+          echo "public=$PUBLIC" >> "$GITHUB_OUTPUT"
           echo "budget=$BUDGET" >> "$GITHUB_OUTPUT"
           echo "cpus=$(nproc)" >> "$GITHUB_OUTPUT"
-          echo "budget=${BUDGET}min cpus=$(nproc)"
+          echo "public=$PUBLIC budget=${BUDGET}min cpus=$(nproc)"
       - run: docker build -q -t aitrader:research .
       - uses: actions/cache/restore@v4
         with:
@@ -72,7 +69,7 @@ jobs:
           mkdir -p work/batch work/export && chmod -R 777 work
           cp research/ledger.json work/ledger.json 2>/dev/null || echo '{"trials": []}' > work/ledger.json
           docker run --rm -v "$PWD/work:/data" \
-            -e RESEARCH_EXCHANGE -e LAB_PUBLIC=true \
+            -e RESEARCH_EXCHANGE -e LAB_PUBLIC=${{ steps.plan.outputs.public }} \
             -e ACTIONS_ID_TOKEN_REQUEST_URL -e ACTIONS_ID_TOKEN_REQUEST_TOKEN \
             -e RESEARCH_EPOCHS=80 -e RESEARCH_JOBS=${{ steps.plan.outputs.cpus }} -e RESEARCH_UNIVERSE=40 \
             aitrader:research python -m aitrader.research.batch cycle --out /data/batch --export /data/export \
@@ -80,6 +77,20 @@ jobs:
               --server "$LAB_SERVER" --ledger /data/ledger.json
       - if: always()
         run: sudo chown -R "$(id -u):$(id -g)" work
+      - name: Back up the live registry (trades, strategies, learnings)
+        if: always()
+        continue-on-error: true
+        run: |
+          TOK=$(curl -s -H "Authorization: bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" "$ACTIONS_ID_TOKEN_REQUEST_URL&audience=aitrader-lab" | python3 -c 'import sys,json;print(json.load(sys.stdin)["value"])')
+          mkdir -p backup && curl -sf -H "Authorization: Bearer $TOK" -o backup/registry.sqlite.gz "$LAB_SERVER/api/lab/backup" && ls -la backup
+      - uses: actions/upload-artifact@v4
+        if: always()
+        continue-on-error: true
+        with:
+          name: registry-backup
+          path: backup/registry.sqlite.gz
+          retention-days: 30
+          if-no-files-found: ignore
       - uses: actions/cache/save@v4
         if: always()
         with:
@@ -98,13 +109,9 @@ jobs:
           git config user.email "aitrader-research-lab@users.noreply.github.com"
           git add research/imports research/reports research/ledger.json
           git commit -q -m "research-lab: run ${{ github.run_id }} results [skip ci]" || exit 0
-          for i in 1 2 3; do
-            if git pull -q --rebase origin main && git push -q origin HEAD:main; then exit 0; fi
-            sleep 5
-          done
-          exit 1
+          for i in 1 2 3; do git pull -q --rebase origin main && git push -q origin HEAD:main && break; sleep 5; done
       - name: Chain the next run (continuous research on public repos)
-        if: success() && inputs.chain != 'false'
+        if: success() && steps.plan.outputs.public == 'true' && inputs.chain != 'false'
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh workflow run research.yml --ref main -f chain=true
+        run: gh workflow run research.yml --ref main -f chain=true || true

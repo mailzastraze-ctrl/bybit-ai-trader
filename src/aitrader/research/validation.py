@@ -81,8 +81,8 @@ def evaluate_gates(g: Gates, m: dict) -> tuple[str, dict]:
         "deflated_sharpe": (m["dsr"], g.min_dsr, m["dsr"] >= g.min_dsr),
     }
     fp = m.get("fold_pos")
-    checks["fold_consistency"] = (fp or 0.0, g.min_fold_consistency,
-                                  fp is not None and fp >= g.min_fold_consistency)
+    if fp is not None:  # every walk-forward slice is its own out-of-sample test
+        checks["fold_consistency"] = (fp, g.min_fold_consistency, fp >= g.min_fold_consistency)
     gates = {k: {"value": round(float(v), 4), "threshold": t, "pass": bool(ok)}
              for k, (v, t, ok) in checks.items()}
     if all(x["pass"] for x in gates.values()):

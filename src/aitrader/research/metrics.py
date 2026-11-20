@@ -186,15 +186,13 @@ def deflated_sharpe(sr: float, n_obs: int, n_trials: int, sr_variance: float,
 
 
 def monte_carlo(pnl: np.ndarray, starting_balance: float, samples: int = 2000,
-                seed: int = 7, block_size: int = 1) -> dict:
-    """Bootstrap consecutive PnL blocks with replacement."""
+                seed: int = 7) -> dict:
+    """Bootstrap trade outcomes (with replacement) → distribution of return and drawdown."""
     pnl = np.asarray(pnl, dtype=float)
     if len(pnl) < 5:
         return {"prob_profit": 0.0, "ret_p5": 0.0, "ret_p50": 0.0, "dd_p95": 1.0}
     rng = np.random.default_rng(seed)
-    block = max(1, min(block_size, len(pnl)))
-    starts = rng.integers(0, len(pnl), size=(samples, math.ceil(len(pnl) / block), 1))
-    idx = ((starts + np.arange(block)) % len(pnl)).reshape(samples, -1)[:, :len(pnl)]
+    idx = rng.integers(0, len(pnl), size=(samples, len(pnl)))
     paths = pnl[idx]
     totals = paths.sum(axis=1) / starting_balance
     equity = starting_balance + np.cumsum(paths, axis=1)
