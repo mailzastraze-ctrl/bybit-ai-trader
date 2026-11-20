@@ -25,6 +25,13 @@ PAIR_BLACKLIST = [
 CCXT_LINEAR_ONLY = {"options": {"fetchMarkets": {"types": ["linear"]}}}
 
 
+def ccxt_config(settings: Settings) -> dict:
+    cfg = dict(CCXT_LINEAR_ONLY) if settings.research.exchange == "bybit" else {}
+    if settings.research.proxy:
+        cfg["httpsProxy"] = settings.research.proxy  # freqtrade passes it to sync + async ccxt
+    return cfg
+
+
 class FreqtradeError(RuntimeError):
     pass
 
@@ -126,7 +133,7 @@ def research_config(settings: Settings, pairs: list[str], **aitrader: object) ->
                      "pair_whitelist": list(pairs), "pair_blacklist": PAIR_BLACKLIST,
                      # only USDT linear perps are traded; skipping spot/inverse/option markets
                      # cuts memory per freqtrade process substantially
-                     "ccxt_config": CCXT_LINEAR_ONLY if settings.research.exchange == "bybit" else {}},
+                     "ccxt_config": ccxt_config(settings)},
         "pairlists": [{"method": "StaticPairList"}],
         "aitrader": {"risk": 0.01, "leverage": lc.leverage, "min_trades_is": 30,
                      "dd_limit": settings.gates.max_drawdown, **aitrader},

@@ -91,7 +91,9 @@ def main() -> None:
     api_pw = persistent_secret(sd / "ft_api_password", "FT_API_PASSWORD")
     jwt = persistent_secret(sd / "ft_jwt_secret", "FT_JWT_SECRET")
     ws = persistent_secret(sd / "ft_ws_token", "FT_WS_TOKEN")
+    proxy_secret = persistent_secret(sd / "lab_proxy_secret", "LAB_PROXY_SECRET")
     common = {"WEB_PASSWORD": web_pw, "FT_API_PASSWORD": api_pw, "FT_API_USER": s.ft_api_user,
+              "LAB_PROXY_SECRET": proxy_secret,
               "AITRADER_DATA": str(s.data_dir), "AITRADER_APP": str(s.app_dir)}
     os.environ.update(common)
 
@@ -129,6 +131,9 @@ def main() -> None:
         # research (and every freqtrade hyperopt/backtest it spawns) is the first OOM victim
         procs.append(Proc("research", ["nice", "-n", "10", py, "-m", "aitrader.research.worker"],
                           oom_score=1000))
+    if os.environ.get("LAB_PROXY", "1") != "0":
+        # EU egress for the GitHub research lab's public Bybit market-data requests
+        procs.append(Proc("bybitproxy", [py, "-m", "aitrader.bybitproxy"], oom_score=500))
     port = os.environ.get("PORT", "8000")
     procs.append(Proc("web", [py, "-m", "uvicorn", "aitrader.web.app:app", "--host", "0.0.0.0",
                               "--port", port, "--log-level", "warning", "--proxy-headers"],

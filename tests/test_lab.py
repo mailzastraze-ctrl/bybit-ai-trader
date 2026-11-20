@@ -106,6 +106,9 @@ class FakeLab:
     def state(self):
         return self.st
 
+    def proxy(self):
+        return None
+
     def run_event(self, kind, **kw):
         self.events.append(kind)
 
@@ -134,7 +137,8 @@ def test_cycle_state_to_import_closed_loop(env, tmp_path, monkeypatch):
     ls.ensure_dirs()
     out = tmp_path / "runner" / "batch"
     out.mkdir(parents=True)
-    (out / "universe.json").write_text(json.dumps({"ts": iso(), "exchange": "okx", "pairs": PAIRS, "market": {}}))
+    (out / "universe.json").write_text(json.dumps({"ts": iso(), "exchange": ls.research.exchange, "pairs": PAIRS,
+                                                   "market": {}}))
     fake = FakeLab(json.loads(json.dumps(state, default=str)))
     monkeypatch.setattr(batch, "get_settings", lambda: ls)
     monkeypatch.setattr(batch, "Pipeline", lambda st, rg, **kw: Pipeline(st, rg, FakeRunner(False), **kw))

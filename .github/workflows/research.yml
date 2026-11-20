@@ -8,8 +8,9 @@ name: research-lab
 #   4. sends only the compact results to the server and commits them to research/
 #   5. public repo: immediately starts the next run (continuous research, free minutes)
 #
-# Data: OKX USDT perps 1h (Bybit's API is geo-blocked on US runners). Imported strategies
-# must still pass forward tests on Bybit Demo before they get real (demo) risk.
+# Data: real Bybit USDT perps (1h candles, funding, mark prices). Bybit blocks US IPs, so the
+# lab tunnels its public market-data requests through the live server's EU egress proxy
+# (short-lived credentials via OIDC). Fallback: OKX data if the proxy is unavailable.
 # Auth to the server: GitHub OIDC token (no secrets stored anywhere).
 on:
   schedule:
@@ -59,8 +60,10 @@ jobs:
           path: |
             work/user_data/data
             work/batch/universe.json
-          key: okx-1h-${{ github.run_id }}
-          restore-keys: okx-1h-
+          key: mkt-1h-${{ github.run_id }}
+          restore-keys: |
+            mkt-1h-
+            okx-1h-
       - name: Research cycle
         run: |
           mkdir -p work/batch work/export && chmod -R 777 work
@@ -94,7 +97,7 @@ jobs:
           path: |
             work/user_data/data
             work/batch/universe.json
-          key: okx-1h-${{ github.run_id }}
+          key: mkt-1h-${{ github.run_id }}
       - name: Commit results (history + fallback import on deploy)
         run: |
           if ! ls work/export/imports/*.json >/dev/null 2>&1; then echo "no results"; exit 0; fi

@@ -260,6 +260,17 @@ async def lab_import(request: Request, claims: dict = Depends(lab_auth)) -> dict
     return {"ok": True, **res}
 
 
+@app.get("/api/lab/proxy")
+def lab_proxy(claims: dict = Depends(lab_auth)) -> dict:  # noqa: ARG001
+    """Short-lived credentials for the EU egress proxy (Bybit market data for research)."""
+    from aitrader import bybitproxy
+    host = os.environ.get("RAILWAY_TCP_PROXY_DOMAIN") or os.environ.get("LAB_PROXY_PUBLIC_HOST")
+    port = os.environ.get("RAILWAY_TCP_PROXY_PORT") or os.environ.get("LAB_PROXY_PUBLIC_PORT")
+    if not host or not port or not os.environ.get("LAB_PROXY_SECRET"):
+        raise HTTPException(404, "egress proxy not configured")
+    return {"url": f"http://lab:{bybitproxy.issue_token()}@{host}:{port}", "ttl_s": bybitproxy.TOKEN_TTL_S}
+
+
 @app.get("/api/lab/backup")
 def lab_backup(claims: dict = Depends(lab_auth)) -> Response:  # noqa: ARG001
     """Consistent gzip snapshot of the registry (the lab stores it as a 30-day artifact)."""

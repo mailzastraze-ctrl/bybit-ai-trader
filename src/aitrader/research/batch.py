@@ -250,6 +250,18 @@ def _fresh_universe(path: Path, max_age_h: float = 12) -> dict | None:
     return u
 
 
+def probe_bybit(proxy: str) -> bool:
+    import requests
+    try:
+        r = requests.get("https://api.bybit.com/v5/market/time", proxies={"https": proxy}, timeout=20)
+        ok = r.status_code == 200 and r.json().get("retCode") == 0
+        log.info("Bybit via EU proxy: HTTP %s %s", r.status_code, "OK" if ok else r.text[:200])
+        return ok
+    except Exception as e:  # noqa: BLE001
+        log.warning("Bybit via EU proxy failed: %s", e)
+        return False
+
+
 def plan(gen: Generator, state: dict, pairs: list[str], rng):
     """Endless spec stream: revalidations first, then ~25% refinements of promising
     strategies and ~75% new searches chosen by the UCB bandit (+ A/B'd learnings)."""
@@ -287,7 +299,15 @@ def cmd_cycle(out: Path, budget_min: float, run_id: str, server: str | None, max
         log.warning("research paused from the terminal – nothing to do")
         return None
     public = os.environ.get("LAB_PUBLIC", "") == "true"
-    lab.run_event("start", budget_min=budget_min, cpus=os.cpu_count(), public=public)
+    # Real Bybit data: GitHub runners are geo-blocked by Bybit (US), so public market-data
+    # requests are tunnelled through the live server's EU egress proxy. Fallback: OKX.
+    proxy = lab.proxy() if lab.enabled else None
+    if proxy and probe_bybit(proxy):
+        s.research.exchange, s.research.proxy = "bybit", proxy
+    else:
+        log.warning("Bybit egress proxy unavailable – researching on %s data", s.research.exchange)
+    lab.run_event("start", budget_min=budget_min, cpus=os.cpu_count(), public=public,
+                  exchange=s.research.exchange)
 
     db = out / "lab.sqlite"
     for suffix in ("", "-wal", "-shm"):
@@ -298,6 +318,8 @@ def cmd_cycle(out: Path, budget_min: float, run_id: str, server: str | None, max
                    | {"ts": iso(), "active": 1})
 
     uni = _fresh_universe(out / "universe.json")
+    if uni is not None and uni.get("exchange") != s.research.exchange:
+        uni = None  # cached universe belongs to the other exchange
     if uni is None:
         cmd_scan(out, reg)
         uni = json.loads((out / "universe.json").read_text())
