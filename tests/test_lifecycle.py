@@ -59,7 +59,11 @@ def test_manifest_priority_exclusion_and_closing(env):
     man = life.build_manifest([{"enter_tag": "old", "pair": "XRP"}], {"SOL"}, False)
     by = {x.id: x for x in man.sleeves}
     assert by["prod"].pairs == ["BTC", "ETH"] and by["prod"].risk == s.lifecycle.risk_production
-    assert "inc" not in by  # ETH taken by production, SOL excluded → no pairs left
+    assert by["inc"].pairs == ["ETH"]  # ETH shared with production (independent strategy), SOL excluded
+    for i in range(3):  # at most 3 sleeves per pair
+        _strategy(reg, f"x{i}", "exploration", ["ETH"], 1.0)
+    man = life.build_manifest([], set(), False)
+    assert sum(1 for x in man.sleeves if "ETH" in x.pairs) == s.lifecycle.max_sleeves_per_pair
     assert by["old"].stage == "closing" and by["old"].pairs == []
 
 
@@ -349,6 +353,7 @@ def test_revalidation_spec_targets_stale_live_strategy(env):
 
 def test_research_candidates_displace_bootstrap_placeholders(env):
     s, reg = env
+    s.lifecycle.max_exploration = 5  # a full lane forces displacement
     life = Lifecycle(s, reg)
     life.bootstrap()  # 4 unvalidated exploration sleeves (more than max_exploration)
     _strategy(reg, "cand1", "exploratory", ["SOL/USDT:USDT"], score=0.8)

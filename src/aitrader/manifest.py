@@ -67,6 +67,12 @@ class Manifest:
                     best = s
         return best
 
+    def sleeves_for(self, pair: str) -> list[Sleeve]:
+        """All entry-accepting sleeves trading this pair, highest priority first. Several
+        independent strategies may share a pair; the first one that signals takes the trade."""
+        xs = [s for s in self.sleeves if s.accept_entries and pair in s.pairs]
+        return sorted(xs, key=lambda s: (STAGE_PRIORITY[s.stage], s.score), reverse=True)
+
     def all_pairs(self) -> list[str]:
         seen: dict[str, None] = {}
         for s in sorted(self.sleeves, key=lambda x: -STAGE_PRIORITY.get(x.stage, 0)):

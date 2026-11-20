@@ -88,7 +88,7 @@ def test_portfolio_stoploss_tp_time_and_stake(portfolio):
     assert portfolio.leverage(tr.pair, tr.open_date_utc, entry, 1.0, 10.0, "s1", "long") == 3.0
 
 
-def test_exit_signal_blocked_when_pair_reassigned(portfolio, tmp_path):
+def test_exit_signal_blocked_when_trade_sleeve_no_longer_runs_the_pair(portfolio, tmp_path):
     df = _populate(portfolio, ohlcv(700))
     portfolio.dp = FakeDP(df)
     tr = _trade(df, 500, tag="old")
@@ -172,3 +172,22 @@ def test_maker_first_entry_then_cross(portfolio):
     assert adj(200, 100.1, 100.1, "short") == pytest.approx(99.9 * 0.9995)
     portfolio.config["runmode"] = "backtest"
     assert adj(200, 99.9, 99.0) == 99.0           # no repricing in backtests
+
+
+
+def test_several_sleeves_share_a_pair(tmp_path):
+    from AIPortfolio import AIPortfolio
+    pair = "BTC/USDT:USDT"
+    m = Manifest(sleeves=[
+        Sleeve(id="a", family="trend_ema", params={}, pairs=[pair], stage="exploration", risk=0.001, score=0.5),
+        Sleeve(id="b", family="meanrev_bb", params={}, pairs=[pair], stage="exploration", risk=0.002, score=0.4)])
+    path = tmp_path / "manifest.json"
+    m.save(path)
+    st = AIPortfolio({"aitrader": {"manifest_path": str(path)}, "runmode": "backtest", "exchange": {"demo_trading": True}})
+    st.bot_start()
+    assert [x.id for x in st.sleeves_for_pair(pair)] == ["a", "b"]
+    df = _populate(st, ohlcv(2500, seed=11, vol=0.012), pair)
+    tags = set(df.loc[(df["enter_long"] == 1) | (df.get("enter_short", 0) == 1), "enter_tag"].dropna())
+    assert tags == {"a", "b"}  # both strategies trade the same pair
+    assert {"xl:a", "xl:b", "cv:a", "cv:b"} <= set(df.columns)
+    assert st.sleeve_by_tag(pair, "b").risk == 0.002  # sizing uses the entry's own sleeve

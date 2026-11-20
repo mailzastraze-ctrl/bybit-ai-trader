@@ -330,14 +330,26 @@ class Lifecycle:
         penalty = self.correlation_penalty([r["id"] for r in rows if r["stage"] in ("production", "incubation", "eligible")])
         rows.sort(key=lambda r: (-STAGE_PRIORITY.get("incubation" if r["stage"] == "eligible" else r["stage"], 0),
                                  -(r.get("score") or 0)))
-        taken: set[str] = set()
+        # Pairs may be shared by up to `max_sleeves_per_pair` independent strategies (more
+        # signals, more forward evidence); the whitelist is capped to protect the bot's memory.
+        per_pair: dict[str, int] = {}
+        union: set[str] = set()
         sleeves: list[Sleeve] = []
         for r in rows:
-            mine = [p for p in (r.get("pairs") or []) if p not in taken and p not in excluded]
-            mine = mine[: self.lc.max_pairs_per_sleeve]
+            mine: list[str] = []
+            for p in r.get("pairs") or []:
+                if p in excluded or per_pair.get(p, 0) >= self.lc.max_sleeves_per_pair:
+                    continue
+                if p not in union and len(union) >= self.lc.max_whitelist:
+                    continue
+                mine.append(p)
+                if len(mine) >= self.lc.max_pairs_per_sleeve:
+                    break
             if not mine:
                 continue
-            taken.update(mine)
+            for p in mine:
+                per_pair[p] = per_pair.get(p, 0) + 1
+                union.add(p)
             stage = "incubation" if r["stage"] == "eligible" else r["stage"]
             sleeves.append(Sleeve(id=r["id"], family=r["family"], params=r["params"], pairs=mine,
                                   stage=stage,

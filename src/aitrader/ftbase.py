@@ -54,6 +54,26 @@ class AIBase(IStrategy):
     def sleeve_for_trade(self, trade: Trade) -> Sleeve | None:
         raise NotImplementedError
 
+    def sleeves_for_pair(self, pair: str) -> list[Sleeve]:
+        s = self.sleeve_for_pair(pair)
+        return [s] if s else []
+
+    def sleeve_by_tag(self, pair: str, entry_tag: str | None) -> Sleeve | None:
+        """The sleeve that generated this entry (enter_tag = sleeve id)."""
+        for s in self.sleeves_for_pair(pair):
+            if not entry_tag or s.id == entry_tag:
+                return s
+        return None
+
+    def _open_tag(self, pair: str) -> str | None:
+        if self.config.get("runmode") not in (RunMode.LIVE, RunMode.DRY_RUN):
+            return None
+        try:
+            trades = Trade.get_trades_proxy(pair=pair, is_open=True)
+        except Exception:  # noqa: BLE001
+            return None
+        return trades[0].enter_tag if trades else None
+
     def entries_paused(self) -> bool:
         return False
 
@@ -111,26 +131,41 @@ class AIBase(IStrategy):
     def populate_entry_trend(self, dataframe: pd.DataFrame, metadata: dict) -> pd.DataFrame:
         # Signals are computed here (not in populate_indicators) so hyperopt re-evaluates
         # entry parameters every epoch.
-        sleeve = self.sleeve_for_pair(metadata["pair"])
-        if sleeve is None:
+        sleeves = self.sleeves_for_pair(metadata["pair"])
+        if not sleeves:
             return dataframe
-        fam = get_family(sleeve.family)
         cols = ["date", "open", "high", "low", "close", "volume"] + (["funding"] if "funding" in dataframe else [])
-        res = fam.populate(dataframe[cols], sleeve.params)
-        for col in ("long_sig", "short_sig", "exit_long_sig", "exit_short_sig", "conviction"):
-            dataframe[col] = res[col].values
-        if self.entries_paused():
-            return dataframe
-        if "long" in sleeve.sides:
-            dataframe.loc[dataframe["long_sig"], ["enter_long", "enter_tag"]] = (1, sleeve.id)
-        if "short" in sleeve.sides and self.can_short:
-            dataframe.loc[dataframe["short_sig"], ["enter_short", "enter_tag"]] = (1, sleeve.id)
+        paused = self.entries_paused()
+        free = pd.Series(True, index=dataframe.index)  # rows not yet claimed by a higher-priority sleeve
+        for i, sleeve in enumerate(sleeves):
+            res = fam_res = get_family(sleeve.family).populate(dataframe[cols], sleeve.params)  # noqa: F841
+            if i == 0:  # primary sleeve columns (single-sleeve research/backtests read these)
+                for col in ("long_sig", "short_sig", "exit_long_sig", "exit_short_sig", "conviction"):
+                    dataframe[col] = res[col].values
+            dataframe[f"xl:{sleeve.id}"] = fam_res["exit_long_sig"].values
+            dataframe[f"xs:{sleeve.id}"] = fam_res["exit_short_sig"].values
+            dataframe[f"cv:{sleeve.id}"] = fam_res["conviction"].values
+            if paused:
+                continue
+            ls = pd.Series(res["long_sig"].values, index=dataframe.index).fillna(False).astype(bool)
+            ss = pd.Series(res["short_sig"].values, index=dataframe.index).fillna(False).astype(bool)
+            if "long" in sleeve.sides:
+                take = ls & free
+                dataframe.loc[take, ["enter_long", "enter_tag"]] = (1, sleeve.id)
+                free &= ~take
+            if "short" in sleeve.sides and self.can_short:
+                take = ss & free
+                dataframe.loc[take, ["enter_short", "enter_tag"]] = (1, sleeve.id)
+                free &= ~take
         return dataframe
 
     def populate_exit_trend(self, dataframe: pd.DataFrame, metadata: dict) -> pd.DataFrame:
-        if "exit_long_sig" in dataframe:
-            dataframe.loc[dataframe["exit_long_sig"].fillna(False).astype(bool), "exit_long"] = 1
-            dataframe.loc[dataframe["exit_short_sig"].fillna(False).astype(bool), "exit_short"] = 1
+        # Exit signals belong to the sleeve that opened the position (pairs can be shared).
+        tag = self._open_tag(metadata["pair"])
+        cl, cs = (f"xl:{tag}", f"xs:{tag}") if tag and f"xl:{tag}" in dataframe else ("exit_long_sig", "exit_short_sig")
+        if cl in dataframe:
+            dataframe.loc[dataframe[cl].fillna(False).astype(bool), "exit_long"] = 1
+            dataframe.loc[dataframe[cs].fillna(False).astype(bool), "exit_short"] = 1
         return dataframe
 
     # ------------------------------------------------------------------ helpers
@@ -191,11 +226,11 @@ class AIBase(IStrategy):
     def confirm_trade_exit(self, pair: str, trade: Trade, order_type: str, amount: float,
                            rate: float, time_in_force: str, exit_reason: str,
                            current_time: datetime, **kwargs) -> bool:
-        # Signal exits only count when the pair is still owned by the sleeve that opened it.
+        # Signal exits only count when the trade's own sleeve still runs (or the exit columns
+        # were computed for it); a sleeve that was removed exits via stops / time instead.
         if exit_reason == "exit_signal":
-            owner = self.sleeve_for_pair(pair)
             mine = self.sleeve_for_trade(trade)
-            if owner is not None and mine is not None and owner.id != mine.id:
+            if mine is None or mine.id not in {x.id for x in self.sleeves_for_pair(pair)}:
                 return False
         return True
 
@@ -251,7 +286,7 @@ class AIBase(IStrategy):
                     continue
                 loss_frac = (t.stop_loss - t.open_rate) / t.open_rate if t.is_short else (t.open_rate - t.stop_loss) / t.open_rate
                 open_risk += max(loss_frac, 0.0) * float(t.stake_amount or 0) * float(t.leverage or 1)
-            sleeve = self.sleeve_for_pair(pair)
+            sleeve = self.sleeve_by_tag(pair, entry_tag)
             new_risk = (sleeve.risk if sleeve else 0.0) * equity
             if open_risk + new_risk > max_risk * equity:
                 logger.info("portfolio limit: %s %s skipped (open risk %.2f%% of equity, cap %.1f%%)", side, pair,
@@ -267,8 +302,8 @@ class AIBase(IStrategy):
         if entry_tag and entry_tag.startswith(EXEC_TEST_TAG):
             # execution self-test (forced entry via REST API): use the requested small stake
             return float(max(min(proposed_stake, max_stake), min_stake or 0.0))
-        sleeve = self.sleeve_for_pair(pair)
-        if sleeve is None or (entry_tag and sleeve.id != entry_tag):
+        sleeve = self.sleeve_by_tag(pair, entry_tag)
+        if sleeve is None:
             return 0.0
         p = get_family(sleeve.family).normalize(sleeve.params)
         df, _ = self.dp.get_analyzed_dataframe(pair, self.timeframe)
@@ -278,7 +313,7 @@ class AIBase(IStrategy):
         atr = float(last.get("atr", float("nan")))
         if not atr or atr != atr or current_rate <= 0:
             return 0.0
-        conviction = float(last.get("conviction", 1.0) or 1.0)
+        conviction = float(last.get(f"cv:{sleeve.id}", last.get("conviction", 1.0)) or 1.0)
         equity = float(self.wallets.get_total_stake_amount())
         return stake_for_risk(
             equity=equity,
@@ -296,7 +331,7 @@ class AIBase(IStrategy):
                  side: str, **kwargs) -> float:
         if entry_tag and entry_tag.startswith(EXEC_TEST_TAG):
             return float(max(1.0, min(2.0, max_leverage)))
-        sleeve = self.sleeve_for_pair(pair)
+        sleeve = self.sleeve_by_tag(pair, entry_tag)
         lev = sleeve.leverage if sleeve else 1.0
         return float(max(1.0, min(lev, max_leverage)))
 
@@ -392,6 +427,9 @@ class PortfolioBase(AIBase):
 
     def sleeve_for_pair(self, pair: str) -> Sleeve | None:
         return self._watcher().manifest.owner_of(pair)
+
+    def sleeves_for_pair(self, pair: str) -> list[Sleeve]:
+        return self._watcher().manifest.sleeves_for(pair)
 
     def sleeve_for_trade(self, trade: Trade) -> Sleeve | None:
         m = self._watcher().manifest
