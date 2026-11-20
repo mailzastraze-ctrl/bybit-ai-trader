@@ -78,6 +78,7 @@ def test_watchdog_kills_stalled_and_timed_out_processes(tmp_path):
     import sys
     import time
 
+    pytest.importorskip("psutil")  # stall detection needs psutil (present in the freqtrade image)
     from aitrader.research.ftrunner import FreqtradeStalled, run_supervised
     env = dict(__import__("os").environ)
     with open(tmp_path / "log", "w") as lf:
