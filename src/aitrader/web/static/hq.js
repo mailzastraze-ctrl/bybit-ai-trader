@@ -4,6 +4,8 @@
 import * as THREE from "three";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 import { RoomEnvironment } from "three/addons/environments/RoomEnvironment.js";
+import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
+import * as SkeletonUtils from "three/addons/utils/SkeletonUtils.js";
 
 // ============================================================== utils
 const $ = s => document.querySelector(s);
@@ -404,6 +406,29 @@ const PANTS = [0x2a2f3a, 0x3b3b40, 0x24364f, 0x403527];
 const chars = [];
 const UP = new THREE.Vector3(0, 1, 0);
 
+// ---- mocap character (skinned, motion-captured idle/walk + procedural office poses).
+// Loaded at runtime from the three.js repository; falls back to the procedural rig.
+const XBOT_URL = "https://raw.githubusercontent.com/mrdoob/three.js/r170/examples/models/gltf/Xbot.glb";
+let XBOT = null;
+try {
+  const lm = document.getElementById("lmsg"); if (lm) lm.textContent = "loading motion-captured staff…";
+  XBOT = await Promise.race([new GLTFLoader().loadAsync(XBOT_URL), new Promise((_, rej) => setTimeout(() => rej(new Error("timeout")), 12000))]);
+  for (const name of ["agree", "headShake", "sad_pose"]) {
+    const c = XBOT.animations.find(a => a.name === name); if (c) THREE.AnimationUtils.makeClipAdditive(c);
+  }
+} catch (e) { console.warn("mocap staff unavailable, using procedural rig:", e.message); XBOT = null; }
+const ROLE_SUIT = {trader: [0x2f4a6d, 0x3b5d86, 0x24364f], research: [0xf4f4f0], risk: [0x2b2f3a], scanner: [0x1f8a63], learn: [0x6a5fc4], ops: [0x3b3f47], ceo: [0x5a1f3a]};
+const _q1 = new THREE.Quaternion(), _q2 = new THREE.Quaternion(), _v1 = new THREE.Vector3(), _v2 = new THREE.Vector3();
+function rotWorld(bone, axis, angle) {
+  // rotate a bone about a WORLD axis, independent of the rig's local bone axes
+  if (!bone || !angle) return;
+  bone.parent.getWorldQuaternion(_q1);
+  _q2.setFromAxisAngle(axis, angle);
+  const d = _q1.clone().invert().multiply(_q2).multiply(_q1);
+  bone.quaternion.premultiply(d);
+  bone.updateMatrixWorld(true);
+}
+
 class Person {
   constructor(name, role, home, opts = {}) {
     this.name = name; this.role = role; this.homeSeat = home; this.state = "idle"; this.queue = [];
@@ -481,6 +506,7 @@ class Person {
       return {hp, kn, an};
     };
     this.legL = leg(1); this.legR = leg(-1);
+    if (XBOT) this.attachModel(role, opts);
     this.pos = (home?.approach || home?.pos || new THREE.Vector3()).clone();
     R.position.copy(this.pos); this.yaw = 0; scene.add(R);
     R.traverse(o => { o.userData.person = this; });
@@ -488,6 +514,95 @@ class Person {
     this.bubble = document.createElement("div"); this.bubble.className = "bubble"; $("#labels").appendChild(this.bubble);
     this.tagEl = document.createElement("div"); this.tagEl.className = "nametag"; this.tagEl.textContent = `${name} · ${roleName(role)}`; $("#labels").appendChild(this.tagEl);
     this.bubbleUntil = 0; chars.push(this);
+  }
+  attachModel(role, opts) {
+    this.root.remove(this.hips);
+    const m = SkeletonUtils.clone(XBOT.scene);
+    const suit = new THREE.Color(pick(ROLE_SUIT[role] || [0x888888]));
+    m.traverse(o => {
+      if (o.isMesh) {
+        o.castShadow = true; o.receiveShadow = true; o.frustumCulled = false;
+        const joints = /joint/i.test(o.material?.name || o.name);
+        o.material = new THREE.MeshPhysicalMaterial({
+          color: joints ? new THREE.Color(0x1d1f24) : suit, roughness: joints ? 0.35 : 0.55,
+          metalness: joints ? 0.6 : 0.05, clearcoat: joints ? 0.3 : 0.15, sheen: joints ? 0 : 0.6, sheenColor: new THREE.Color(0xffffff)});
+      }
+    });
+    this.root.add(m); this.model = m;
+    this.bones = {}; m.traverse(o => { if (o.isBone) this.bones[o.name.replace(/^mixamorig:?/, "")] = o; });
+    this.mixer = new THREE.AnimationMixer(m);
+    const clip = n => XBOT.animations.find(a => a.name === n);
+    this.act = {};
+    for (const n of ["idle", "walk"]) { const a = this.mixer.clipAction(clip(n)); a.play(); a.setEffectiveWeight(n === "idle" ? 1 : 0); this.act[n] = a; }
+    for (const n of ["agree", "headShake", "sad_pose"]) { const c = clip(n); if (!c) continue; const a = this.mixer.clipAction(c); a.blendMode = THREE.AdditiveAnimationBlending; a.play(); a.setEffectiveWeight(0); this.act[n] = a; }
+    this.act.idle.time = rand(0, 3); this.act.walk.time = rand(0, 1);
+    this.w = {walk: 0, agree: 0, headShake: 0, sad_pose: 0};
+    m.updateMatrixWorld(true);
+    this.hipH = this.bones.Hips ? this.bones.Hips.getWorldPosition(new THREE.Vector3()).y - this.root.position.y : 1.0;
+    this.pose3 = {};
+    // accessories on bones
+    const head = this.bones.Head, hand = this.bones.RightHand;
+    const attach = (bone, obj, x, y, z) => { // place in metres regardless of the bone's unit scale
+      const k = 1 / (bone.getWorldScale(new THREE.Vector3()).x || 1); bone.add(obj); obj.scale.setScalar(k); obj.position.set(x * k, y * k, z * k); };
+    if (head && role === "trader") attach(head, mesh(new THREE.TorusGeometry(0.1, 0.011, 8, 24, Math.PI), M.black), 0, 0.1, 0);
+    if (head && (role === "research" || opts.glasses)) { const gl = new THREE.Group(); [-1, 1].forEach(sd => { const r = mesh(new THREE.TorusGeometry(0.025, 0.004, 6, 16), M.black, false); r.position.set(sd * 0.033, 0, 0); gl.add(r); }); gl.add(boxM(0.02, 0.004, 0.004, M.black)); attach(head, gl, 0, 0.09, 0.095); }
+    if (hand) for (const o of Object.values(this.props)) { this.armR.el.remove(o); o.rotation.set(0, 0, 0); attach(hand, o, 0, 0.09, 0.03); }
+    this.restQ = {}; for (const [k, bn] of Object.entries(this.bones)) this.restQ[k] = bn.quaternion.clone();
+  }
+  animateModel(dt, t, walking) {
+    const R = this.root, seated = !!this.seat && !walking, b = this.bones;
+    if (!seated) this.sitBlend = damp(this.sitBlend, 0, 6, dt); else this.sitBlend = damp(this.sitBlend, 1, 6, dt);
+    R.position.set(this.pos.x, 0, this.pos.z); R.rotation.y = this.yaw;
+    const pose = walking ? "walk" : this.pose, sb = this.sitBlend;
+    // clip weights: walk vs idle; additive nod / head-shake / slump layered on top
+    this.w.walk = damp(this.w.walk, walking ? 1 : 0, 8, dt);
+    this.act.walk.setEffectiveWeight(this.w.walk); this.act.idle.setEffectiveWeight(1 - this.w.walk);
+    this.act.walk.timeScale = this.speed / 1.25;
+    const listening = pose === "talk" && !this.speaking;
+    const tgt = {agree: listening && Math.sin(t * 0.7 + this.phase) > 0.2 ? 1 : 0, headShake: pose === "facepalm" ? 1 : 0, sad_pose: this.mood < -0.4 && !walking ? 0.7 : 0};
+    for (const k of ["agree", "headShake", "sad_pose"]) if (this.act[k]) { this.w[k] = damp(this.w[k], tgt[k], 4, dt); this.act[k].setEffectiveWeight(this.w[k]); }
+    for (const k of ["LeftUpLeg", "RightUpLeg", "LeftLeg", "RightLeg", "Spine1", "RightArm", "RightForeArm", "LeftArm", "LeftForeArm", "Neck", "Head"])
+      if (b[k]) b[k].quaternion.copy(this.restQ[k]); // clips overwrite; reset guards against drift
+    this.mixer.update(dt);
+    this.model.position.y = -sb * (this.hipH - 0.56); this.model.position.z = -0.12 * sb;
+    this.model.updateMatrixWorld(true);
+    // procedural layer (world-axis rotations, rig independent)
+    const f = _v1.set(Math.sin(this.yaw), 0, Math.cos(this.yaw)), right = _v2.set(-Math.cos(this.yaw), 0, Math.sin(this.yaw)).clone();
+    const P = this.pose3, ks = 1 - Math.exp(-10 * dt);
+    const want = {thigh: 1.5 * sb, knee: -1.55 * sb, uarm: 0, farm: 0, uarmL: 0, farmL: 0, inR: 0, inL: 0, spine: 0, headY: 0, headX: 0, raise: 0};
+    if (seated) { want.uarm = want.uarmL = 0.55; want.farm = want.farmL = 0.85; want.inR = 0.35; want.inL = -0.35; want.spine = 0.08;
+      if (this.role !== "ceo" || Math.sin(t * 0.3) > 0) { const fast = this.typingFast ? 1.8 : 1; want.farm += Math.sin(t * 16 * fast + this.phase) * 0.06; want.farmL += Math.sin(t * 14 * fast + this.phase * 2) * 0.06; }
+      if (Math.sin(t * 0.13 + this.phase) > 0.97) { want.uarm = want.uarmL = 2.6; want.farm = want.farmL = 0.2; } }
+    if (pose === "talk" && this.speaking) { const g = Math.sin(t * 3.1 + this.phase), g2 = Math.sin(t * 2.2 + this.phase * 1.7); want.uarm = 0.45 + Math.max(0, g) * 0.5; want.farm = 1.0 + g * 0.35; want.inR = 0.25; want.uarmL = 0.2 + Math.max(0, g2) * 0.4; want.farmL = 0.8 + Math.max(0, g2) * 0.4; want.inL = -0.2; }
+    if (pose === "coffee") { want.uarm = 0.55; want.farm = 1.9 + Math.max(0, Math.sin(t * 0.8 + this.phase)) * 0.35; want.inR = 0.3; }
+    if (pose === "phone") { want.uarm = 0.35; want.farm = 2.35; want.inR = 0.8; want.headY = 0.15; }
+    if (pose === "cheer") { want.uarm = want.uarmL = 2.9 + Math.sin(t * 9) * 0.1; want.farm = want.farmL = 0.15; }
+    if (pose === "clap") { const c = Math.sin(t * 16) * 0.15; want.uarm = want.uarmL = 0.75; want.farm = want.farmL = 1.25; want.inR = 0.75 + c; want.inL = -0.75 - c; }
+    if (pose === "highfive") { want.uarm = 2.6; want.farm = 0.1; }
+    if (pose === "facepalm") { want.uarm = 0.9; want.farm = 2.3; want.inR = 0.9; want.headX = 0.25; }
+    if (pose === "think") { want.uarm = 0.6; want.farm = 2.2; want.inR = 0.7; want.uarmL = 0.4; want.farmL = 1.4; want.inL = -0.9; }
+    if (pose === "point") { want.uarm = 1.45; want.farm = 0.05; want.inR = 0.15; }
+    if (pose === "present") { want.uarm = 1.2 + Math.sin(t * 1.3) * 0.12; want.farm = 0.25; want.inR = -0.3; want.uarmL = 0.4; want.farmL = 0.9; }
+    if (pose === "write") { const w = t * 5 + this.phase; want.uarm = 1.75 + Math.sin(w) * 0.12; want.farm = 0.6 + Math.cos(w * 1.3) * 0.15; want.inR = 0.2 + Math.sin(w * 0.7) * 0.1; }
+    if (this.carryObj || this.carryTablet) { want.uarm = want.uarmL = 0.6; want.farm = want.farmL = 1.0; want.inR = 0.4; want.inL = -0.4; }
+    if (this.lookTarget) { const lt = this.lookTarget.pos || this.lookTarget; want.headY = clamp(angDiff(this.yaw, Math.atan2(lt.x - this.pos.x, lt.z - this.pos.z)), -1.0, 1.0); }
+    else if (seated && Math.sin(t * 0.37 + this.phase * 2) > 0.93) want.headY = 0.6;
+    else if (!walking && !seated && pose === "stand") want.headY = Math.sin(t * 0.5 + this.phase) * 0.4;
+    if (seated) want.headX += 0.12;
+    for (const k in want) P[k] = (P[k] ?? 0) + (want[k] - (P[k] ?? 0)) * ks;
+    // legs (sitting): thighs forward, shins down
+    rotWorld(b.LeftUpLeg, right, P.thigh); rotWorld(b.RightUpLeg, right, P.thigh);
+    rotWorld(b.LeftLeg, right, P.knee); rotWorld(b.RightLeg, right, P.knee);
+    rotWorld(b.Spine1, right, -P.spine); // a negative angle about the right axis leans the torso forward
+    // arms: forward about the right axis, then inward about the vertical
+    rotWorld(b.RightArm, right, P.uarm); rotWorld(b.RightArm, UP, P.inR);
+    rotWorld(b.RightForeArm, right, P.farm);
+    rotWorld(b.LeftArm, right, P.uarmL); rotWorld(b.LeftArm, UP, P.inL);
+    rotWorld(b.LeftForeArm, right, P.farmL);
+    rotWorld(b.Neck, UP, P.headY * 0.5); rotWorld(b.Head, UP, P.headY * 0.5); rotWorld(b.Head, right, -P.headX);
+    if (this.speaking) rotWorld(b.Head, f, Math.sin(t * 2.6 + this.phase) * 0.05);
+    this.props.cup.visible = pose === "coffee"; this.props.phone.visible = pose === "phone"; this.props.tablet.visible = !!this.carryTablet;
+    if (this.carryObj) this.carryObj.position.set(0, 1.08, 0.32);
   }
   // ---- task queue
   do(task) { this.queue.push(task); return this; }
@@ -541,6 +656,7 @@ class Person {
   standUp() { if (this.seat) { this.seat.taken = null; this.seat = null; } }
   turnTo(a, dt, rate) { this.yaw += angDiff(this.yaw, a) * (1 - Math.exp(-rate * dt)); }
   animate(dt, t, walking) {
+    if (this.model) return this.animateModel(dt, t, walking);
     const R = this.root, seated = !!this.seat && !walking;
     if (!seated) this.sitBlend = damp(this.sitBlend, 0, 6, dt);
     const sb = this.sitBlend, pose = walking ? "walk" : this.pose;
