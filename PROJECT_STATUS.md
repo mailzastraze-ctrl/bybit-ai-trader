@@ -1,6 +1,6 @@
 # PROJECT_STATUS
 
-_Last updated: 2026-11-20 22:00 CET_
+_Last updated: 2026-11-20 22:50 CET_
 
 ## Summary
 The system is **deployed and running autonomously on Bybit Demo**. It never trades real money: `demo_trading` is hard-required.
@@ -27,6 +27,14 @@ Links and rules:
 | — | Cloud, independent of your PC | ✅ / ⚠️ | Railway **trial** credit runs out in about 15 days. Hobby is needed for indefinite operation |
 | — | GitHub + PROJECT_STATUS | ✅ | CI green with the real Freqtrade image; 113 tests |
 
+## Weak spots fixed (2026-11-20, 22:50)
+- **Screener false-discovery control:** every holdout test gets a p-value. Survivors must pass Benjamini–Hochberg (q = 0.2) across all holdout tests of the run, and the run reports the expected number of lucky survivors.
+- **New information sources** (beyond price and volume):
+  - `rel_strength`: a coin's performance relative to BTC (cross-sectional momentum). BTC candles are merged on the same candle.
+  - `oi_flow`: price move combined with the **open-interest** change, in two modes (confirm a breakout carried by new positions, or fade a move on collapsing OI). Research downloads Bybit OI history (`/v5/market/open-interest`, incremental, through the relay); the live bot fetches recent OI via ccxt; OI is merged as of the candle start.
+  - 18 families in total.
+- **One web interface in Russian:** tabs Обзор / Стратегии / Лаборатория / Сделки / 3D-офис. Strategy cards are in the style of the owner's Strategy Lab. The old `/terminal` redirects to the control room, and the company log is translated.
+
 ## Owner's Strategy Lab integrated + owner's rules (2026-11-20, 22:00)
 Research pipeline, end to end:
 1. **Stage 1, mass screener** (`screener/`, Node): the owner's Bybit Strategy Lab engine (`engine.js`, unchanged) tries thousands of strategy × parameter × exit combinations per coin and timeframe (15m + 1h, 1x, Bybit fees + slippage).
@@ -37,7 +45,7 @@ Research pipeline, end to end:
 4. **Stage 4, demo trading** at 0.1% risk, then readiness.
 
 Strategy families:
-- **16 families.** All 10 engine strategies have exact twins: SuperTrend, MACD, ADX+DI, Hull MA, RSI, Stochastic, Z-score, EMA cross, plain Bollinger, turtle. The 6 earlier families remain.
+- **18 families.** All 10 engine strategies have exact twins: SuperTrend, MACD, ADX+DI, Hull MA, RSI, Stochastic, Z-score, EMA cross, plain Bollinger, turtle. The 6 earlier families remain.
 - The owner's own SOL 15m z-score configuration is imported (`research/external/`). It is walk-forward tested with fixed parameters and forward-tested.
 
 Ranking and the trading bot:
