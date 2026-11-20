@@ -1,6 +1,6 @@
 # PROJECT_STATUS
 
-_Last updated: 2026-11-20 16:25 CET_
+_Last updated: 2026-11-20 17:00 CET_
 
 ## Summary
 The system is **deployed and running autonomously on Bybit Demo**. It never trades real money: `demo_trading` is hard-required.
@@ -49,9 +49,25 @@ Links and rules:
 - **Registry backup** every lab run (30-day artifact; the repo is public, so the demo data in it is visible to GitHub users).
 - **Not done yet:**
   - Telegram alerts (need a bot token from the owner);
-  - Bybit instead of OKX research data (GitHub runners are geo-blocked by Bybit);
   - cross-sectional momentum / open-interest data;
   - a real-account switch procedure.
+
+## Real Bybit research data (2026-11-20)
+Bybit blocks US IPs, and GitHub runners are in the US. Probe result: a direct request from the runner gets HTTP 403, while the same request through the server relay gets HTTP 200.
+
+How the data reaches the lab:
+- The live server (Railway EU) relays **GET-only `/v5/market/*`** requests to `api.bybit.com` at `/relay/`. Tokens are 8-hour HMACs issued via OIDC; no new ports and no API keys are involved.
+- Research freqtrade subprocesses load a `sitecustomize` hook that rewrites ccxt's Bybit URLs to the relay. ccxt's own proxy options conflicted.
+
+First live run 15:44 UTC: instruments, risk limits, 1h klines and funding history were all downloaded through the relay with HTTP 200. Fallback to OKX applies if Bybit is unreachable, and no experiments run on a universe smaller than 4 pairs.
+
+Incident: the first attempt (ccxt proxy conflict) produced 50 empty experiments. The guard above was added and that batch file removed.
+
+## HQ staff (2026-11-20)
+- **Model and motion:** motion-captured skinned characters (three.js Xbot, Mixamo rig) with idle/walk mocap plus additive nod, head-shake and slump.
+- **Procedural poses** (world-axis, rig-independent): sitting, typing, talking, phone, coffee, cheering, clapping, pointing, whiteboard.
+- **Clothing shader:** skin, hair, shirts/jackets by department, lab coats, ties, belts, trousers, shoes.
+- **Fallback:** the procedural rig if the model can't load.
 
 ## Research lab (GitHub Actions), added 2026-11-20
 1. `GET /api/lab/state` fetches learnings, revalidations due, strategies worth refining and the family bandit stats.
@@ -92,6 +108,6 @@ userdir must exist · absolute `file:////` pairlist URL · OOM on 1 GB (now: no 
 Owner decisions (2026-11-20): keep the current Bybit **Demo** API key (no rotation); make the repo public for free research compute.
 
 ## Known limitations
-- GitHub runners can't reach Bybit (US geo-block), so research uses OKX prices as a proxy. Candidates must pass Bybit Demo forward tests.
+- Research data now comes from Bybit through the server relay. If the relay is down, a run falls back to OKX data and says so in its report.
 - Backtest TP fills at candle close, not intrabar.
 - Funding family: live funding candles are requested only when a funding sleeve is deployed. If data is missing, the family stays silent.
