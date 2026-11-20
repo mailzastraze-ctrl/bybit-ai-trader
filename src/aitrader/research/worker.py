@@ -15,6 +15,16 @@ from aitrader.util import iso, parse_dt, setup_logging, utcnow
 
 log = setup_logging("research")
 UNIVERSE_MAX_AGE_H = 12
+KEEP_JOBS = 12
+
+
+def prune_jobs(jobs_dir) -> None:
+    """Keep disk usage bounded: results live in the registry, job folders are scratch."""
+    import shutil
+    dirs = sorted((d for d in jobs_dir.iterdir() if d.is_dir() and not d.name.startswith("_")),
+                  key=lambda d: d.stat().st_mtime, reverse=True)
+    for d in dirs[KEEP_JOBS:]:
+        shutil.rmtree(d, ignore_errors=True)
 
 
 def universe(reg: Registry, scanner: Scanner) -> list[str]:
@@ -61,6 +71,7 @@ def main() -> None:
                                                 "error": f"{e}\n{traceback.format_exc()[-1500:]}"[:4000]})
                 reg.event("research", f"experiment {eid} failed: {str(e)[:300]}", "error")
             learner.learn_from_research()
+            prune_jobs(s.jobs_dir)
             reg.heartbeat("research", "idle", {"last_experiment": eid})
             time.sleep(s.research.idle_sleep_s)
         except Exception as e:  # noqa: BLE001 – never die

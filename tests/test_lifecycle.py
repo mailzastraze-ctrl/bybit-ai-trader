@@ -218,3 +218,21 @@ def test_runner_creates_userdir(env, monkeypatch):
     job = Job(s.jobs_dir / "xtest")
     FreqtradeRunner(s).test_pairlist(job, job.path("c.json"))
     assert seen["userdir_exists"]
+
+
+def test_prune_jobs_and_lite_profile(tmp_path, monkeypatch):
+    import os
+    import time
+
+    from aitrader.research.worker import KEEP_JOBS, prune_jobs
+    for i in range(KEEP_JOBS + 5):
+        d = tmp_path / f"x{i:03d}"
+        d.mkdir()
+        os.utime(d, (time.time() + i, time.time() + i))
+    (tmp_path / "_scan").mkdir()
+    prune_jobs(tmp_path)
+    left = sorted(p.name for p in tmp_path.iterdir())
+    assert "_scan" in left and len(left) == KEEP_JOBS + 1 and "x000" not in left
+    monkeypatch.setenv("AITRADER_PROFILE", "lite")
+    s = Settings()
+    assert s.research.hyperopt_jobs == 1 and s.research.epochs == 60

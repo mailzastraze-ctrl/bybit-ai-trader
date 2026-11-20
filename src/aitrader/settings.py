@@ -96,6 +96,10 @@ class Settings:
 
     def __post_init__(self) -> None:
         r = self.research
+        if os.environ.get("AITRADER_PROFILE", "").lower() == "lite":
+            # Small instances (≈1 GB RAM, e.g. Railway trial): fewer/lighter experiments.
+            r.epochs, r.hyperopt_jobs, r.pairs_per_experiment = 60, 1, 6
+            r.universe_size, r.perturbations, r.mc_samples, r.idle_sleep_s = 16, 4, 1000, 900
         r.epochs = _i("RESEARCH_EPOCHS", r.epochs)
         r.hyperopt_jobs = _i("RESEARCH_JOBS", r.hyperopt_jobs)
         r.idle_sleep_s = _i("RESEARCH_IDLE_SECONDS", r.idle_sleep_s)
