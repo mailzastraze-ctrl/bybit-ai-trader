@@ -70,8 +70,13 @@ def healthz() -> dict:
 
 
 @app.get("/", dependencies=[Depends(auth)])
-def hq() -> Response:
-    """3D company headquarters view (live data)."""
+def home() -> Response:
+    """Control room (primary screen); the 3D office lives at /hq."""
+    return FileResponse(STATIC / "control.html", headers={"Cache-Control": "no-store"})
+
+
+@app.get("/hq", dependencies=[Depends(auth)])
+def hq_page() -> FileResponse:
     return FileResponse(STATIC / "hq.html", headers={"Cache-Control": "no-store"})
 
 

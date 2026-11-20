@@ -1,5 +1,5 @@
 name: hq-preview
-# Renders the 3D HQ in headless Chromium with demo data, fails on JavaScript errors and
+# Renders the control room and the 3D HQ in headless Chromium with demo data, fails on JavaScript errors and
 # commits screenshots to docs/preview/ (so UI changes are verified before anyone looks).
 on:
   push:

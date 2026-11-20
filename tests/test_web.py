@@ -26,13 +26,15 @@ def test_auth_and_endpoints(client):
     assert client.get("/api/overview").status_code == 401
     assert client.get("/api/overview", auth=("admin", "wrong")).status_code == 401
     a = ("admin", "pw")
-    assert "AI TRADER HQ" in client.get("/", auth=a).text
+    assert "Control Room" in client.get("/", auth=a).text
+    assert "AI TRADER HQ" in client.get("/hq", auth=a).text
+    assert "renderForward" in client.get("/static/control.js").text
     assert "class Person" in client.get("/static/hq.js").text
     assert "AI TRADER" in client.get("/terminal", auth=a).text
     ov = client.get("/api/overview", auth=a).json()
     assert ov["bot_up"] is False and ov["open_trades"] == []
     for path in ("/api/trades", "/api/strategies", "/api/research", "/api/market",
-                 "/api/learnings", "/api/events", "/api/health"):
+                 "/api/learnings", "/api/events", "/api/health", "/api/forward", "/api/goals"):
         r = client.get(path, auth=a)
         assert r.status_code == 200, path
     assert client.get("/api/lab/state").status_code == 401

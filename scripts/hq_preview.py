@@ -102,6 +102,8 @@ def seed(data: Path) -> None:
         reg.event(src, msg)
     reg.heartbeat("manager", "ok", {"mem_headroom_mb": 420})
     reg.heartbeat("research", "busy", {"remote": True})
+    from aitrader import forward
+    reg.kv_set("forward", forward.summarize([]) | {"persistence": forward.persistence(reg)})
     reg.kv_set("selftest", {"ok": True})
     reg.kv_set("exec_test", {"ok": True})
 
@@ -155,6 +157,17 @@ def serve(port: int):
     uvicorn.run(webapp.app, host="127.0.0.1", port=port, log_level="warning")
 
 
+def snap(pg, path: Path) -> None:
+    """Software WebGL is slow on CI runners: a slow frame must not fail the whole preview."""
+    for _ in range(3):
+        try:
+            pg.screenshot(path=str(path), timeout=60_000)
+            return
+        except Exception as e:  # noqa: BLE001
+            print("screenshot retry:", path.name, str(e)[:120])
+            time.sleep(3)
+
+
 def shoot(port: int, out: Path) -> int:
     from playwright.sync_api import sync_playwright
     out.mkdir(parents=True, exist_ok=True)
@@ -164,17 +177,30 @@ def shoot(port: int, out: Path) -> int:
         pg = b.new_page(viewport={"width": 1600, "height": 900}, http_credentials={"username": "admin", "password": "pw"})
         pg.on("console", lambda m: errors.append(m.text) if m.type == "error" else None)
         pg.on("pageerror", lambda e: errors.append(str(e)))
+        # control room (primary screen): desktop + phone
         pg.goto(f"http://127.0.0.1:{port}/", wait_until="load")
+        pg.wait_for_function("window.__ready === true", timeout=60_000)
+        time.sleep(2)
+        pg.screenshot(path=str(out / "control-room.png"), full_page=True)
+        ph = b.new_page(viewport={"width": 420, "height": 900}, http_credentials={"username": "admin", "password": "pw"})
+        ph.on("pageerror", lambda e: errors.append(str(e)))
+        ph.goto(f"http://127.0.0.1:{port}/", wait_until="load")
+        ph.wait_for_function("window.__ready === true", timeout=60_000)
+        time.sleep(2)
+        ph.screenshot(path=str(out / "control-room-phone.png"), full_page=True)
+        ph.close()
+        # 3D office
+        pg.goto(f"http://127.0.0.1:{port}/hq", wait_until="load")
         pg.wait_for_function("window.__hqReady === true", timeout=90_000)
         time.sleep(9)
-        pg.screenshot(path=str(out / "hq-overview.png"))
+        snap(pg, out / "hq-overview.png")
         shots = [("hq-mission", "mission"), ("hq-research", "research"), ("hq-trading", "trading"), ("hq-cloud", "cloud")]
         for name, key in shots:
             label = {"mission": "Company Mission", "research": "Research Lab", "trading": "Trading Floor",
                      "cloud": "GitHub Research Lab"}[key]
             pg.evaluate(f"document.querySelectorAll('.tag').forEach(t => {{ if (t.querySelector('b').textContent.trim() === {json.dumps(label)}) t.click(); }})")
             time.sleep(4)
-            pg.screenshot(path=str(out / f"{name}.png"))
+            snap(pg, out / f"{name}.png")
         # close-ups: a researcher and a trader (character detail + animation)
         pg.evaluate("document.getElementById('px').click()")
         for name, idx in (("hq-person-research", 3), ("hq-person-trader", 11)):
@@ -182,7 +208,7 @@ def shoot(port: int, out: Path) -> int:
             time.sleep(2)
             pg.evaluate(f"window.__hq.follow({idx}, true)")
             time.sleep(4)
-            pg.screenshot(path=str(out / f"{name}.png"))
+            snap(pg, out / f"{name}.png")
         b.close()
     (out / "console.txt").write_text("\n".join(errors) or "no errors")
     print("console errors:", errors)
