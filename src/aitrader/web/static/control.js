@@ -153,11 +153,12 @@ function renderResults() {
   const done = (S.rs?.experiments || []).filter((e) => e.status === "done").slice(0, 14);
   if (!done.length) { $("#results").innerHTML = `<div class="empty">No finished experiments yet.</div>`; return; }
   const vp = (v) => pill(v, {validated: "good", exploratory: "warn", rejected: ""}[v] || "");
-  $("#results").innerHTML = `<table><thead><tr><th>Strategy</th><th class="r">Trades</th><th class="r">PF</th><th class="r">Sharpe</th><th class="r">Max DD</th><th>Folds</th><th>Verdict</th></tr></thead><tbody>${done.map((e) => {
+  $("#results").innerHTML = `<table><thead><tr><th>Strategy</th><th class="r">Trades</th><th class="r">PF</th><th class="r">Sharpe</th><th class="r">Max DD</th><th class="r" title="R² of the unseen-period equity curve (1 = steady line up) · last 3 months">Steadiness</th><th>Folds</th><th>Verdict</th></tr></thead><tbody>${done.map((e) => {
     const o = e.oos || {}, f = e.folds || [];
-    return `<tr><td>${esc(e.variant || famName(e.family))}<div class="dim">${e.pairs} pairs · ${ago(e.finished)}</div></td>
+    return `<tr><td>${esc(e.variant || famName(e.family))}<div class="dim">${e.pairs} pairs · ${esc(e.timeframe || "1h")} · ${ago(e.finished)}</div></td>
       <td class="r num">${o.trades ?? "—"}</td><td class="r num ${(o.profit_factor || 0) >= 1 ? "pos" : "neg"}">${o.profit_factor ?? "—"}</td>
       <td class="r num">${o.sharpe ?? "—"}</td><td class="r num">${o.max_drawdown != null ? (o.max_drawdown * 100).toFixed(1) + "%" : "—"}</td>
+      <td class="r num">${o.curve_r2 != null ? `<span class="${cls(o.curve_r2)}">${o.curve_r2.toFixed(2)}</span><div class="dim">3m ${pct(o.last90_return, 1)}</div>` : "—"}</td>
       <td title="each square = one 90-day test window">${f.map((x) => `<span class="fold ${x.ret > 0 ? "p" : x.ret < 0 ? "n" : ""}" title="${esc(x.test)}: ${pct(x.ret)}, ${x.trades ?? 0} trades"></span>`).join("")}</td>
       <td>${vp(e.summary?.verdict || "—")}</td></tr>`;
   }).join("")}</tbody></table>`;

@@ -139,6 +139,7 @@ def research(limit: int = 60) -> dict:
             r["oos"] = res.get("oos")
             r["gates"] = res.get("gates")
             r["variant"] = res.get("variant")
+            r["timeframe"] = res.get("timeframe") or (spec.get("timeframe") if isinstance(spec, dict) else None)
             r["folds"] = [{"test": f.get("test"), "trades": (f.get("oos") or {}).get("trades"),
                            "ret": (f.get("oos") or {}).get("total_return"),
                            "pf": (f.get("oos") or {}).get("profit_factor")} for f in (res.get("folds") or [])]

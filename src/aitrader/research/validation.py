@@ -56,7 +56,11 @@ def score(oos: dict, dsr: float) -> float:
         return 0.0
     sharpe = max(min(oos.get("sharpe", 0.0), 4.0), 0.0)
     dd = min(oos.get("max_drawdown", 1.0), 1.0)
-    return round(sharpe * (1 - dd) * math.sqrt(min(trades, 100) / 100.0) * (0.5 + 0.5 * dsr), 4)
+    # steadiness of the unseen-period equity curve (owner's criterion): a jagged curve with the
+    # same Sharpe ranks lower; a falling last quarter is a warning sign
+    steady = 0.5 + 0.5 * max(min(float(oos.get("curve_r2", 0.0)), 1.0), 0.0)
+    recent = 1.0 if float(oos.get("last90_return", 0.0)) >= 0 else 0.7
+    return round(sharpe * (1 - dd) * math.sqrt(min(trades, 100) / 100.0) * (0.5 + 0.5 * dsr) * steady * recent, 4)
 
 
 def evaluate_gates(g: Gates, m: dict) -> tuple[str, dict]:

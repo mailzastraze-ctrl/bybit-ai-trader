@@ -124,3 +124,17 @@ def test_daily_returns_zero_fill():
     df = M.trades_frame(make_trades([10, 10]))
     r = M.daily_returns(df, 1000, pd.Timestamp("2025-05-30", tz="UTC"), pd.Timestamp("2025-06-10", tz="UTC"))
     assert len(r) == 12 and (r >= 0).all()
+
+
+def test_stability_prefers_a_steady_curve():
+    import numpy as np
+    import pandas as pd
+
+    from aitrader.research.metrics import stability
+    idx = pd.date_range("2025-01-01", periods=360, freq="1D", tz="UTC")
+    steady = stability(pd.Series(0.001 + np.random.default_rng(1).normal(0, 0.001, 360), index=idx))
+    jagged = stability(pd.Series(np.r_[np.full(180, 0.006), np.full(180, -0.004)], index=idx))
+    falling = stability(pd.Series(np.full(360, -0.001), index=idx))
+    assert steady["curve_r2"] > 0.9 and steady["pos_months"] == 1.0 and steady["last90_return"] > 0
+    assert jagged["curve_r2"] < steady["curve_r2"] and jagged["last90_return"] < 0
+    assert falling["curve_r2"] < -0.9

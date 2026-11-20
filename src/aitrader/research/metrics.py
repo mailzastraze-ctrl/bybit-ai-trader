@@ -124,7 +124,33 @@ def summarize(trades: Iterable[dict] | pd.DataFrame, starting_balance: float,
         "kurtosis": round(float(r.kurt() + 3.0) if len(r) > 3 else 3.0, 4),
         "n_days": int(len(r)),
         "daily_sharpe": round(sharpe(r, 1), 6),
+        **stability(r),
     }
+
+
+def stability(r: pd.Series) -> dict:
+    """How steadily the equity curve rises (the owner's 'steady line up' criterion), measured
+    on whatever window the trades come from – used on unseen out-of-sample windows only.
+      curve_r2      R² of a straight line through the equity curve, signed by its slope
+                    (+1 = perfectly steady rise, −1 = perfectly steady fall)
+      pos_months    share of calendar months that made money
+      last90_return return of the last 90 days of the window"""
+    if len(r) < 20:
+        return {"curve_r2": 0.0, "pos_months": 0.0, "last90_return": 0.0}
+    eq = (1.0 + r).cumprod().to_numpy()
+    x = np.arange(len(eq), dtype=float)
+    slope, icpt = np.polyfit(x, eq, 1)
+    fit = slope * x + icpt
+    ss_tot = float(((eq - eq.mean()) ** 2).sum())
+    r2 = 1.0 - float(((eq - fit) ** 2).sum()) / ss_tot if ss_tot > 0 else 0.0
+    if isinstance(r.index, pd.DatetimeIndex):
+        months = r.groupby([r.index.year, r.index.month]).sum()
+    else:
+        months = r.groupby(x // 30).sum()
+    last = r.iloc[-90:]
+    return {"curve_r2": round(float(np.sign(slope)) * max(r2, 0.0), 4),
+            "pos_months": round(float((months > 0).mean()), 4),
+            "last90_return": round(float((1.0 + last).prod() - 1.0), 5)}
 
 
 # --------------------------------------------------------------------- overfitting stats
