@@ -1,6 +1,6 @@
 # PROJECT_STATUS
 
-_Last updated: 2026-11-20 17:00 CET_
+_Last updated: 2026-11-20 21:00 CET_
 
 ## Summary
 The system is **deployed and running autonomously on Bybit Demo**. It never trades real money: `demo_trading` is hard-required.
@@ -10,7 +10,7 @@ Architecture, split by load:
 - **GitHub Actions research lab** (`research-lab` workflow, public repo, 4 vCPU runners, free minutes): all hyperopt, walk-forward, stress, robustness and Monte Carlo. It sends only compact results to the server.
 
 Links and rules:
-- Web HQ: https://aitrader-production-cf456409.up.railway.app (basic auth, user `admin`, password in the Railway variable `WEB_PASSWORD`). Classic terminal: `/terminal`.
+- Web: https://aitrader-production-cf456409.up.railway.app (basic auth, user `admin`, password in the Railway variable `WEB_PASSWORD`). `/` = **control room** (primary screen), `/hq` = 3D office, `/terminal` = classic terminal.
 - Repo: `mailzastraze-ctrl/bybit-ai-trader` (**public** since 2026-11-20; no secrets in the repo or its history). Railway deploys on code changes only (`src`, `ft`, `config`, `Dockerfile`, `pyproject.toml`); research commits do not redeploy.
 - No profitability is claimed. Every number comes from real demo fills or from walk-forward out-of-sample backtests.
 
@@ -23,9 +23,33 @@ Links and rules:
 | 4 | Realistic validation, costs, OOS, overfitting control | ✅ | Walk-forward OOS, fees + slippage + funding, 2× cost stress, ±10% parameter perturbation, Monte Carlo and WFE gates. **Deflated Sharpe counts every trial of the last 90 days** (`research/ledger.json`), so continuous searching cannot inflate significance |
 | 5 | Execute and manage trades on Bybit Demo, controlled experiments | ✅ verified | Execution test passed: entry → **exchange stop-loss** → exit. Exploration sleeves trade at 0.1% risk |
 | 6 | Analyse, learn, promote only after independent validation | ✅ code / ⏳ trades | Learner (pair exclusion, MFE, time exits, side asymmetry, gate failures) with A/B pruning. Lifecycle: exploration → incubation → forward demo evidence → production. Revalidation every 14 days runs in the lab; a failed one retires the strategy |
-| 7 | Web terminal | ✅ live | **3D HQ v3**: real data on every screen (live 1h candles with entry/stop/target, live GitHub hyperopt epochs, fold results, gates, bandit, market map, goals). Company mission board, stand-up meetings built from real numbers, GitHub-lab cloud with data beam, expressive characters. Rendered headlessly on every UI change (`hq-preview` workflow, screenshots in `docs/preview/`, fails on JS errors) |
+| 7 | Web terminal | ✅ live | **Control room** (primary, desktop + phone): capital curve, positions with protection state, forward-test verdict, 4 live lab runners, results with fold squares, bandit, gates, lifecycle, goals, readiness, log, learnings, closed trades. **3D HQ v3** at `/hq`: real data on every screen (live 1h candles with entry/stop/target, live GitHub hyperopt epochs, fold results, gates, bandit, market map, goals). Company mission board, stand-up meetings built from real numbers, GitHub-lab cloud with data beam, expressive characters. Rendered headlessly on every UI change (`hq-preview` workflow, screenshots in `docs/preview/`, fails on JS errors) |
 | — | Cloud, independent of your PC | ✅ / ⚠️ | Railway **trial** credit runs out in about 15 days. Hobby is needed for indefinite operation |
-| — | GitHub + PROJECT_STATUS | ✅ | CI green with the real Freqtrade image; 104 tests |
+| — | GitHub + PROJECT_STATUS | ✅ | CI green with the real Freqtrade image; 113 tests |
+
+## Forward test — "can this system make money?" (2026-11-20, 21:00)
+The direct answer to the owner's question, in days to weeks instead of months.
+- **Shadow book** (`forward.py`, `research/shadow.py`): every finished walk-forward experiment is **frozen** when it finishes (parameters and pairs never change afterwards). Each lab run backtests every frozen strategy (up to 120, last 60 days) on real Bybit candles **after its freeze time only**, with fees and the 5 bp/side slippage haircut. Open trades at the data end are excluded.
+- It includes the weak candidates on purpose: the test is whether the research's own ranking predicts unseen performance.
+- **Pre-registered verdict** (fixed before any forward data existed): the top quartile by backtest score at freeze vs the rest.
+  - too early: < 100 forward trades or < 7 days;
+  - early read: direction only;
+  - **works**: ≥ 200 trades, ≥ 14 days, PF ≥ 1.15 after costs, daily-pooled t ≥ 2.0;
+  - **not working**: PF < 1.0 or return ≤ 0 at that point. That would mean the search finds noise and needs new data sources (OI, liquidations, cross-sectional), not more of the same.
+- **Immediate history indicator:** does a profitable first half of the walk-forward holdout predict a profitable second half?
+- **Forward-proven strategies** (≥ 20 forward trades, PF ≥ 1.3 after costs, positive) become `exploratory` (`fw-…`) and can get demo capital.
+- Shown at the top of the control room, as a company goal and at `/api/forward`.
+
+## Research throughput ×4 (2026-11-20, 21:00)
+`research-lab` is now `prep` → **4 parallel runners** (4 vCPU each) + `shadow` (forward test) → `merge`.
+- Each runner opens with a different family (UCB rank), and its local bandit counts the run's own finished experiments.
+- Deflated Sharpe is computed over every trial: the 90-day ledger plus all four runners.
+- Private-repo fallback: 1 runner.
+
+## Honest numbers (2026-11-20, 21:00)
+- PF no longer shows a fake 99 without losses; the PF goal needs ≥ 30 trades.
+- Infrastructure losses (cancelled runner, restart) count as `lost`, not research failures.
+- Capital = the bot's USDT trading capital (≈ 49.8k). The self-test also shows the whole demo account value including other coins (≈ 168k).
 
 ## Success-critical upgrades (2026-11-20, evening)
 - **Real-money readiness gate** (`readiness.py`, `/api/readiness`, HQ mission panel). It is advisory and never switches by itself. All 8 checks are evaluated on post-promotion production trades:
@@ -103,7 +127,9 @@ First run, 2026-11-20: scan finished at 14:56 UTC, experiments streaming.
 userdir must exist · absolute `file:////` pairlist URL · OOM on 1 GB (now: no research on the server) · universe too small · artifact permissions · forced-entry stake · keep-alive reset · hyperopt hang (watchdog) · weak candidates (stricter gates + retraction) · placeholders blocking research · CI missing psutil.
 
 ## Needs the owner
-1. **Railway Hobby** (with a hard usage limit) for operation beyond the trial (≈ $10/month measured; trial credit ≈ 15 days).
+1. **Railway Hobby** (with a hard usage limit) for operation beyond the trial (≈ $10/month measured; trial credit ≈ 15 days). This is the only payment needed now; compute is free on GitHub.
+2. The list of configurations from the owner's own strategy analyzer (`nvidia-trading-ai-2` keeps results in its database, not the repo). They will be added to the forward test.
+3. A second Railway project `boreal-quant-demo` (empty repo) appeared at 20:29 CET, not created by this system. It spends the same trial credit; delete it if unused.
 
 Owner decisions (2026-11-20): keep the current Bybit **Demo** API key (no rotation); make the repo public for free research compute.
 
