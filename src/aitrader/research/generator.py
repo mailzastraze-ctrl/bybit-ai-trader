@@ -45,7 +45,9 @@ class Generator:
                     stats[f] = (int(v[0]), float(v[1]))
             return stats
         stats = {f: (0, 0.0) for f in FAMILIES}
-        rows = self.reg.q("SELECT family, result, status FROM experiments WHERE status IN ('done','failed')")
+        # Only completed experiments are evidence about a family. Infrastructure failures (data,
+        # memory, a broken run) say nothing about the strategy and must not steer the bandit.
+        rows = self.reg.q("SELECT family, result, status FROM experiments WHERE status='done'")
         acc: dict[str, list[float]] = {f: [] for f in FAMILIES}
         for r in rows:
             if r["family"] not in acc:

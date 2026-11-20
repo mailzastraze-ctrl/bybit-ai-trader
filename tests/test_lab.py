@@ -207,3 +207,16 @@ def test_fold_consistency_gate():
     v, g = evaluate_gates(Gates(), {**m, "fold_pos": 0.5})  # only 2 of 4 slices profitable
     assert v == "exploratory" and g["fold_consistency"]["pass"] is False
     assert evaluate_gates(Gates(), {**m, "fold_pos": 0.25})[0] == "rejected"
+
+
+def test_broken_runs_do_not_steer_the_bandit(env):
+    s, reg = env
+    for i in range(20):  # a broken run: many failures, no pairs
+        reg.upsert("experiments", {"id": f"xbad{i:04d}", "created": iso(), "family": "tsmom",
+                                   "spec": {"family": "tsmom", "pairs": []}, "status": "failed", "error": "no data"})
+    reg.upsert("experiments", {"id": "xok00001", "created": iso(), "family": "tsmom",
+                               "spec": {"family": "tsmom", "pairs": PAIRS[:3]}, "status": "failed", "error": "OOM"})
+    assert Generator(s, reg).family_stats()["tsmom"] == (0, 0.0)
+    lab.build_state(s, reg)
+    left = reg.q("SELECT id FROM experiments")
+    assert [r["id"] for r in left] == ["xok00001"]  # real failures are kept, broken-run rows purged

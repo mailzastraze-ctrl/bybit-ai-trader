@@ -109,8 +109,20 @@ def refine_pool(reg: Registry, k: int = 5) -> list[dict]:
     return [x[1] for x in out[:k]]
 
 
+def purge_broken_runs(reg: Registry) -> int:
+    """Experiments that never had pairs (a broken lab run) are not research – remove them."""
+    rows = reg.q("SELECT id, spec FROM experiments WHERE status='failed'")
+    bad = [r["id"] for r in rows if isinstance(r.get("spec"), dict) and not r["spec"].get("pairs")]
+    with reg.conn() as c:
+        for eid in bad:
+            c.execute("DELETE FROM experiments WHERE id=?", (eid,))
+    return len(bad)
+
+
 def build_state(s: Settings, reg: Registry) -> dict:
     _expire_lost_runs(reg)
+    if purge_broken_runs(reg):
+        reg.event("research", "lab: removed experiments of a broken run (no pairs) from the research record")
     now = iso()
     learnings = [lr for lr in reg.q("SELECT id, scope, key, insight, adjustment, expires FROM learnings WHERE active=1")
                  if not lr.get("expires") or lr["expires"] > now]
