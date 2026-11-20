@@ -136,3 +136,18 @@ def test_metrics_are_finite_for_edge_cases():
     s = summarize([], 10_000)
     assert s["trades"] == 0
     assert all(not (isinstance(v, float) and math.isnan(v)) for v in s.values())
+
+
+@pytest.mark.parametrize("name", list(FAMILIES))
+def test_genes_filter_signals_without_lookahead(name):
+    fam = get_family(name)
+    df = ohlcv(2500, seed=9, vol=0.012)
+    base = fam.populate(df, fam.defaults())
+    p = {**fam.defaults(), "htf_trend": 1, "htf_len": 150, "vol_regime": 2}
+    gened = fam.populate(df, p)
+    # genes only ever remove entries
+    assert not (gened["long_sig"] & ~base["long_sig"]).any()
+    assert gened["long_sig"].sum() + gened["short_sig"].sum() <= base["long_sig"].sum() + base["short_sig"].sum()
+    part = fam.populate(df.iloc[:2000].copy(), p)
+    assert (gened["long_sig"].iloc[:2000].values == part["long_sig"].values).all()
+    assert fam.variant(p) == f"{name} +HTF-trend(150) +low-vol"

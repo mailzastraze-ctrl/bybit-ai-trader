@@ -124,3 +124,13 @@ def test_research_strategy_parameters_and_signals():
     df2 = _populate(st, ohlcv(2000, seed=4, vol=0.012))
     n_loose = df2["enter_long"].fillna(0).sum() + df2["enter_short"].fillna(0).sum()
     assert n_loose > n_default  # entry params take effect without re-running populate_indicators
+
+
+def test_exec_test_entries_bypass_sleeve_sizing(portfolio):
+    df = _populate(portfolio, ohlcv(400))
+    portfolio.dp = FakeDP(df)
+    portfolio.wallets = FakeWallets()
+    t = df["date"].iloc[-1].to_pydatetime()
+    assert portfolio.custom_stake_amount("XRP/USDT:USDT", t, 1.0, 30.0, 5.0, 1000.0, 2.0, "exec-test-1", "long") == 30.0
+    assert portfolio.custom_stake_amount("XRP/USDT:USDT", t, 1.0, 30.0, 5.0, 1000.0, 2.0, "random", "long") == 0.0
+    assert portfolio.leverage("XRP/USDT:USDT", t, 1.0, 1.0, 10.0, "exec-test-1", "long") == 2.0

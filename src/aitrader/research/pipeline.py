@@ -178,7 +178,7 @@ class Pipeline:
             "dsr": round(dsr, 4), "n_trials": n_trials, "wfe": round(wfe, 4),
             "robust_frac": round(robust_frac, 3),
             "perturb_pf_median": round(float(np.median(pert_pfs)), 3) if pert_pfs else 0.0,
-            "folds": fold_reports, "params": params, "pairs": good_pairs,
+            "folds": fold_reports, "params": params, "pairs": good_pairs, "variant": fam.variant(params),
             "pair_stats": pair_stats, "score": score(oos, dsr),
             "epoch_sharpe_std": round(float(np.std(all_sharpes)), 4) if all_sharpes else None,
             "exit_reasons": (df["exit_reason"].value_counts().to_dict() if not df.empty else {}),
@@ -197,13 +197,13 @@ class Pipeline:
             "id": sid, "experiment_id": eid, "family": spec["family"],
             "params": result["params"], "pairs": result["pairs"],
             "sides": spec.get("sides", ["long", "short"]), "stage": stage,
-            "score": result["score"], "oos": {**result["oos"], "mc": result["mc"],
-                                              "dsr": result["dsr"], "wfe": result["wfe"]},
+            "score": result["score"], "oos": {**result["oos"], "mc": result["mc"], "dsr": result["dsr"],
+                                              "wfe": result["wfe"], "variant": result["variant"]},
             "gates": result["gates"], "live": {}, "created": now, "updated": now,
             "stage_since": now, "history": [{"ts": now, "to": stage, "reason": "research"}],
             "note": f"universe={len(spec['pairs'])} pairs",
         })
-        self.reg.event("research", f"{sid} ({spec['family']}): {stage} — OOS trades "
+        self.reg.event("research", f"{sid} ({result['variant']}): {stage} — OOS trades "
                        f"{result['oos']['trades']}, PF {result['oos']['profit_factor']}, "
                        f"Sharpe {result['oos']['sharpe']}, DD {result['oos']['max_drawdown']}",
                        data={"strategy": sid, "experiment": eid})

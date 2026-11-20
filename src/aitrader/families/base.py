@@ -46,7 +46,17 @@ EXIT_PARAMS: tuple[Param, ...] = (
     Param("conv_w", "float", 0.0, 1.0, 0.5, "sell", 2),  # sizing: weight on signal conviction
 )
 
+# Structural "genes" shared by all families: hyperopt switches them on/off, so research
+# discovers new strategy variants (e.g. trend-filtered mean reversion, low-vol breakouts),
+# not just new numbers for a fixed recipe.
+GENE_PARAMS: tuple[Param, ...] = (
+    Param("htf_trend", "int", 0, 1, 0, "buy"),  # 1 = trade only with the higher-timeframe trend
+    Param("htf_len", "int", 100, 400, 200, "buy"),  # EMA length (1h bars) defining that trend
+    Param("vol_regime", "int", 0, 2, 0, "buy"),  # 0 any, 1 only high-vol, 2 only low-vol regime
+)
+
 ATR_LEN = 14
+VOL_WINDOW = 500
 
 SignalFn = Callable[[pd.DataFrame, dict], pd.DataFrame]
 
@@ -62,7 +72,7 @@ class Family:
     params: tuple[Param, ...] = field(init=False)
 
     def __post_init__(self) -> None:
-        object.__setattr__(self, "params", tuple(self.entry_params) + EXIT_PARAMS)
+        object.__setattr__(self, "params", tuple(self.entry_params) + GENE_PARAMS + EXIT_PARAMS)
 
     # ------------------------------------------------------------------
     def defaults(self) -> dict[str, float]:
@@ -97,6 +107,32 @@ class Family:
             out[p.name] = p.clip(params.get(p.name, p.default) + rng.uniform(-span, span))
         return out
 
+    @staticmethod
+    def _apply_genes(df: pd.DataFrame, p: dict) -> None:
+        if int(p.get("htf_trend", 0)) == 1:
+            htf = ta.ema(df["close"], int(p.get("htf_len", 200)))
+            up = (df["close"] > htf) & (htf > htf.shift(24))
+            dn = (df["close"] < htf) & (htf < htf.shift(24))
+            df["long_sig"] &= up.fillna(False)
+            df["short_sig"] &= dn.fillna(False)
+        regime = int(p.get("vol_regime", 0))
+        if regime:
+            atr_pct = df["atr"] / df["close"]
+            med = atr_pct.rolling(VOL_WINDOW, min_periods=100).median()
+            ok = (atr_pct > med) if regime == 1 else (atr_pct <= med)
+            ok = ok.fillna(False)
+            df["long_sig"] &= ok
+            df["short_sig"] &= ok
+
+    def variant(self, params: dict) -> str:
+        """Human-readable strategy variant, e.g. 'donchian_breakout +HTF-trend(200) +low-vol'."""
+        p = self.normalize(params)
+        parts = [self.name]
+        if int(p["htf_trend"]) == 1:
+            parts.append(f"+HTF-trend({int(p['htf_len'])})")
+        parts.append({0: "", 1: "+high-vol", 2: "+low-vol"}[int(p["vol_regime"])])
+        return " ".join(x for x in parts if x)
+
     def populate(self, df: pd.DataFrame, params: dict) -> pd.DataFrame:
         """Add indicator + signal columns. Always produces:
         atr, long_sig, short_sig, exit_long_sig, exit_short_sig, conviction (0.5..1.5)."""
@@ -107,6 +143,7 @@ class Family:
         for col in ("long_sig", "short_sig", "exit_long_sig", "exit_short_sig"):
             s = sig[col] if col in sig else pd.Series(False, index=df.index)
             df[col] = s.fillna(False).astype(bool)
+        self._apply_genes(df, p)
         conv = sig["conviction"] if "conviction" in sig else pd.Series(1.0, index=df.index)
         df["conviction"] = conv.fillna(1.0).clip(0.5, 1.5)
         # never signal while ATR is undefined (warm-up)

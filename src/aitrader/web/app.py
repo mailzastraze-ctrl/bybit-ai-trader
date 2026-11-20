@@ -183,6 +183,7 @@ def health() -> dict:
                                               "dry_run", "state", "max_open_trades", "timeframe",
                                               "stake_currency", "bot_name")}) if up else None,
         "selftest": reg().kv_get("selftest"),
+        "exec_test": reg().kv_get("exec_test"),
         "supervisor": reg().kv_get("supervisor"),
         "disk": {"total": du.total, "used": du.used, "free": du.free} if du else None,
     }

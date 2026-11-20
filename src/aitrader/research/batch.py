@@ -93,14 +93,16 @@ def merge(dirs: list[Path], batch_id: str) -> dict:
                 "id": f"{batch_id}-{e['spec']['family'][:5]}-{idx:02d}",
                 "family": e["spec"]["family"], "params": r["params"], "pairs": r["pairs"],
                 "sides": e["spec"].get("sides", ["long", "short"]), "stage": verdict,
-                "score": score(oos, dsr), "oos": {**oos, "mc": r["mc"], "dsr": round(dsr, 4), "wfe": r["wfe"]},
+                "score": score(oos, dsr), "variant": r.get("variant", e["spec"]["family"]),
+                "oos": {**oos, "mc": r["mc"], "dsr": round(dsr, 4), "wfe": r["wfe"],
+                        "variant": r.get("variant", e["spec"]["family"])},
                 "gates": gates, "experiment": e["id"],
             })
     candidates.sort(key=lambda c: -c["score"])
     return {"batch_id": batch_id, "created": iso(), "exchange": exchange, "n_experiments": len(exps),
             "n_completed": len(done), "n_trials_for_dsr": n_trials, "candidates": candidates,
             "experiments": [{k: e.get(k) for k in ("id", "batch_verdict", "batch_dsr", "error")}
-                            | {"family": e["spec"]["family"], "pairs": e["spec"]["pairs"],
+                            | {"family": e.get("result", {}).get("variant", e["spec"]["family"]), "pairs": e["spec"]["pairs"],
                                "oos": e.get("result", {}).get("oos"),
                                "gates": e.get("batch_gates")} for e in exps]}
 
@@ -126,7 +128,7 @@ def report_md(m: dict) -> str:
     if m["candidates"]:
         lines += ["", "## Candidates", ""]
         for c in m["candidates"]:
-            lines.append(f"- **{c['id']}** ({c['family']}, {c['stage']}, score {c['score']}): pairs {', '.join(c['pairs'])}; "
+            lines.append(f"- **{c['id']}** ({c.get('variant', c['family'])}, {c['stage']}, score {c['score']}): pairs {', '.join(c['pairs'])}; "
                          f"params `{json.dumps(c['params'])}`")
     return "\n".join(lines) + "\n"
 

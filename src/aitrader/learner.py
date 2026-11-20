@@ -77,6 +77,8 @@ class Learner:
             tid = t.get("trade_id")
             if tid is None or tid in known or t.get("is_open"):
                 continue
+            if (t.get("enter_tag") or "").startswith("exec-test"):
+                continue  # execution self-test trades are not strategy evidence
             self.reg.upsert("live_trades", {
                 "trade_id": tid, "sleeve_id": t.get("enter_tag") or "", "pair": t.get("pair"),
                 "is_short": int(bool(t.get("is_short"))), "open_date": t.get("open_date"),

@@ -79,5 +79,12 @@ class FtClient:
     def reload_config(self) -> Any:
         return self._post("reload_config")
 
+    def forceenter(self, pair: str, side: str, stake: float, tag: str) -> Any:
+        return self._post("forceenter", {"pair": pair, "side": side, "stakeamount": stake,
+                                         "entry_tag": tag, "ordertype": "market"})
+
+    def forceexit(self, trade_id: int) -> Any:
+        return self._post("forceexit", {"tradeid": trade_id, "ordertype": "market"})
+
     def forceexit_all(self) -> Any:
         return self._post("forceexit", {"tradeid": "all"})

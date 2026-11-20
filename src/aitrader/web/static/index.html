@@ -199,7 +199,7 @@ R.Strategies = async v => {
     {h: "Sleeve", k: "id"}, {h: "Stage", f: r => stage(r.stage)}, {h: "Family", k: "family"}, {h: "Risk/trade", num: 1, f: r => pct(r.risk, 2)},
     {h: "Lev", num: 1, f: r => num(r.leverage, 1)}, {h: "Sides", f: r => (r.sides || []).join("/")}, {h: "Pairs", f: r => `<span style="white-space:normal">${esc((r.pairs || []).join(", "))}</span>`}], sl, "No sleeves deployed")}</div>
   <div class="card" style="margin-top:12px"><h2>Strategy registry (${d.strategies.length})</h2>${table([
-    {h: "ID", k: "id"}, {h: "Stage", f: r => stage(r.stage)}, {h: "Family", k: "family"}, {h: "Score", num: 1, f: r => num(r.score, 3)},
+    {h: "ID", k: "id"}, {h: "Stage", f: r => stage(r.stage)}, {h: "Strategy variant", f: r => esc(r.oos?.variant || r.family)}, {h: "Score", num: 1, f: r => num(r.score, 3)},
     {h: "OOS trades", num: 1, f: r => r.oos?.trades ?? "–"}, {h: "OOS PF", num: 1, f: r => num(r.oos?.profit_factor)}, {h: "OOS Sharpe", num: 1, f: r => num(r.oos?.sharpe)},
     {h: "OOS DD", num: 1, f: r => pct(r.oos?.max_drawdown, 1)}, {h: "DSR", num: 1, f: r => num(r.oos?.dsr, 2)},
     {h: "Live trades", num: 1, f: r => r.live?.trades ?? 0}, {h: "Live PF", num: 1, f: r => r.live?.trades ? num(r.live.profit_factor) : "–"}, {h: "Live P&L", num: 1, f: r => r.live?.trades ? signed(r.live.pnl) : "–"},
@@ -261,11 +261,12 @@ R.Health = async v => {
     ${kpi("Last bot loop", d.bot_health ? ago(d.bot_health.last_process) : "–", d.bot_config ? `freqtrade ${esc(d.bot_config.version)}` : "")}
     ${kpi("Disk", d.disk ? pct(d.disk.used / d.disk.total, 0) : "–", d.disk ? `${num(d.disk.free / 1e9, 1)} GB free` : "")}
     ${kpi("Self-test", d.selftest ? (d.selftest.ok ? "passed" : "FAILED") : "–", d.selftest ? ago(d.selftest.ts) : "")}
+    ${kpi("Order execution test", d.exec_test ? (d.exec_test.ok ? "passed" : "FAILED") : "–", d.exec_test ? "entry → SL on exchange → exit · " + ago(d.exec_test.ts) : "")}
   </div>
   <div class="grid two" style="margin-top:12px">
     <div class="card"><h2>Services</h2>${table([{h: "Service", k: "service"}, {h: "Status", f: r => `<span class="badge"><span class="dot" style="background:var(--${st(r.status)})"></span>${esc(r.status)}</span>`},
       {h: "Heartbeat", f: r => r.age_s === null ? "–" : (r.age_s > 900 ? `⚠ ${ago(r.ts)}` : ago(r.ts))}, {h: "Detail", f: r => `<pre>${esc(JSON.stringify(r.detail))}</pre>`}], d.heartbeats)}</div>
-    <div class="card"><h2>Self-test & supervisor</h2><pre>${esc(JSON.stringify({selftest: d.selftest, supervisor: d.supervisor, bot: d.bot_config}, null, 1))}</pre></div>
+    <div class="card"><h2>Self-test & supervisor</h2><pre>${esc(JSON.stringify({selftest: d.selftest, exec_test: d.exec_test, supervisor: d.supervisor, bot: d.bot_config}, null, 1))}</pre></div>
   </div>`;
 };
 

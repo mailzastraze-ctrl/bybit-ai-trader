@@ -27,6 +27,7 @@ from aitrader.riskcore import EntryContext, bars_held, signal_row, size_multipli
 logger = logging.getLogger(__name__)
 
 _FALLBACK_EXIT = {p.name: p.default for p in EXIT_PARAMS}
+EXEC_TEST_TAG = "exec-test"
 
 
 class AIBase(IStrategy):
@@ -96,6 +97,8 @@ class AIBase(IStrategy):
 
     # ------------------------------------------------------------------ helpers
     def _params(self, trade: Trade) -> dict:
+        if (trade.enter_tag or "").startswith(EXEC_TEST_TAG):
+            return dict(_FALLBACK_EXIT)
         sleeve = self.sleeve_for_trade(trade)
         if sleeve is None:
             return dict(_FALLBACK_EXIT)
@@ -163,6 +166,9 @@ class AIBase(IStrategy):
                             proposed_stake: float, min_stake: float | None, max_stake: float,
                             leverage: float, entry_tag: str | None, side: str,
                             **kwargs) -> float:
+        if entry_tag and entry_tag.startswith(EXEC_TEST_TAG):
+            # execution self-test (forced entry via REST API): use the requested small stake
+            return float(max(min(proposed_stake, max_stake), min_stake or 0.0))
         sleeve = self.sleeve_for_pair(pair)
         if sleeve is None or (entry_tag and sleeve.id != entry_tag):
             return 0.0
@@ -190,6 +196,8 @@ class AIBase(IStrategy):
     def leverage(self, pair: str, current_time: datetime, current_rate: float,
                  proposed_leverage: float, max_leverage: float, entry_tag: str | None,
                  side: str, **kwargs) -> float:
+        if entry_tag and entry_tag.startswith(EXEC_TEST_TAG):
+            return float(max(1.0, min(2.0, max_leverage)))
         sleeve = self.sleeve_for_pair(pair)
         lev = sleeve.leverage if sleeve else 1.0
         return float(max(1.0, min(lev, max_leverage)))

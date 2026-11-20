@@ -13,7 +13,7 @@
   "dataformat_ohlcv": "feather",
   "cancel_open_orders_on_exit": false,
   "initial_state": "running",
-  "force_entry_enable": false,
+  "force_entry_enable": true,
   "unfilledtimeout": {"entry": 10, "exit": 10, "exit_timeout_count": 0, "unit": "minutes"},
   "entry_pricing": {"price_side": "other", "use_order_book": true, "order_book_top": 1,
                     "price_last_balance": 0.0, "check_depth_of_market": {"enabled": false, "bids_to_ask_delta": 1}},
