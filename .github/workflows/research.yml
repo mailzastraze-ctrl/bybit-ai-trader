@@ -39,7 +39,8 @@ jobs:
           mkdir -p work && chmod 777 work
           docker run --rm -v "$PWD/work:/data" -e RESEARCH_EXCHANGE -e RESEARCH_UNIVERSE=${{ inputs.universe }} \
             aitrader:research python -m aitrader.research.batch scan --out /data/batch
-          cat work/batch/universe.json | head -c 2000
+          sudo chown -R "$(id -u):$(id -g)" work
+          head -c 2000 work/batch/universe.json
       - id: m
         run: echo "matrix=$(python3 -c 'import json;print(json.dumps(list(range(int("${{ inputs.jobs }}")))))')" >> "$GITHUB_OUTPUT"
       - uses: actions/upload-artifact@v4
@@ -73,6 +74,8 @@ jobs:
             aitrader:research python -m aitrader.research.batch run --out /data/batch/job-${{ matrix.job }} \
               --job ${{ matrix.job }} --experiments ${{ inputs.experiments_per_job }} \
               --universe /data/batch/universe.json
+      - if: always()
+        run: sudo chown -R "$(id -u):$(id -g)" work
       - uses: actions/upload-artifact@v4
         if: always()
         with:
