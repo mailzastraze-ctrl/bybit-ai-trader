@@ -1240,7 +1240,7 @@ for (const d of Object.values(departments)) {
   $("#labels").appendChild(el); tags[d.key] = el;
 }
 function setTag(key, info, status) {
-  const d = departments[key]; d.info = info; d.status = status; tags[key].querySelector("i").textContent = info;
+  const d = departments[key]; if (!d || !tags[key]) return; d.info = info; d.status = status; tags[key].querySelector("i").textContent = info;
   const col = {good: "#0ca30c", warn: "#fab219", crit: "#d03b3b"}[status]; const dot = tags[key].querySelector(".dot"); dot.style.background = col; dot.style.color = col;
 }
 function applyData() {
@@ -1257,7 +1257,7 @@ function applyData() {
   $("#hRs").textContent = rs.paused ? "paused" : labActive ? "GitHub lab ▶" : "idle"; $("#hRsS").textContent = `${rs.counts.done || 0} done · ${rs.counts.failed || 0} failed · ${lab.runs || 0} runs`;
   flowSpeed = labActive ? 0.05 : 0.015;
   setTag("cloud", labActive ? `running · ${lab.cpus || "?"} CPUs · ${running[0]?.progress?.stage || lab.status}`.slice(0, 46) : `idle · ${lab.runs || 0} runs · next run queued`, labActive ? "good" : "warn");
-  const G = S.goals?.goals || []; setTag("mission", G.length ? `${G.filter(x => x.progress >= 1).length}/${G.length} goals reached` : "loading", "good");
+  const G = S.goals?.goals || []; if (G.length) setTag("mission", `${G.filter(x => x.progress >= 1).length}/${G.length} goals reached`, "good");
   const uni = rs.universe?.pairs?.length || 0;
   setTag("scanner", `${uni} pairs in universe`, uni >= 4 ? "good" : "warn");
   setTag("research", running.length ? `${running[0].family} · ${running[0].progress?.stage || ""}`.slice(0, 44) : `${rs.counts.done || 0} experiments done`, "good");
@@ -1305,7 +1305,8 @@ async function refreshSlow(force = false) {
 }
 function renderGoals() {
   const G = S.goals; if (!G) return;
-  $("#goals").innerHTML = `<div class="h">Company goals · measured live</div>` + G.goals.map(x => `<div class="g"><div class="gt"><span>${esc(x.title)}</span><b>${esc(x.value)}${x.unit === "%" ? "%" : ""}<i>/${esc(x.target)}${x.unit === "%" ? "%" : ""}</i></b></div><div class="gb"><i style="width:${Math.round(clamp(x.progress, 0, 1) * 100)}%;background:${x.progress >= 1 ? "var(--good)" : x.warning ? "var(--crit)" : "var(--blue)"}"></i></div></div>`).join("");
+  setTag("mission", `${G.goals.filter(x => x.progress >= 1).length}/${G.goals.length} goals reached`, "good");
+  $("#goals").innerHTML = `<div class="h">Company goals · measured live</div>` + G.goals.map(x => `<div class="g"><div class="gt"><span title="${esc(x.note || "")}">${esc(x.title)}</span><b>${esc(x.value)}${x.unit === "%" ? "%" : ""}<i>/${esc(x.target)}${x.unit === "%" ? "%" : ""}</i></b></div><div class="gb"><i style="width:${Math.round(clamp(x.progress, 0, 1) * 100)}%;background:${x.progress >= 1 ? "var(--good)" : x.warning ? "var(--crit)" : "var(--blue)"}"></i></div></div>`).join("");
 }
 
 // ---- panels

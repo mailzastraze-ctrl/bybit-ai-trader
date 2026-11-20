@@ -144,7 +144,10 @@ def research(limit: int = 60) -> dict:
         r["used_learnings"] = spec.get("used_learnings", []) if isinstance(spec, dict) else []
         r["error"] = (r.get("error") or "")[:400]
         out.append(r)
-    counts = reg().q("SELECT status, COUNT(*) n FROM experiments GROUP BY status")
+    # infrastructure losses (runner cancelled, restart) are not research failures
+    counts = reg().q("SELECT CASE WHEN status='failed' AND (error LIKE '%run lost%' OR error LIKE 'interrupted%' "
+                     "OR error LIKE '%cancelled%') THEN 'lost' ELSE status END AS status, COUNT(*) n "
+                     "FROM experiments GROUP BY 1")
     return {
         "experiments": out,
         "counts": {c["status"]: c["n"] for c in counts},
@@ -347,7 +350,7 @@ def company_goals(r: Registry) -> dict:
     trades = r.q("SELECT profit_abs, stake_amount, leverage FROM live_trades WHERE sleeve_id NOT LIKE 'exec-test%'")
     pnl = [real_pnl(t) for t in trades]
     gains, losses = sum(x for x in pnl if x > 0), -sum(x for x in pnl if x < 0)
-    pf = gains / losses if losses else (99.0 if gains else 0.0)
+    pf = gains / losses if losses else None  # undefined until the first losing trade
     week = iso(utcnow() - timedelta(days=7))
     n_week = r.one("SELECT COUNT(*) n FROM experiments WHERE status='done' AND finished >= ?", (week,))["n"]
     ever_validated = r.one("SELECT COUNT(*) n FROM strategies WHERE stage IN ('validated','incubation','eligible','production') "
@@ -367,8 +370,11 @@ def company_goals(r: Registry) -> dict:
          "value": len(pnl), "target": 100, "unit": "trades", "progress": min(1.0, len(pnl) / 100)},
         {"id": "research", "title": "Research throughput (walk-forward experiments / 7 days)",
          "value": n_week, "target": week_target, "unit": "", "progress": min(1.0, n_week / week_target)},
-        {"id": "pf", "title": "Live profit factor ≥ 1.3 (after slippage haircut)",
-         "value": round(pf, 2), "target": 1.3, "unit": "", "progress": min(1.0, pf / 1.3) if pnl else 0.0},
+        {"id": "pf", "title": "Live profit factor ≥ 1.3 (after slippage haircut, ≥ 30 trades)",
+         "value": round(pf, 2) if pf is not None else "—", "target": 1.3, "unit": "",
+         # a profit factor over a handful of trades is noise: progress counts only with evidence
+         "progress": min(1.0, pf / 1.3) * min(1.0, len(pnl) / 30) if pf is not None else 0.0,
+         "note": f"{len(pnl)} trades so far" + ("" if losses else ", no losing trade yet")},
         {"id": "production", "title": "Strategies promoted to production",
          "value": n_prod, "target": 3, "unit": "", "progress": min(1.0, n_prod / 3)},
         {"id": "return", "title": "Grow demo equity +10% (without breaching 15% drawdown)",
@@ -376,7 +382,7 @@ def company_goals(r: Registry) -> dict:
          "progress": max(0.0, min(1.0, ret / 0.10)), "warning": dd > 0.10},
     ]
     return {"mission": "Find, prove and scale real trading edges on Bybit Demo — no overfitting, no fake results.",
-            "goals": items, "equity": now_eq, "drawdown": round(dd, 4), "lab": lab, "readiness": rd}
+            "goals": items, "equity": now_eq, "equity_label": "trading capital (USDT)", "drawdown": round(dd, 4), "lab": lab, "readiness": rd}
 
 
 @app.exception_handler(Exception)

@@ -43,7 +43,9 @@ def run(s: Settings, wait_s: int = 0) -> dict:
         try:
             bal = ft.balance()
             total = float(bal.get("total") or 0)
-            check("demo_account_auth", total > 0, f"account value {total:.2f} {bal.get('stake', '')}")
+            bot = float(bal.get("total_bot") or total)
+            check("demo_account_auth", total > 0,
+                  f"trading capital {bot:.2f} {bal.get('stake', '')} (whole demo account incl. other coins {total:.2f})")
         except Exception as e:  # noqa: BLE001
             check("demo_account_auth", False, str(e))
         try:
