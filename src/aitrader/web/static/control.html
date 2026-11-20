@@ -125,6 +125,9 @@ svg text{fill:var(--muted);font-size:11px}
 [data-tab]{display:none}
 body.t-overview [data-tab~="overview"],body.t-strategies [data-tab~="strategies"],body.t-lab [data-tab~="lab"],body.t-trades [data-tab~="trades"]{display:block}
 body.t-overview .kpis[data-tab~="overview"]{display:grid}
+body.t-office [data-tab~="office"]{display:block}
+body.t-office main{display:none}
+.office iframe{display:block;width:100%;height:calc(100vh - 58px);border:0;background:#0b0d12}
 .filters{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px}
 .filters button{background:var(--card);border:1px solid var(--line);color:var(--text2);font:inherit;font-size:12.5px;padding:5px 12px;border-radius:99px;cursor:pointer}
 .filters button.on{border-color:var(--blue);color:var(--text);background:var(--blue-soft)}
@@ -159,9 +162,8 @@ body.t-overview .kpis[data-tab~="overview"]{display:grid}
   <div class="brand"><div class="logo">AI</div><div>AI Trader<small>Bybit Demo · автономная исследовательская компания</small></div></div>
   <nav class="tabs" id="tabs">
     <button data-t="overview" class="on">Обзор</button><button data-t="strategies">Стратегии</button>
-    <button data-t="lab">Лаборатория</button><button data-t="trades">Сделки</button>
+    <button data-t="lab">Лаборатория</button><button data-t="trades">Сделки</button><button data-t="office">3D-офис</button>
   </nav>
-  <nav><a href="/hq">3D-офис</a><a href="/terminal">Терминал</a></nav>
   <div class="chips">
     <div class="chip" id="chBot"><i></i><span>Бот</span></div>
     <div class="chip" id="chLab"><i></i><span>Лаборатория</span></div>
@@ -242,6 +244,7 @@ body.t-overview .kpis[data-tab~="overview"]{display:grid}
     <div class="scroll" id="closed"></div>
   </section>
 </main>
+<section class="office" data-tab="office"><iframe id="officeFrame" title="3D-офис компании" allow="fullscreen"></iframe></section>
 <aside class="drawer" id="drawer"><button class="x" id="dx">Закрыть ✕</button><div id="dbody"></div></aside>
 <div class="tip" id="tip"></div>
 <script src="/static/control.js"></script>

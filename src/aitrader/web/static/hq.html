@@ -101,14 +101,15 @@ html, body { margin: 0; height: 100%; overflow: hidden; background: #0b0d12; col
   <div class="spacer"></div>
   <button class="btn" id="bTour" title="Slow cinematic camera tour">🎥 Tour</button>
   <button class="btn" id="bReset">⌂ Overview</button>
-  <a class="btn" href="/">Control room</a> <a class="btn" href="/terminal">Terminal →</a>
+  <a class="btn" id="backBtn" href="/#overview" target="_top">← Пульт</a>
 </div>
 <div id="panel" class="glass"><span class="x" id="px">✕</span><div id="pbody"></div></div>
 <div id="goals" class="glass"></div>
 <div id="feed" class="glass"><div class="h">Office chatter · live events</div></div>
 <div id="ticker" class="glass"><div class="lbl">Company log</div><div class="wrap"><div class="track" id="track">loading…</div></div></div>
-<div id="loader"><div style="letter-spacing:.12em;font-weight:600">AI TRADER HQ</div><div class="bar"><i></i></div><div id="lmsg" style="color:#8d8c84;font-size:11.5px">building the office…</div><div id="err"><a class="btn" href="/terminal">3D engine unavailable – open the terminal</a></div></div>
+<div id="loader"><div style="letter-spacing:.12em;font-weight:600">AI TRADER HQ</div><div class="bar"><i></i></div><div id="lmsg" style="color:#8d8c84;font-size:11.5px">building the office…</div><div id="err"><a class="btn" href="/#overview" target="_top">3D недоступно — вернуться в пульт</a></div></div>
 <script type="module" src="/static/hq.js"></script>
 <script>setTimeout(() => { if (!window.__hqReady) { document.getElementById("err").style.display = "block"; document.getElementById("lmsg").textContent = "Could not load the 3D engine (CDN)."; } }, 15000);</script>
+<script>if (window.top !== window) { const b = document.getElementById("backBtn"); if (b) b.style.display = "none"; }</script>
 </body>
 </html>

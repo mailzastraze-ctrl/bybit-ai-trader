@@ -35,6 +35,8 @@ const labActive = () => { const lab = S.rs?.lab || {}; return lab.status && lab.
 // ---------------------------------------------------------------------------- вкладки
 function setTab(t) {
   S.tab = t; document.body.className = "t-" + t;
+  const fr = $("#officeFrame");  // the 3D office loads only when its tab is opened (GPU/CPU heavy)
+  if (t === "office" && !fr.src) fr.src = "/hq";
   document.querySelectorAll("#tabs button").forEach((b) => b.classList.toggle("on", b.dataset.t === t));
   try { history.replaceState(null, "", "#" + t); } catch (e) { /* ignore */ }
   renderAll();
@@ -352,6 +354,6 @@ async function slow() {
 }
 async function tick() { await fast(); await slow(); window.__ready = true; }
 const startTab = (location.hash || "").slice(1);
-if (["overview", "strategies", "lab", "trades"].includes(startTab)) setTab(startTab);
+if (["overview", "strategies", "lab", "trades", "office"].includes(startTab)) setTab(startTab);
 tick(); setInterval(tick, 10000);
 addEventListener("resize", () => safe(renderEquity));

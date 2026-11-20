@@ -81,8 +81,10 @@ def hq_page() -> FileResponse:
 
 
 @app.get("/terminal", dependencies=[Depends(auth)])
-def index() -> Response:
-    return FileResponse(STATIC / "index.html", headers={"Cache-Control": "no-store"})
+def terminal() -> Response:
+    """Old page – everything now lives in the one control room."""
+    from fastapi.responses import RedirectResponse
+    return RedirectResponse("/#overview", status_code=307)
 
 
 @app.get("/api/overview", dependencies=[Depends(auth)])
