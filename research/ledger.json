@@ -1,0 +1,4 @@
+{
+  "note": "Every research trial (all batches). Deflated Sharpe counts trials of the last 90 days, so repeated searching cannot inflate significance.",
+  "trials": []
+}
