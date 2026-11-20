@@ -6,6 +6,7 @@ name: research-lab
 #            strategies), picks the data source, scans the universe → plan
 #   run ×4 – four parallel runners (4 vCPU each), each a budgeted stream of walk-forward
 #            experiments opening with a different strategy family; live progress → HQ
+#   shadow – forward test: every frozen strategy on Bybit candles after its freeze time
 #   merge  – Deflated Sharpe over EVERY trial (90-day ledger + all four runners), compact
 #            results → server import + research/ commit, registry backup, next run
 #
@@ -133,8 +134,44 @@ jobs:
           retention-days: 7
           if-no-files-found: ignore
 
+  shadow:
+    # forward test: every frozen strategy of the server's book on Bybit candles after its
+    # freeze time only (unseen data) → does the research find edges that keep working?
+    needs: prep
+    runs-on: ubuntu-latest
+    timeout-minutes: 150
+    steps:
+      - uses: actions/checkout@v5
+      - run: docker build -q -t aitrader:research .
+      - uses: actions/cache/restore@v4
+        with:
+          path: |
+            work/user_data/data
+            work/batch/universe.json
+          key: mkt-1h-${{ github.run_id }}
+      - uses: actions/download-artifact@v4
+        with:
+          name: lab-plan
+          path: work/batch
+      - name: Forward test of the frozen strategy book
+        run: |
+          chmod -R 777 work
+          docker run --rm -v "$PWD/work:/data" -e RESEARCH_EXCHANGE \
+            -e ACTIONS_ID_TOKEN_REQUEST_URL -e ACTIONS_ID_TOKEN_REQUEST_TOKEN \
+            aitrader:research python -m aitrader.research.batch lab-shadow --out /data/batch \
+              --jobs $(nproc) --run-id ${{ github.run_id }} --server "$LAB_SERVER"
+      - if: always()
+        run: sudo chown -R "$(id -u):$(id -g)" work
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: lab-results-shadow
+          path: work/batch/shadow/shadow-results.json
+          retention-days: 7
+          if-no-files-found: ignore
+
   merge:
-    needs: [prep, run]
+    needs: [prep, run, shadow]
     if: always() && needs.prep.result == 'success'
     runs-on: ubuntu-latest
     timeout-minutes: 30

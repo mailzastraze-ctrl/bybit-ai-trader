@@ -331,6 +331,20 @@ def readiness_api() -> dict:
     return readiness.evaluate(reg())
 
 
+@app.get("/api/forward", dependencies=[Depends(auth)])
+def forward_api() -> dict:
+    """Forward test of every frozen research strategy on unseen Bybit data (aitrader.forward)."""
+    from aitrader import forward
+    f = reg().kv_get("forward") or {}
+    if "persistence" not in f:
+        f["persistence"] = forward.persistence(reg())
+    f.setdefault("verdict", "too_early")
+    f.setdefault("text", "Forward test starts with the next research-lab run.")
+    f["book_size"] = len(forward.book(reg()))
+    f["rules"] = forward.RULES
+    return f
+
+
 @app.get("/api/goals", dependencies=[Depends(auth)])
 def goals() -> dict:
     return company_goals(reg())
@@ -360,7 +374,13 @@ def company_goals(r: Registry) -> dict:
     lab = r.kv_get("lab") or {}
     week_target = 60 if lab.get("public") else 20
     rd = r.kv_get("readiness") or {}
+    fw = r.kv_get("forward") or {}
+    fw_n = int((fw.get("top") or {}).get("trades") or 0)
     items = [
+        {"id": "forward", "title": "Forward test: best research strategies profitable on unseen data",
+         "value": {"works": "works", "not_working": "no", "inconclusive": "unclear"}.get(fw.get("verdict"), f"{fw_n} trades"),
+         "target": "200 trades", "unit": "", "progress": 1.0 if fw.get("verdict") == "works" else min(0.99, fw_n / 200),
+         "warning": fw.get("verdict") == "not_working", "note": fw.get("text", "")},
         {"id": "readiness", "title": "Real-money readiness (all checks, realistic fills)",
          "value": rd.get("passed", 0), "target": rd.get("total", 8), "unit": "",
          "progress": (rd.get("passed", 0) / rd.get("total", 8)) if rd else 0.0},

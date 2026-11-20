@@ -17,6 +17,7 @@ import logging
 import threading
 from datetime import timedelta
 
+from aitrader import forward
 from aitrader.learner import Learner
 from aitrader.lifecycle import DEPLOYED, Lifecycle
 from aitrader.registry import Registry
@@ -142,6 +143,7 @@ def build_state(s: Settings, reg: Registry) -> dict:
                       "live": r.get("live")} for r in reg.strategies(DEPLOYED)],
         "server_trials_90d": len(srs),
         "universe": reg.kv_get("universe"),
+        "shadow": forward.book(reg),
     }
 
 
@@ -191,6 +193,10 @@ def record_run(reg: Registry, p: dict) -> None:
     elif kind == "scan":
         reg.event("scanner", f"lab: universe refreshed on {p.get('exchange')} — {len(p.get('pairs') or [])} pairs",
                   data={"pairs": p.get("pairs")})
+    elif kind == "shadow":
+        reg.event("research", f"lab: forward test of {p.get('strategies')} frozen strategies on unseen Bybit data "
+                  f"— {p.get('trades')} forward trades", data={"lab": True})
+        return
     elif kind == "end":
         reg.heartbeat("research", "idle", {"remote": True, "run_id": p.get("run_id")})
     reg.kv_set("lab", lab)
@@ -200,6 +206,9 @@ def record_run(reg: Registry, p: dict) -> None:
 def apply_import(s: Settings, reg: Registry, data: dict) -> dict:
     """Store finished experiments, candidates, market scores; learn; act on revalidations."""
     now = iso()
+    fw = forward.apply(reg, data["shadow"]) if data.get("shadow") else None
+    if not data.get("experiments_full") and not data.get("candidates"):
+        return {"experiments": 0, "candidates": 0, "forward": fw}
     n_exp = 0
     for e in data.get("experiments_full", []):
         eid, spec, res = e.get("id"), e.get("spec") or {}, e.get("result")
@@ -241,4 +250,4 @@ def apply_import(s: Settings, reg: Registry, data: dict) -> dict:
     reg.kv_set("lab", lab)
     reg.event("research", f"lab: batch {data.get('batch_id')} imported — {n_exp} experiments, "
               f"{n_cand} new candidates (DSR over N={data.get('n_trials_for_dsr')} trials)", data={"lab": True})
-    return {"experiments": n_exp, "candidates": n_cand}
+    return {"experiments": n_exp, "candidates": n_cand, "forward": fw}

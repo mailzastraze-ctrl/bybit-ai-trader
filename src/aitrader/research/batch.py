@@ -233,7 +233,8 @@ class EpochWatcher:
             except OSError:
                 snap = None
             if snap:
-                self.lab.progress(cur["eid"], cur["stage"], force=False, epochs=cur.get("epochs"), **snap)
+                self.lab.progress(cur["eid"], cur["stage"], force=False, epochs=cur.get("epochs"),
+                                  **({"job": cur["job"]} if "job" in cur else {}), **snap)
 
 
 def _fresh_universe(path: Path, max_age_h: float = 12) -> dict | None:
@@ -398,7 +399,7 @@ def cmd_lab_run(out: Path, job: int, jobs: int, budget_min: float, run_id: str, 
             break
         spec = next(specs)
         eid = reg.new_experiment(spec["family"], spec)
-        watcher.cur.update(eid=eid, stage="download", epochs=spec.get("epochs"))
+        watcher.cur.update(eid=eid, stage="download", epochs=spec.get("epochs"), job=job)
         lab.progress(eid, "download", spec=spec, job=job)
         log.info("job %d experiment %d: %s %s on %s", job, len(results) + 1, eid, spec["family"], spec["pairs"])
         started, t1 = iso(), time.time()
@@ -420,6 +421,29 @@ def cmd_lab_run(out: Path, job: int, jobs: int, budget_min: float, run_id: str, 
     return results
 
 
+def cmd_lab_shadow(out: Path, run_id: str, server: str | None, workers: int = 4) -> list[dict]:
+    """Forward test (parallel to the experiment runners): every frozen strategy of the
+    server's book, backtested on Bybit candles after its freeze time only."""
+    from aitrader.research import shadow
+    from aitrader.research.labclient import LabClient
+    s = get_settings()
+    s.ensure_dirs()
+    plan_doc = json.loads((out / "plan.json").read_text())
+    if plan_doc.get("paused") or plan_doc.get("error"):
+        return []
+    lab = LabClient(server, run_id)
+    if plan_doc.get("relay") and not _use_relay(s, lab):
+        log.error("forward test: Bybit relay unavailable – skipping")
+        return []
+    s.research.exchange = plan_doc["exchange"]
+    book = (plan_doc.get("state") or {}).get("shadow") or []
+    sdir = out / "shadow"
+    sdir.mkdir(parents=True, exist_ok=True)
+    res = shadow.run(s, book, sdir, workers=workers)
+    lab.run_event("shadow", strategies=len(res), trades=sum(len(r["trades"]) for r in res))
+    return res
+
+
 def cmd_lab_merge(out: Path, results_root: Path, run_id: str, server: str | None, ledger_path: Path | None,
                   export: Path) -> dict | None:
     """Phase 3 (one runner): Deflated Sharpe over every trial (ledger + all parallel jobs),
@@ -431,7 +455,11 @@ def cmd_lab_merge(out: Path, results_root: Path, run_id: str, server: str | None
     plan_doc = json.loads((out / "plan.json").read_text()) if (out / "plan.json").exists() else {}
     files = sorted(results_root.rglob("results-*.json"))
     n = sum(len(json.loads(f.read_text()).get("experiments", [])) for f in files)
+    sh = sorted(results_root.rglob("shadow-results.json"))
+    shadow_res = json.loads(sh[-1].read_text()) if sh else None
     if not n:
+        if shadow_res:
+            log.info("forward test import: %s", lab.import_batch({"shadow": shadow_res}))
         lab.run_event("end", experiments=0)
         return None
     ledger = json.loads(ledger_path.read_text()) if ledger_path and ledger_path.exists() else {"trials": []}
@@ -440,9 +468,11 @@ def cmd_lab_merge(out: Path, results_root: Path, run_id: str, server: str | None
     uni = plan_doc.get("universe") or {}
     m["market"], m["universe"] = uni.get("market", {}), uni.get("pairs", [])
     imp = {k: v for k, v in m.items() if k != "experiments"} | {"summary": m["experiments"]}
+    if shadow_res:
+        imp["shadow"] = shadow_res
     (export / "imports").mkdir(parents=True, exist_ok=True)
     (export / "reports").mkdir(parents=True, exist_ok=True)
-    write_json_atomic(export / "imports" / f"{batch_id}.json", imp)
+    write_json_atomic(export / "imports" / f"{batch_id}.json", {k: v for k, v in imp.items() if k != "shadow"})
     (export / "reports" / f"{batch_id}.md").write_text(report_md(m))
     write_json_atomic(export / "ledger.json", update_ledger(ledger, m))
     resp = lab.import_batch(imp)
@@ -489,7 +519,7 @@ def main() -> None:
     y.add_argument("--run-id", default="local")
     y.add_argument("--server", default=None)
     y.add_argument("--ledger", type=Path, default=None)
-    for name in ("lab-prep", "lab-run", "lab-merge"):
+    for name in ("lab-prep", "lab-run", "lab-merge", "lab-shadow"):
         q = sub.add_parser(name)
         q.add_argument("--out", type=Path, required=True)
         q.add_argument("--run-id", default="local")
@@ -517,6 +547,8 @@ def main() -> None:
         cmd_lab_prep(args.out, args.run_id, args.server, args.budget_min, args.jobs)
     elif args.cmd == "lab-run":
         cmd_lab_run(args.out, args.job, args.jobs, args.budget_min, args.run_id, args.server, args.max_experiments)
+    elif args.cmd == "lab-shadow":
+        cmd_lab_shadow(args.out, args.run_id, args.server, args.jobs)
     elif args.cmd == "lab-merge":
         cmd_lab_merge(args.out, args.results or args.out, args.run_id, args.server, args.ledger, args.export)
     elif args.cmd == "run":
