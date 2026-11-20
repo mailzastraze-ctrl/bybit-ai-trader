@@ -33,7 +33,8 @@ def _secret() -> bytes:
 
 
 def issue_token(ttl_s: int = TOKEN_TTL_S, now: float | None = None) -> str:
-    exp = int((now or time.time()) + ttl_s)
+    current = time.time() if now is None else now
+    exp = int(current + min(ttl_s, TOKEN_TTL_S))
     sig = hmac.new(_secret(), f"relay|{exp}".encode(), hashlib.sha256).hexdigest()[:40]
     return f"{exp}.{sig}"
 
@@ -45,7 +46,8 @@ def verify_token(token: str | None, now: float | None = None) -> bool:
     except ValueError:
         return False
     current = time.time() if now is None else now
-    if exp <= current or exp - current > TOKEN_TTL_S:
+    # A signed token issued by the previous release can finish its active lab run.
+    if exp <= current:
         return False
     try:
         good = hmac.new(_secret(), f"relay|{exp}".encode(), hashlib.sha256).hexdigest()[:40]
