@@ -134,3 +134,24 @@ def test_exec_test_entries_bypass_sleeve_sizing(portfolio):
     assert portfolio.custom_stake_amount("XRP/USDT:USDT", t, 1.0, 30.0, 5.0, 1000.0, 2.0, "exec-test-1", "long") == 30.0
     assert portfolio.custom_stake_amount("XRP/USDT:USDT", t, 1.0, 30.0, 5.0, 1000.0, 2.0, "random", "long") == 0.0
     assert portfolio.leverage("XRP/USDT:USDT", t, 1.0, 1.0, 10.0, "exec-test-1", "long") == 2.0
+
+
+
+def test_portfolio_limits_cap_same_side_and_open_risk(portfolio, monkeypatch):
+    from freqtrade.persistence import Trade
+    portfolio.config["runmode"] = "live"
+    portfolio.wallets = FakeWallets()
+    mk = lambda short, stop: SimpleNamespace(is_short=short, open_rate=100.0, stop_loss=stop,  # noqa: E731
+                                             stake_amount=1000.0, leverage=3.0)
+    ok = lambda side: portfolio.confirm_trade_entry("BTC/USDT:USDT", "limit", 1, 100, "GTC", None, "s1", side)  # noqa: E731
+    # 7 longs open with break-even stops (no risk left) → 8th long blocked, short still allowed
+    monkeypatch.setattr(Trade, "get_open_trades", staticmethod(lambda: [mk(False, 100.0)] * 7), raising=False)
+    assert ok("long") is False and ok("short") is True
+    # open risk: 2 trades × (2% stop × 3000 notional) = 120 = 1.2%; + new 1% risk = 2.2% < 3% → allowed
+    monkeypatch.setattr(Trade, "get_open_trades", staticmethod(lambda: [mk(False, 98.0)] * 2), raising=False)
+    assert ok("short") is True
+    # 4 such trades = 2.4% + 1% > 3% → blocked
+    monkeypatch.setattr(Trade, "get_open_trades", staticmethod(lambda: [mk(True, 102.0)] * 4), raising=False)
+    assert ok("long") is False
+    portfolio.config["runmode"] = "backtest"
+    assert ok("long") is True  # research backtests are single-sleeve: no account limits

@@ -47,7 +47,7 @@ class Lifecycle:
     risk_exploration: float = 0.001
     max_production: int = 4
     max_incubation: int = 3
-    max_exploration: int = 3
+    max_exploration: int = 5
     max_pairs_per_sleeve: int = 8
     leverage: float = 3.0
     incubation_min_trades: int = 15

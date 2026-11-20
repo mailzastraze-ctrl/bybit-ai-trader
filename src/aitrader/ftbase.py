@@ -199,6 +199,40 @@ class AIBase(IStrategy):
                 return False
         return True
 
+    # ------------------------------------------------------------------ portfolio limits
+    def confirm_trade_entry(self, pair: str, order_type: str, amount: float, rate: float,
+                            time_in_force: str, current_time: datetime, entry_tag: str | None,
+                            side: str, **kwargs) -> bool:
+        """Account-level limits (live/dry-run): crypto pairs are highly correlated, so the
+        book as a whole is capped, not just each trade."""
+        if (entry_tag or "").startswith(EXEC_TEST_TAG):
+            return True
+        if self.config.get("runmode") not in (RunMode.LIVE, RunMode.DRY_RUN):
+            return True
+        cfg = self.config.get("aitrader", {})
+        max_risk = float(cfg.get("max_open_risk", 0.03))
+        max_side = int(cfg.get("max_same_side", 7))
+        trades = Trade.get_open_trades()
+        short = side == "short"
+        if sum(1 for t in trades if bool(t.is_short) == short) >= max_side:
+            logger.info("portfolio limit: %s %s skipped (%d %s positions already open)", side, pair, max_side, side)
+            return False
+        equity = float(self.wallets.get_total_stake_amount()) if self.wallets else 0.0
+        if equity > 0:
+            open_risk = 0.0
+            for t in trades:
+                if not t.open_rate or not t.stop_loss:
+                    continue
+                loss_frac = (t.stop_loss - t.open_rate) / t.open_rate if t.is_short else (t.open_rate - t.stop_loss) / t.open_rate
+                open_risk += max(loss_frac, 0.0) * float(t.stake_amount or 0) * float(t.leverage or 1)
+            sleeve = self.sleeve_for_pair(pair)
+            new_risk = (sleeve.risk if sleeve else 0.0) * equity
+            if open_risk + new_risk > max_risk * equity:
+                logger.info("portfolio limit: %s %s skipped (open risk %.2f%% of equity, cap %.1f%%)", side, pair,
+                            100 * open_risk / equity, 100 * max_risk)
+                return False
+        return True
+
     # ------------------------------------------------------------------ sizing
     def custom_stake_amount(self, pair: str, current_time: datetime, current_rate: float,
                             proposed_stake: float, min_stake: float | None, max_stake: float,

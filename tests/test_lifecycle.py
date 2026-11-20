@@ -307,6 +307,24 @@ def test_always_on_exploration_near_miss_and_random_explorer(env):
     assert reg.one("SELECT stage FROM strategies WHERE id='near'")["stage"] == "exploration"
 
 
+def test_volatility_targeting_scales_risk_down(env):
+    s, reg = env
+    from datetime import timedelta
+
+    import numpy as np
+
+    from aitrader.util import utcnow
+    eq = 10_000.0
+    rng = np.random.default_rng(0)
+    for d in range(10):
+        eq *= 1 + rng.choice([-0.06, 0.06])
+        for k in range(144):
+            ts = (utcnow() - timedelta(days=10 - d, minutes=-10 * k)).strftime("%Y-%m-%dT%H:%M")[:15] + "0"
+            reg.upsert("equity", {"ts": ts, "equity": eq, "free": eq, "open_trades": 0}, key="ts")
+    sc = Lifecycle(s, reg).portfolio_scale()
+    assert 0.5 <= sc < 1.0 and reg.kv_get("risk_scale")["daily_vol"] > 0.015
+
+
 def test_divergence_retires_and_risk_follows_live_edge(env):
     s, reg = env
     life = Lifecycle(s, reg)
@@ -338,4 +356,8 @@ def test_research_candidates_displace_bootstrap_placeholders(env):
     life.evaluate(10_000)
     st = {r["id"]: r["stage"] for r in reg.strategies()}
     assert st["cand1"] == "exploration" and st["cand2"] == "exploration"
-    assert sum(1 for k, v in st.items() if k.startswith("boot-") and v == "retired") >= 2
+    assert sum(1 for k, v in st.items() if k.startswith("boot-") and v == "retired") >= 1
+    # diversification: a third research candidate of the same family waits
+    _strategy(reg, "cand3", "exploratory", ["DOT/USDT:USDT"], score=0.9)
+    life.evaluate(10_000)
+    assert reg.one("SELECT stage FROM strategies WHERE id='cand3'")["stage"] == "exploratory"

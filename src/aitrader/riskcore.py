@@ -11,7 +11,6 @@ from datetime import datetime, timedelta
 
 import pandas as pd
 
-
 BE_FEE_BUFFER = 0.0012  # break-even stop sits ~0.12% beyond entry so fees+slippage are covered
 
 

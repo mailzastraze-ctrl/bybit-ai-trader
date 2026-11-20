@@ -201,10 +201,14 @@ class Lifecycle:
         for cand in self.reg.strategies(("validated",)):
             if n_inc >= lc.max_incubation:
                 break
+            if self._family_full(cand["family"]):
+                continue
             self.reg.set_stage(cand["id"], "incubation", "validated by research gates → forward test")
             n_inc += 1
         n_exp = len(self.reg.strategies(("exploration",)))
         for cand in self.reg.strategies(("exploratory",)):
+            if self._family_full(cand["family"]):
+                continue
             if n_exp >= lc.max_exploration and not self._displace_placeholder(cand):
                 break
             self.reg.set_stage(cand["id"], "exploration", "relaxed gates passed → tiny-risk live experiment")
@@ -213,10 +217,17 @@ class Lifecycle:
         # (profitable out-of-sample but failed a strict gate) so live evidence keeps flowing.
         if n_exp < lc.max_exploration:
             for cand in self.near_misses(lc.max_exploration - n_exp):
+                if self._family_full(cand["family"]):
+                    continue
                 self.reg.set_stage(cand["id"], "exploration",
                                    "always-on exploration: near-miss (positive OOS, failed a strict gate)")
                 n_exp += 1
         self.ensure_activity()
+
+    def _family_full(self, family: str, cap: int = 2) -> bool:
+        """Diversification: at most `cap` deployed sleeves per strategy family."""
+        return sum(1 for r in self.reg.strategies(DEPLOYED)
+                   if r["family"] == family and not str(r["id"]).startswith(("boot-", "rnd-"))) >= cap
 
     def _displace_placeholder(self, cand: dict) -> bool:
         """Research-backed candidates replace unvalidated placeholders (bootstrap defaults,
@@ -269,8 +280,54 @@ class Lifecycle:
             self.reg.event("lifecycle", f"{sid}: random explorer launched ({fam.variant(params)}) on {pairs}")
 
     # ------------------------------------------------------------------ manifest
+    def portfolio_scale(self, target_daily_vol: float = 0.015, days: int = 20) -> float:
+        """Volatility targeting: if the account's realised daily volatility exceeds the
+        target, every sleeve's risk is scaled down proportionally (never up, floor 0.5)."""
+        import numpy as np
+        rows = self.reg.q("SELECT ts, equity FROM equity ORDER BY ts DESC LIMIT ?", (days * 144 + 1,))
+        if len(rows) < 3 * 144:
+            return 1.0
+        daily = {}
+        for r in rows:  # last snapshot per day
+            daily.setdefault(r["ts"][:10], float(r["equity"]))
+        eq = np.array([v for _, v in sorted(daily.items())])
+        if len(eq) < 4 or (eq <= 0).any():
+            return 1.0
+        vol = float(np.std(np.diff(np.log(eq)), ddof=1))
+        scale = 1.0 if vol <= target_daily_vol else max(0.5, target_daily_vol / vol)
+        self.reg.kv_set("risk_scale", {"scale": round(scale, 3), "daily_vol": round(vol, 5), "ts": iso()})
+        return scale
+
+    def correlation_penalty(self, ids: list[str], max_corr: float = 0.7, min_days: int = 20) -> dict[str, float]:
+        """Two live sleeves whose daily P&L moves together are one bet: halve the weaker."""
+        import pandas as pd
+        series = {}
+        for sid in ids:
+            rows = self.reg.q("SELECT close_date, profit_abs FROM live_trades WHERE sleeve_id=?", (sid,))
+            if len(rows) >= 10:
+                s = pd.Series([float(r["profit_abs"] or 0) for r in rows],
+                              index=pd.to_datetime([r["close_date"] for r in rows], utc=True, errors="coerce"))
+                series[sid] = s[s.index.notna()].resample("1D").sum()
+        out: dict[str, float] = {}
+        if len(series) < 2:
+            return out
+        df = pd.DataFrame(series).fillna(0.0)
+        if len(df) < min_days:
+            return out
+        corr = df.corr()
+        score = {r["id"]: float(r.get("score") or 0) for r in self.reg.strategies(DEPLOYED)}
+        cols = list(corr.columns)
+        for i, a in enumerate(cols):
+            for b in cols[i + 1:]:
+                if corr.loc[a, b] > max_corr:
+                    weaker = a if score.get(a, 0) < score.get(b, 0) else b
+                    out[weaker] = 0.5
+        return out
+
     def build_manifest(self, open_trades: list[dict], excluded: set[str], paused: bool) -> Manifest:
         rows = self.reg.strategies(DEPLOYED)
+        scale = self.portfolio_scale()
+        penalty = self.correlation_penalty([r["id"] for r in rows if r["stage"] in ("production", "incubation", "eligible")])
         rows.sort(key=lambda r: (-STAGE_PRIORITY.get("incubation" if r["stage"] == "eligible" else r["stage"], 0),
                                  -(r.get("score") or 0)))
         taken: set[str] = set()
@@ -284,8 +341,9 @@ class Lifecycle:
             stage = "incubation" if r["stage"] == "eligible" else r["stage"]
             sleeves.append(Sleeve(id=r["id"], family=r["family"], params=r["params"], pairs=mine,
                                   stage=stage,
-                                  risk=round(self.risk_for(r["stage"]) * (self.risk_multiplier(r)
-                                             if r["stage"] in ("production", "incubation", "eligible") else 1.0), 6),
+                                  risk=round(self.risk_for(r["stage"]) * scale * penalty.get(r["id"], 1.0)
+                                             * (self.risk_multiplier(r)
+                                                if r["stage"] in ("production", "incubation", "eligible") else 1.0), 6),
                                   leverage=self.lc.leverage, sides=r.get("sides") or ["long", "short"],
                                   score=float(r.get("score") or 0.0)))
         # retired sleeves that still hold positions keep managing them (no new entries)
