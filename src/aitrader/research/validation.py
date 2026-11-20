@@ -80,6 +80,9 @@ def evaluate_gates(g: Gates, m: dict) -> tuple[str, dict]:
                         mc["prob_profit"] >= g.min_mc_prob_profit),
         "deflated_sharpe": (m["dsr"], g.min_dsr, m["dsr"] >= g.min_dsr),
     }
+    fp = m.get("fold_pos")
+    if fp is not None:  # every walk-forward slice is its own out-of-sample test
+        checks["fold_consistency"] = (fp, g.min_fold_consistency, fp >= g.min_fold_consistency)
     gates = {k: {"value": round(float(v), 4), "threshold": t, "pass": bool(ok)}
              for k, (v, t, ok) in checks.items()}
     if all(x["pass"] for x in gates.values()):
@@ -89,5 +92,6 @@ def evaluate_gates(g: Gates, m: dict) -> tuple[str, dict]:
                   and stress["profit_factor"] >= g.explore_min_stress_pf
                   and oos.get("sharpe", 0.0) >= g.explore_min_sharpe
                   and mc.get("prob_profit", 0.0) >= g.explore_min_mc
-                  and oos["total_return"] > 0)
+                  and oos["total_return"] > 0
+                  and (fp is None or fp >= g.explore_min_fold_consistency))
     return ("exploratory" if explore_ok else "rejected"), gates

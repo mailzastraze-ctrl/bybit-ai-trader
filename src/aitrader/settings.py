@@ -32,12 +32,14 @@ class Gates:
     min_robust_frac: float = 0.6  # share of parameter perturbations that stay profitable
     min_mc_prob_profit: float = 0.80  # Monte-Carlo bootstrap probability of profit
     min_dsr: float = 0.80  # Deflated Sharpe Ratio probability
+    min_fold_consistency: float = 0.75  # share of walk-forward test slices that are profitable
     # relaxed gates for the exploration (tiny-risk) lane
     explore_min_trades: int = 15
     explore_min_pf: float = 1.05
     explore_min_stress_pf: float = 1.0
     explore_min_sharpe: float = 0.3
     explore_min_mc: float = 0.6
+    explore_min_fold_consistency: float = 0.5
 
 
 @dataclass
@@ -67,9 +69,9 @@ class Lifecycle:
 @dataclass
 class Research:
     timeframe: str = "1h"
-    train_days: int = 300
-    holdout_days: int = 120
-    wf_folds: int = 2
+    train_days: int = 365   # each fold re-optimises on the previous year
+    holdout_days: int = 360  # one full year of out-of-sample data …
+    wf_folds: int = 4        # … tested as four unseen 90-day slices
     epochs: int = 120
     hyperopt_jobs: int = 2
     universe_size: int = 24
@@ -79,7 +81,7 @@ class Research:
     perturbations: int = 6
     mc_samples: int = 2000
     idle_sleep_s: int = 300  # pause between experiments (keeps CPU bill in check)
-    min_history_days: int = 400
+    min_history_days: int = 760
     # Exchange whose public data research uses. Live trading is always Bybit Demo; offline
     # bulk research on GitHub runners (US IPs, Bybit geo-blocked) uses OKX perps as a proxy.
     exchange: str = "bybit"

@@ -36,6 +36,8 @@ def test_auth_and_endpoints(client):
         r = client.get(path, auth=a)
         assert r.status_code == 200, path
     assert client.get("/api/lab/state").status_code == 401
+    assert client.get("/api/lab/backup").status_code == 401
+    assert client.get("/api/readiness", auth=a).json()["total"] == 8
     assert client.post("/api/lab/import", json={}, headers={"Authorization": "Bearer junk"}).status_code == 401
     g = client.get("/api/goals", auth=a).json()
     assert g["mission"] and len(g["goals"]) >= 5

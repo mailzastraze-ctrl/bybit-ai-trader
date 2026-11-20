@@ -187,7 +187,7 @@ def test_pipeline_end_to_end(env, good):
     assert runner.calls.count("hyperopt") == s.research.wf_folds
     assert any(c.startswith("backtest:bt_stress") for c in runner.calls)
     assert any(c.startswith("backtest:bt_pert") for c in runner.calls)
-    assert res["oos"]["trades"] == 72
+    assert res["oos"]["trades"] == 36 * s.research.wf_folds
     assert set(res["gates"]) >= {"trades", "profit_factor", "deflated_sharpe", "monte_carlo", "robustness", "wfe"}
     st = reg.one("SELECT * FROM strategies WHERE experiment_id=?", (eid,))
     if good:

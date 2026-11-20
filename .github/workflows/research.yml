@@ -68,12 +68,26 @@ jobs:
           docker run --rm -v "$PWD/work:/data" \
             -e RESEARCH_EXCHANGE -e LAB_PUBLIC=${{ steps.plan.outputs.public }} \
             -e ACTIONS_ID_TOKEN_REQUEST_URL -e ACTIONS_ID_TOKEN_REQUEST_TOKEN \
-            -e RESEARCH_EPOCHS=80 -e RESEARCH_JOBS=${{ steps.plan.outputs.cpus }} -e RESEARCH_UNIVERSE=24 \
+            -e RESEARCH_EPOCHS=80 -e RESEARCH_JOBS=${{ steps.plan.outputs.cpus }} -e RESEARCH_UNIVERSE=40 \
             aitrader:research python -m aitrader.research.batch cycle --out /data/batch --export /data/export \
               --budget-min ${{ steps.plan.outputs.budget }} --run-id ${{ github.run_id }} \
               --server "$LAB_SERVER" --ledger /data/ledger.json
       - if: always()
         run: sudo chown -R "$(id -u):$(id -g)" work
+      - name: Back up the live registry (trades, strategies, learnings)
+        if: always()
+        continue-on-error: true
+        run: |
+          TOK=$(curl -s -H "Authorization: bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" "$ACTIONS_ID_TOKEN_REQUEST_URL&audience=aitrader-lab" | python3 -c 'import sys,json;print(json.load(sys.stdin)["value"])')
+          mkdir -p backup && curl -sf -H "Authorization: Bearer $TOK" -o backup/registry.sqlite.gz "$LAB_SERVER/api/lab/backup" && ls -la backup
+      - uses: actions/upload-artifact@v4
+        if: always()
+        continue-on-error: true
+        with:
+          name: registry-backup
+          path: backup/registry.sqlite.gz
+          retention-days: 30
+          if-no-files-found: ignore
       - uses: actions/cache/save@v4
         if: always()
         with:

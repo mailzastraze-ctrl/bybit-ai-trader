@@ -168,9 +168,11 @@ class Pipeline:
         wfe = walk_forward_efficiency(float(np.mean(is_annual)) if is_annual else 0.0,
                                       oos.get("annual_return", 0.0))
 
+        fold_pos = (sum(1 for f in fold_reports if (f.get("oos") or {}).get("total_return", 0) > 0)
+                    / max(len(folds), 1))
         verdict, gates = evaluate_gates(self.s.gates, {
             "oos": oos, "stress": stress, "wfe": wfe, "robust_frac": robust_frac, "mc": mc,
-            "dsr": dsr})
+            "dsr": dsr, "fold_pos": fold_pos})
 
         # 5) per-pair attribution → which pairs this strategy should own --------
         df = M.trades_frame(oos_trades)
@@ -185,7 +187,7 @@ class Pipeline:
         result = {
             "verdict": verdict, "gates": gates, "oos": oos, "stress": stress, "mc": mc,
             "dsr": round(dsr, 4), "n_trials": n_trials, "wfe": round(wfe, 4),
-            "robust_frac": round(robust_frac, 3),
+            "robust_frac": round(robust_frac, 3), "fold_pos": round(fold_pos, 3),
             "perturb_pf_median": round(float(np.median(pert_pfs)), 3) if pert_pfs else 0.0,
             "folds": fold_reports, "params": params, "pairs": good_pairs, "variant": fam.variant(params),
             "pair_stats": pair_stats, "score": score(oos, dsr),

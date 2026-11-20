@@ -147,7 +147,7 @@ def test_cycle_state_to_import_closed_loop(env, tmp_path, monkeypatch):
     assert m["n_completed"] == 3 and m["n_trials_for_dsr"] == 23  # ledger trials count too
     assert fake.events[0] == "start" and fake.events[-1] == "end"
     assert m["experiments_full"][0]["spec"]["revalidates"] == "prod-1"  # revalidation first
-    assert {st for _, st in fake.prog} >= {"download", "hyperopt fold 1/2", "evaluated"}
+    assert {st for _, st in fake.prog} >= {"download", "hyperopt fold 1/4", "evaluated"}
     assert len(json.loads((tmp_path / "export" / "ledger.json").read_text())["trials"]) == 23
     assert (tmp_path / "export" / "reports" / f"{m['batch_id']}.md").exists()
 
@@ -191,3 +191,15 @@ def test_imported_candidate_flows_to_exploration(env):
     lab.apply_import(s, reg, data)
     Lifecycle(s, reg).evaluate(10_000)
     assert reg.one("SELECT stage FROM strategies WHERE id='b1-1-trend-00'")["stage"] == "exploration"
+
+
+def test_fold_consistency_gate():
+    from aitrader.research.validation import evaluate_gates
+    from aitrader.settings import Gates
+    oos = {"trades": 80, "profit_factor": 1.5, "sharpe": 1.4, "max_drawdown": 0.05, "total_return": 0.2}
+    m = {"oos": oos, "stress": {"profit_factor": 1.3}, "wfe": 0.8, "robust_frac": 1.0, "mc": {"prob_profit": 0.95},
+         "dsr": 0.95}
+    assert evaluate_gates(Gates(), m)[0] == "validated"  # old results without fold data
+    v, g = evaluate_gates(Gates(), {**m, "fold_pos": 0.5})  # only 2 of 4 slices profitable
+    assert v == "exploratory" and g["fold_consistency"]["pass"] is False
+    assert evaluate_gates(Gates(), {**m, "fold_pos": 0.25})[0] == "rejected"

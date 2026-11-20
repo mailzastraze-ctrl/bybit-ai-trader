@@ -70,7 +70,7 @@ def cmd_run(out: Path, job: int, n: int, universe_file: Path) -> None:
 
 
 LEDGER_WINDOW_DAYS = 90
-RESULT_KEYS = ("oos", "stress", "mc", "wfe", "robust_frac", "perturb_pf_median", "params", "pairs",
+RESULT_KEYS = ("oos", "stress", "mc", "wfe", "robust_frac", "fold_pos", "perturb_pf_median", "params", "pairs",
                "variant", "pair_stats", "exit_reasons", "epoch_sharpe_std")
 
 
@@ -122,7 +122,8 @@ def merge(dirs: list[Path], batch_id: str, ledger: dict | None = None) -> dict:
         dsr = M.deflated_sharpe(oos.get("daily_sharpe", 0.0), oos.get("n_days", 0), n_trials, max(var, 1e-6),
                                 oos.get("skew", 0.0), oos.get("kurtosis", 3.0))
         verdict, gates = evaluate_gates(s.gates, {"oos": oos, "stress": r["stress"], "wfe": r["wfe"],
-                                                  "robust_frac": r["robust_frac"], "mc": r["mc"], "dsr": dsr})
+                                                  "robust_frac": r["robust_frac"], "mc": r["mc"], "dsr": dsr,
+                                                  "fold_pos": r.get("fold_pos")})
         e["batch_verdict"], e["batch_dsr"], e["batch_gates"] = verdict, round(dsr, 4), gates
         if verdict != "rejected" and r.get("pairs"):
             candidates.append({

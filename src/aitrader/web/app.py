@@ -260,6 +260,25 @@ async def lab_import(request: Request, claims: dict = Depends(lab_auth)) -> dict
     return {"ok": True, **res}
 
 
+@app.get("/api/lab/backup")
+def lab_backup(claims: dict = Depends(lab_auth)) -> Response:  # noqa: ARG001
+    """Consistent gzip snapshot of the registry (the lab stores it as a 30-day artifact)."""
+    import gzip
+    import sqlite3
+    import tempfile
+    with tempfile.TemporaryDirectory() as d:
+        tmp = Path(d) / "registry.sqlite"
+        src, dst = sqlite3.connect(S.registry_path), sqlite3.connect(tmp)
+        try:
+            src.backup(dst)
+        finally:
+            src.close()
+            dst.close()
+        data = gzip.compress(tmp.read_bytes(), 6)
+    return Response(data, media_type="application/gzip",
+                    headers={"Content-Disposition": "attachment; filename=registry.sqlite.gz"})
+
+
 # ---------------------------------------------------------------------------- HQ helpers
 @app.get("/api/candles", dependencies=[Depends(auth)])
 def candles(pair: str, limit: int = 96) -> dict:

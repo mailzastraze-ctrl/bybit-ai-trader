@@ -303,7 +303,7 @@ table.position.set(-1.8, 0, 8.6); scene.add(table); blockObj(tTop, 0.15);
 const meetSpots = [new THREE.Vector3(-3.6, 0, 8.6), new THREE.Vector3(0, 0, 8.6), new THREE.Vector3(-1.8, 0, 7.4), new THREE.Vector3(-1.8, 0, 9.8)];
 const lampBar = new THREE.Group(), lamps = [];
 lampBar.add(boxM(6.8, 0.9, 0.12, M.black, 0, 0, 0));
-for (let i = 0; i < 9; i++) { const l = mesh(new THREE.SphereGeometry(0.22, 18, 12), new THREE.MeshStandardMaterial({color: 0x333333, emissive: 0x000000})); l.position.set(-3 + i * 0.75, 0, 0.1); lampBar.add(l); lamps.push(l); }
+for (let i = 0; i < 10; i++) { const l = mesh(new THREE.SphereGeometry(0.2, 18, 12), new THREE.MeshStandardMaterial({color: 0x333333, emissive: 0x000000})); l.position.set(-3.06 + i * 0.68, 0, 0.1); lampBar.add(l); lamps.push(l); }
 lampBar.position.set(0, 2.5, 14.7); lampBar.rotation.y = Math.PI; scene.add(lampBar);
 glassWall(-5, 5.2, -1.2, 5.2); glassWall(1.2, 5.2, 5, 5.2); glassWall(-5, 5.2, -5, 14.6); glassWall(5, 5.2, 5, 14.6);
 
