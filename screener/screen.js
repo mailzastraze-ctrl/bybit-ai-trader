@@ -54,6 +54,24 @@ function steadiness(eq, barsPerDay) {
   return { r2, last90: eq[k] > 0 ? eq[n - 1] / eq[k] - 1 : 0 };
 }
 
+// one-sided p-value that the mean trade return on the holdout is > 0 (normal approximation of
+// the t statistic; holdout tests need >= 15 trades, where it is adequate)
+function pValue(trades) {
+  const x = trades.map((t) => t.pct), n = x.length;
+  if (n < 3) return 1;
+  const m = x.reduce((a, b) => a + b, 0) / n;
+  const sd = Math.sqrt(x.reduce((a, b) => a + (b - m) ** 2, 0) / (n - 1));
+  if (!(sd > 0)) return m > 0 ? 0 : 1;
+  const t = m / sd * Math.sqrt(n);
+  return 0.5 * erfc(t / Math.SQRT2);
+}
+function erfc(z) { // Numerical Recipes erfc (|err| < 1.2e-7)
+  const t = 1 / (1 + 0.5 * Math.abs(z));
+  const r = t * Math.exp(-z * z - 1.26551223 + t * (1.00002368 + t * (0.37409196 + t * (0.09678418 + t * (-0.18628806 +
+    t * (0.27886807 + t * (-1.13520398 + t * (1.48851587 + t * (-0.82215223 + t * 0.17087277)))))))));
+  return z >= 0 ? r : 2 - r;
+}
+
 const pick = (m) => m && { trades: m.trades, pf: +m.pf.toFixed(3), net: +m.netPct.toFixed(2), dd: +m.maxDD.toFixed(2),
   sharpe: +m.sharpe.toFixed(3), win: +m.winRate.toFixed(1) };
 
@@ -62,8 +80,8 @@ function screenSeries(job, opt) {
   const n = d.c.length, ivMin = job.tf === '15m' ? 15 : 60, iv = String(ivMin), bpd = 1440 / ivMin;
   const warm = 400, split = Math.floor(n * 0.6);
   let evaluated = 0;
-  const out = [];
-  if (n < 2000) return { evaluated, survivors: out };
+  const out = [], pvals = [];
+  if (n < 2000) return { evaluated, survivors: out, pvals };
   for (const strat of E.STRATEGIES) {
     if (!FAMILY[strat.id]) continue;
     const ranges = strat.params.map((q) => ({ key: q.key, min: q.min, max: q.max, step: q.step, type: q.type }));
@@ -83,22 +101,32 @@ function screenSeries(job, opt) {
     for (const c of best.slice(0, opt.top)) {
       const r = E.run(d, strat, c.p, settings(c.x), { from: split, to: n - 1, iv });
       evaluated++;
-      const st = steadiness(r.bt.eq, bpd), mB = r.m;
+      const st = steadiness(r.bt.eq, bpd), mB = r.m, pv = pValue(r.bt.trades);
+      pvals.push(pv);
       const pass = mB.trades >= opt.minTradesB && mB.pf >= 1.15 && mB.netPct > 0 && st.r2 >= 0.5 && st.last90 >= 0 && mB.maxDD < 30;
       if (!pass) continue;
       const eq = r.bt.eq, step = Math.max(1, Math.ceil(eq.length / 100)), curve = [];
       for (let i = 0; i < eq.length; i += step) curve.push([d.t[split + i], +(eq[i] / 10000).toFixed(4)]);
       curve.push([d.t[n - 1], +(eq[eq.length - 1] / 10000).toFixed(4)]);
       out.push({ strategy: strat.id, family: FAMILY[strat.id], name: strat.name, pair: job.pair, timeframe: job.tf, curve,
-        params: c.p, exits: c.x, A: pick(c.m), B: pick(mB), r2: +st.r2.toFixed(3), last90: +(st.last90 * 100).toFixed(2),
+        params: c.p, exits: c.x, A: pick(c.m), B: pick(mB), r2: +st.r2.toFixed(3), last90: +(st.last90 * 100).toFixed(2), p: pv,
         holdout_from: d.t[split], holdout_to: d.t[n - 1] });
     }
   }
-  return { evaluated, survivors: out };
+  return { evaluated, survivors: out, pvals };
+}
+
+/* Benjamini–Hochberg: among all holdout tests (m), keep discoveries with p <= p*, where p* is
+   the largest p_(k) <= k/m * q. Controls the expected share of lucky survivors at q. */
+function bhThreshold(pvals, q) {
+  const p = [...pvals].sort((a, b) => a - b), m = p.length;
+  let thr = -1;
+  for (let k = 1; k <= m; k++) if (p[k - 1] <= k / m * q) thr = p[k - 1];
+  return thr;
 }
 
 function parseArgs() {
-  const a = process.argv.slice(2), o = { combos: 260, top: 4, workers: os.cpus().length, seed: 7, minTradesA: 30, minTradesB: 15 };
+  const a = process.argv.slice(2), o = { combos: 260, top: 4, workers: os.cpus().length, seed: 7, minTradesA: 30, minTradesB: 15, fdr: 0.2 };
   for (let i = 0; i < a.length; i += 2) {
     const k = a[i].replace(/^--/, ''), v = a[i + 1];
     o[k.replace(/-([a-z])/g, (_, c) => c.toUpperCase())] = isNaN(+v) ? v : +v;
@@ -106,7 +134,7 @@ function parseArgs() {
   return o;
 }
 
-if (isMainThread) {
+if (isMainThread && require.main === module) {
   const opt = parseArgs();
   const files = fs.readdirSync(opt.data).filter((f) => f.endsWith('.json')).sort();
   const jobs = files.map((f, k) => {
@@ -114,14 +142,20 @@ if (isMainThread) {
     return m && { k, file: path.join(opt.data, f), pair: m[1].replace(/_/g, '/').replace(/\/USDT\/USDT$/, '/USDT:USDT'), tf: m[2] };
   }).filter(Boolean);
   const t0 = Date.now();
-  const all = [];
+  const all = [], pvals = [];
   let evaluated = 0, done = 0, next = 0;
   const finish = () => {
+    const q = opt.fdr, thr = bhThreshold(pvals, q), before = all.length;
+    const kept = all.filter((x) => x.p <= thr);
+    all.length = 0; all.push(...kept);
+    console.log(`false-discovery control: ${pvals.length} holdout tests, BH q=${q} → p ≤ ${thr < 0 ? "none" : thr.toExponential(2)}; ${before} → ${kept.length}`);
     all.sort((a, b) => b.B.sharpe - a.B.sharpe);
     const res = { created: new Date().toISOString(), engine: 'Bybit Strategy Lab engine.js (owner)', evaluated,
-      series: jobs.length, seconds: Math.round((Date.now() - t0) / 1000), rules: {
+      series: jobs.length, seconds: Math.round((Date.now() - t0) / 1000), holdout_tests: pvals.length, fdr_q: opt.fdr,
+      expected_false: +(all.length * opt.fdr).toFixed(1), rules: {
         search: 'first 60% of history', holdout: 'last 40% (unseen by the search)',
-        pass: 'holdout trades>=15, PF>=1.15, return>0, equity R²>=0.5, last 90 days>=0, max DD<30%' },
+        pass: 'holdout trades>=15, PF>=1.15, return>0, equity R²>=0.5, last 90 days>=0, max DD<30%, ' +
+          'and significant after Benjamini–Hochberg over all holdout tests (q=' + opt.fdr + ')' },
       survivors: all };
     fs.writeFileSync(opt.out, JSON.stringify(res));
     console.log(`screened ${evaluated} combinations on ${jobs.length} series in ${res.seconds}s → ${all.length} survivors`);
@@ -132,14 +166,14 @@ if (isMainThread) {
     const wk = new Worker(__filename, { workerData: { opt } });
     const feed = () => { if (next < jobs.length) wk.postMessage(jobs[next++]); else wk.postMessage(null); };
     wk.on('message', (r) => {
-      evaluated += r.evaluated; all.push(...r.survivors); done++;
+      evaluated += r.evaluated; all.push(...r.survivors); pvals.push(...(r.pvals || [])); done++;
       if (done % 10 === 0) console.log(`${done}/${jobs.length} series, ${evaluated} combinations, ${all.length} survivors`);
       feed();
     });
     wk.on('exit', () => { if (done === jobs.length && !finish.done) { finish.done = true; finish(); } });
     feed();
   }
-} else {
+} else if (!isMainThread) {
   parentPort.on('message', (job) => {
     if (!job) { process.exit(0); }
     let r;
@@ -148,4 +182,4 @@ if (isMainThread) {
   });
 }
 
-module.exports = { screenSeries, steadiness, FAMILY };
+module.exports = { screenSeries, steadiness, FAMILY, pValue, bhThreshold };

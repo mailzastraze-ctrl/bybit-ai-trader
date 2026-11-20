@@ -236,7 +236,7 @@ function renderLab() {
 function renderScreen() {
   const sc = S.scr || {}, top = sc.top || [];
   const tested = new Map((S.rs?.experiments || []).filter((e) => e.info?.screen).map((e) => [e.info.screen, e]));
-  $("#scrSub").textContent = sc.evaluated ? `${nf(sc.evaluated, 0)} вариантов на ${sc.series} рядах «монета × таймфрейм» · выжило ${sc.n_survivors} · ${ago(sc.ts || sc.created)}` : "ваш движок Strategy Lab · первый запуск с ближайшим прогоном";
+  $("#scrSub").textContent = sc.evaluated ? `${nf(sc.evaluated, 0)} вариантов на ${sc.series} рядах «монета × таймфрейм» · выжило ${sc.n_survivors}${sc.expected_false != null ? ` (из них случайных ожидается ≈ ${nf(sc.expected_false, 1)})` : ""} · ${ago(sc.ts || sc.created)}` : "ваш движок Strategy Lab · первый запуск с ближайшим прогоном";
   if (!top.length) { $("#screen").innerHTML = `<div class="empty">${sc.evaluated ? "Ни один вариант не удержал прибыль с ровной кривой на невиданных данных." : "Скринер ещё не запускался. Он переберёт тысячи вариантов 10 стратегий вашего анализатора на 30 монетах (15m и 1h) и покажет здесь выживших."}</div>`; return; }
   const ex = (x) => `стоп ${x.sl}×ATR · ${x.tp ? "тейк " + x.tp + "R" : "без тейка"} · ${x.tr ? "трейлинг " + x.tr + "×ATR" : "без трейлинга"}`;
   $("#screen").innerHTML = `<table><thead><tr><th>Стратегия</th><th>Монета · ТФ</th><th class="r">Сделок</th><th class="r">PF</th><th class="r">Доходн.</th><th class="r">Просадка</th><th class="r">Ровность</th><th class="r">3 мес.</th><th>Строгая проверка</th></tr></thead><tbody>${top.map((x) => {

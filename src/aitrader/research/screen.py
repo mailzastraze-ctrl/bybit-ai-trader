@@ -126,7 +126,8 @@ def to_specs(screen: dict, job: int = 0, jobs: int = 1, per_job: int = 8, epochs
 
 def summary(screen: dict, top: int = 30) -> dict:
     sv = (screen or {}).get("survivors") or []
-    return {k: screen.get(k) for k in ("created", "evaluated", "series", "seconds", "rules", "engine")} | {
+    return {k: screen.get(k) for k in ("created", "evaluated", "series", "seconds", "rules", "engine", "holdout_tests",
+                                       "fdr_q", "expected_false")} | {
         "n_survivors": len(sv),
         "top": [{"id": survivor_id(x), **{k: x.get(k) for k in ("name", "family", "pair", "timeframe", "params", "exits",
-                                                                 "A", "B", "r2", "last90", "curve", "strategy")}} for x in sv[:top]]}
+                                                                 "A", "B", "r2", "last90", "curve", "strategy", "p")}} for x in sv[:top]]}

@@ -58,8 +58,15 @@ def test_node_screener_end_to_end(tmp_path):
     subprocess.run(["node", str(ROOT / "screener" / "screen.js"), "--data", str(data), "--out", str(out),
                     "--combos", "40", "--workers", "1"], check=True, timeout=300)
     res = json.loads(out.read_text())
-    assert res["evaluated"] > 300 and res["series"] == 1
+    assert res["evaluated"] > 300 and res["series"] == 1 and res["holdout_tests"] > 0 and res["fdr_q"] == 0.2
     for sv in res["survivors"]:
-        assert sv["pair"] == "SOL/USDT:USDT" and sv["B"]["pf"] >= 1.15 and sv["r2"] >= 0.5
+        assert sv["pair"] == "SOL/USDT:USDT" and sv["B"]["pf"] >= 1.15 and sv["r2"] >= 0.5 and 0 <= sv["p"] < 0.2
         assert screen.to_params(sv) is not None
     assert screen.summary(res)["n_survivors"] == len(res["survivors"])
+
+
+@pytest.mark.skipif(shutil.which("node") is None, reason="node not installed")
+def test_benjamini_hochberg_threshold():
+    out = subprocess.run(["node", "-e", "const S=require(process.argv[1]);console.log(S.bhThreshold([0.001,0.01,0.03,0.2,0.5,0.9],0.2))",
+                          str(ROOT / "screener" / "screen.js")], capture_output=True, text=True, check=True)
+    assert float(out.stdout) == 0.03
