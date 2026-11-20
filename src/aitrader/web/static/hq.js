@@ -363,16 +363,16 @@ departments.mission.anchor.set(0, 4.9, 1.6);
 // --- GitHub research lab: the off-site compute cloud (all hyperopt/backtests run there)
 const cloud = new THREE.Group();
 const cloudMat = new THREE.MeshStandardMaterial({color: 0xf4f7fb, roughness: 0.95, emissive: 0x9fb8d8, emissiveIntensity: 0.15, transparent: true, opacity: 0.94});
-for (let i = 0; i < 11; i++) { const r = rand(1.1, 2.1); const puff = mesh(new THREE.SphereGeometry(r, 20, 14), cloudMat, false, false); puff.position.set(rand(-3.4, 3.4), rand(-0.5, 0.9), rand(-1.6, 1.6)); cloud.add(puff); }
+for (let i = 0; i < 16; i++) { const r = rand(0.9, 1.7); const puff = mesh(new THREE.SphereGeometry(r, 20, 14), cloudMat, false, false); puff.position.set(rand(-3.6, 3.6), rand(-0.2, 0.8) * (1 - Math.abs(i % 4 - 1.5) * 0.2), rand(-1.8, 1.8)); puff.scale.y = 0.72; cloud.add(puff); }
 const coreMat = new THREE.MeshBasicMaterial({color: 0x3987e5, toneMapped: false, transparent: true, opacity: 0.9});
-const cloudCore = new THREE.Mesh(new THREE.IcosahedronGeometry(0.75, 1), coreMat); cloudCore.position.y = -1.6; cloud.add(cloudCore);
-const cloudRing = new THREE.Mesh(new THREE.TorusGeometry(1.4, 0.05, 8, 48), new THREE.MeshBasicMaterial({color: 0x7fb6ff, toneMapped: false})); cloudRing.position.y = -1.6; cloudRing.rotation.x = Math.PI / 2; cloud.add(cloudRing);
+const cloudCore = new THREE.Mesh(new THREE.IcosahedronGeometry(0.6, 1), coreMat); cloudCore.position.y = -2.3; cloud.add(cloudCore);
+const cloudRing = new THREE.Mesh(new THREE.TorusGeometry(1.2, 0.05, 8, 48), new THREE.MeshBasicMaterial({color: 0x7fb6ff, toneMapped: false})); cloudRing.position.y = -2.3; cloudRing.rotation.x = Math.PI / 2; cloud.add(cloudRing);
 const cloudRing2 = cloudRing.clone(); cloudRing2.scale.setScalar(0.7); cloud.add(cloudRing2);
-cloud.position.set(-27, 15, -25); scene.add(cloud);
-dept("cloud", "GitHub Research Lab", -27, -25, 0x3987e5);
-departments.cloud.anchor.set(-27, 18.2, -25);
-const beamFrom = new THREE.Vector3(-27, 13.4, -25), beamTo = new THREE.Vector3(-15.5, 3.2, -8.5);
-const beamCurve = new THREE.QuadraticBezierCurve3(beamFrom, new THREE.Vector3(-22, 12, -14), beamTo);
+const CLOUD_Y = 21; cloud.position.set(-20, CLOUD_Y, -26); scene.add(cloud);
+dept("cloud", "GitHub Research Lab", -20, -26, 0x3987e5);
+departments.cloud.anchor.set(-20, CLOUD_Y + 2.4, -26);
+const beamFrom = new THREE.Vector3(-20, CLOUD_Y - 2.9, -26), beamTo = new THREE.Vector3(-15.5, 3.2, -8.5);
+const beamCurve = new THREE.QuadraticBezierCurve3(beamFrom, new THREE.Vector3(-19, 13, -15), beamTo);
 const beam = new THREE.Mesh(new THREE.TubeGeometry(beamCurve, 60, 0.03, 6, false), new THREE.MeshBasicMaterial({color: 0x7fb6ff, transparent: true, opacity: 0.0, toneMapped: false}));
 scene.add(beam);
 const NB = 26, beamParts = new THREE.InstancedMesh(new THREE.SphereGeometry(0.09, 8, 6), new THREE.MeshBasicMaterial({color: 0xbfe0ff, toneMapped: false}), NB);
@@ -1034,9 +1034,9 @@ function drawMission(t) {
   (Gs?.goals || []).forEach((x, j) => {
     const col = j % 2, row = Math.floor(j / 2), X = 24 + col * 500, Y = 92 + row * 88;
     txt(g, x.title, X, Y, C.text, "17px sans-serif");
-    bar(g, X, Y + 14, 380, 16, x.progress, x.progress >= 1 ? C.green : x.warning ? C.red : "#3987e5", "#ffffff12");
-    const shimmer = (t * 120 + j * 70) % 460 - 40; g.fillStyle = "#ffffff18"; g.fillRect(X + clamp(shimmer, 0, 380 * clamp(x.progress, 0, 1)), Y + 14, 14, 16);
-    txt(g, `${x.value}${x.unit === "%" ? "%" : x.unit ? " " + x.unit : ""} / ${x.target}${x.unit === "%" ? "%" : ""}`, X + 392, Y + 28, C.muted, "bold 15px monospace");
+    bar(g, X, Y + 14, 340, 16, x.progress, x.progress >= 1 ? C.green : x.warning ? C.red : "#3987e5", "#ffffff12");
+    const shimmer = (t * 120 + j * 70) % 420 - 40; g.fillStyle = "#ffffff18"; g.fillRect(X + clamp(shimmer, 0, 340 * clamp(x.progress, 0, 1)), Y + 14, 14, 16);
+    txt(g, `${x.value}${x.unit === "%" ? "%" : ""} / ${x.target}${x.unit === "%" ? "%" : ""}`, X + 352, Y + 28, C.muted, "bold 15px monospace");
   });
   missionScr.tex.needsUpdate = true;
 }
@@ -1185,7 +1185,7 @@ let camTween = null, follow = null, tour = false, tourT = 0;
 function flyTo(pos, tgt, ms = 1600) { camTween = {p0: camera.position.clone(), t0: controls.target.clone(), p1: pos.clone(), t1: tgt.clone(), s: performance.now(), ms}; }
 function focusDept(key) {
   const d = departments[key]; follow = null; tour = false;
-  if (key === "cloud") flyTo(cloud.position.clone().add(new THREE.Vector3(16, 2, 22)), cloud.position.clone().add(new THREE.Vector3(4, -3, 6)));
+  if (key === "cloud") flyTo(new THREE.Vector3(-2, 15, 6), new THREE.Vector3(-17, 13, -20));
   else if (key === "mission") flyTo(new THREE.Vector3(0, 4.5, 11), new THREE.Vector3(0, 3, 1.6));
   else flyTo(d.pos.clone().add(new THREE.Vector3(9, 11, 12)), d.pos.clone().setY(1));
   openPanel(key);
@@ -1231,7 +1231,7 @@ function tick() {
   coffeeLed.material.color.setHSL(0.03, 1, 0.45 + 0.15 * Math.sin(t * 2));
   for (let i = 0; i < NP; i++) { partT[i] = (partT[i] + dt * flowSpeed) % 1; const p = pipeline.getPointAt(partT[i]); m4.makeTranslation(p.x, p.y + Math.sin(t * 3 + i) * 0.04, p.z); parts.setMatrixAt(i, m4); }
   parts.instanceMatrix.needsUpdate = true;
-  cloud.position.y = 15 + Math.sin(t * 0.4) * 0.35; cloudRing.rotation.z += dt * (labActive ? 1.6 : 0.3); cloudRing2.rotation.z -= dt * (labActive ? 2.2 : 0.4);
+  cloud.position.y = CLOUD_Y + Math.sin(t * 0.4) * 0.35; cloudRing.rotation.z += dt * (labActive ? 1.6 : 0.3); cloudRing2.rotation.z -= dt * (labActive ? 2.2 : 0.4);
   cloudCore.rotation.y += dt * (labActive ? 1.2 : 0.2); coreMat.color.setHSL(0.6, 0.75, labActive ? 0.55 + 0.12 * Math.sin(t * 5) : 0.35);
   beam.material.opacity = damp(beam.material.opacity, labActive ? 0.45 : 0.0, 2, dt); beamParts.visible = beam.material.opacity > 0.05;
   for (let i = 0; i < NB; i++) { beamT[i] = (beamT[i] + dt * 0.18) % 1; const bp = beamCurve.getPointAt(beamT[i]); m4.makeTranslation(bp.x, bp.y, bp.z); beamParts.setMatrixAt(i, m4); }
@@ -1255,7 +1255,7 @@ function tick() {
     if (k >= 1) { camTween = null; if (!introDone) introDone = true; }
   } else if (follow) {
     const tp = follow.root.position.clone().setY(1.2); controls.target.lerp(tp, 1 - Math.exp(-4 * dt));
-    const want = tp.clone().add(new THREE.Vector3(5, 5.5, 6.5)); camera.position.lerp(want, 1 - Math.exp(-2 * dt));
+    const want = tp.clone().add(new THREE.Vector3(2.6, 1.9, 3.3)); camera.position.lerp(want, 1 - Math.exp(-2 * dt));
   } else if (tour) {
     tourT += dt * 0.05; const r = 34, a = tourT * Math.PI * 2;
     camera.position.lerp(new THREE.Vector3(Math.sin(a) * r, 22 + Math.sin(tourT * 3) * 6, Math.cos(a) * r * 0.85), 1 - Math.exp(-1.2 * dt));
@@ -1273,4 +1273,5 @@ flyTo(HOME_POS, HOME_TGT, 3200);
 setTimeout(() => ceo.say("Morning, team. Demo account only — we earn trust with evidence, not hope.", 6500), 2600);
 setTimeout(() => conversation(researchers[1], researchers[0], [[researchers[1], "Walk-forward fold two is running. Train on 300 days, test on the next 60."], [researchers[0], "Good. Remember: we only trust the out-of-sample numbers."]]), 9000);
 tick();
+window.__hq = {chars, follow: i => { follow = chars[i]; tour = false; camTween = null; }};
 window.__hqReady = true;

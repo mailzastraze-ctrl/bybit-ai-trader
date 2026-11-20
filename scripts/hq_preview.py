@@ -175,11 +175,12 @@ def shoot(port: int, out: Path) -> int:
             pg.evaluate(f"document.querySelectorAll('.tag').forEach(t => {{ if (t.querySelector('b').textContent.trim() === {json.dumps(label)}) t.click(); }})")
             time.sleep(4)
             pg.screenshot(path=str(out / f"{name}.png"))
-        # close-up of a person
+        # close-ups: a researcher and a trader (character detail + animation)
         pg.evaluate("document.getElementById('px').click()")
-        time.sleep(1)
-        pg.mouse.click(800, 450)
-        time.sleep(2)
+        for name, idx in (("hq-person-research", 3), ("hq-person-trader", 11)):
+            pg.evaluate(f"window.__hq.follow({idx})")
+            time.sleep(5)
+            pg.screenshot(path=str(out / f"{name}.png"))
         b.close()
     (out / "console.txt").write_text("\n".join(errors) or "no errors")
     print("console errors:", errors)
