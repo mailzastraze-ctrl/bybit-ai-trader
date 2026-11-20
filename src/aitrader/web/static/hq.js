@@ -1185,7 +1185,7 @@ let camTween = null, follow = null, tour = false, tourT = 0;
 function flyTo(pos, tgt, ms = 1600) { camTween = {p0: camera.position.clone(), t0: controls.target.clone(), p1: pos.clone(), t1: tgt.clone(), s: performance.now(), ms}; }
 function focusDept(key) {
   const d = departments[key]; follow = null; tour = false;
-  if (key === "cloud") flyTo(new THREE.Vector3(-2, 15, 6), new THREE.Vector3(-17, 13, -20));
+  if (key === "cloud") flyTo(new THREE.Vector3(-5, 11, 3), new THREE.Vector3(-19, 18.5, -24));
   else if (key === "mission") flyTo(new THREE.Vector3(0, 4.5, 11), new THREE.Vector3(0, 3, 1.6));
   else flyTo(d.pos.clone().add(new THREE.Vector3(9, 11, 12)), d.pos.clone().setY(1));
   openPanel(key);
@@ -1254,8 +1254,8 @@ function tick() {
     camera.position.lerpVectors(camTween.p0, camTween.p1, e); controls.target.lerpVectors(camTween.t0, camTween.t1, e);
     if (k >= 1) { camTween = null; if (!introDone) introDone = true; }
   } else if (follow) {
-    const tp = follow.root.position.clone().setY(1.2); controls.target.lerp(tp, 1 - Math.exp(-4 * dt));
-    const want = tp.clone().add(new THREE.Vector3(2.6, 1.9, 3.3)); camera.position.lerp(want, 1 - Math.exp(-2 * dt));
+    const tp = follow.root.position.clone().setY(1.2); controls.target.lerp(tp, 1 - Math.exp(-5 * dt));
+    const want = tp.clone().add(new THREE.Vector3(2.6, 1.9, 3.3)); camera.position.lerp(want, 1 - Math.exp(-3 * dt));
   } else if (tour) {
     tourT += dt * 0.05; const r = 34, a = tourT * Math.PI * 2;
     camera.position.lerp(new THREE.Vector3(Math.sin(a) * r, 22 + Math.sin(tourT * 3) * 6, Math.cos(a) * r * 0.85), 1 - Math.exp(-1.2 * dt));

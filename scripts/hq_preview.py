@@ -178,8 +178,10 @@ def shoot(port: int, out: Path) -> int:
         # close-ups: a researcher and a trader (character detail + animation)
         pg.evaluate("document.getElementById('px').click()")
         for name, idx in (("hq-person-research", 3), ("hq-person-trader", 11)):
+            pg.evaluate("document.getElementById('bReset').click()")
+            time.sleep(2)
             pg.evaluate(f"window.__hq.follow({idx})")
-            time.sleep(5)
+            time.sleep(8)
             pg.screenshot(path=str(out / f"{name}.png"))
         b.close()
     (out / "console.txt").write_text("\n".join(errors) or "no errors")
