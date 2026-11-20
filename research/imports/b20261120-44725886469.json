@@ -1,0 +1,3438 @@
+{
+  "batch_id": "b20261120-44725886469",
+  "candidates": [
+    {
+      "experiment": "x23f15f5675",
+      "family": "trend_ema",
+      "gates": {
+        "deflated_sharpe": {
+          "pass": false,
+          "threshold": 0.8,
+          "value": 0.1785
+        },
+        "max_drawdown": {
+          "pass": true,
+          "threshold": 0.2,
+          "value": 0.0321
+        },
+        "monte_carlo": {
+          "pass": true,
+          "threshold": 0.8,
+          "value": 0.9815
+        },
+        "profit_factor": {
+          "pass": true,
+          "threshold": 1.15,
+          "value": 2.3183
+        },
+        "robustness": {
+          "pass": true,
+          "threshold": 0.6,
+          "value": 0.667
+        },
+        "sharpe": {
+          "pass": true,
+          "threshold": 0.75,
+          "value": 2.6198
+        },
+        "stress_pf": {
+          "pass": true,
+          "threshold": 1.0,
+          "value": 2.2231
+        },
+        "trades": {
+          "pass": true,
+          "threshold": 25,
+          "value": 34.0
+        },
+        "wfe": {
+          "pass": false,
+          "threshold": 0.3,
+          "value": 0.0
+        }
+      },
+      "id": "b20261120-44725886469-trend-04",
+      "oos": {
+        "annual_return": 0.4604,
+        "avg_profit_abs": 38.9969,
+        "daily_sharpe": 0.137125,
+        "days": 120.0,
+        "dsr": 0.1785,
+        "expectancy": 0.047003,
+        "kurtosis": 17.7601,
+        "long_trades": 15,
+        "max_drawdown": 0.0321,
+        "mc": {
+          "dd_p95": 0.05136,
+          "prob_profit": 0.9815,
+          "ret_p5": 0.03065,
+          "ret_p50": 0.12904
+        },
+        "n_days": 121,
+        "profit_factor": 2.3183,
+        "sharpe": 2.6198,
+        "short_trades": 19,
+        "skew": 3.072,
+        "sortino": 6.7696,
+        "total_return": 0.13259,
+        "trades": 34,
+        "variant": "trend_ema",
+        "wfe": 0.0,
+        "win_rate": 0.5294
+      },
+      "pairs": [
+        "ADA/USDT:USDT",
+        "LTC/USDT:USDT",
+        "LINK/USDT:USDT",
+        "APT/USDT:USDT",
+        "SUI/USDT:USDT",
+        "FIL/USDT:USDT",
+        "ETH/USDT:USDT",
+        "XRP/USDT:USDT"
+      ],
+      "params": {
+        "adx_min": 33.7,
+        "conv_w": 0.63,
+        "fast": 28,
+        "max_hold": 101,
+        "pullback_rsi": 37.4,
+        "sl_atr": 3.7,
+        "slow": 47,
+        "tp_rr": 1.0,
+        "trail_atr": 2.5,
+        "trail_rr": 1.9
+      },
+      "score": 0.8712,
+      "sides": [
+        "long",
+        "short"
+      ],
+      "stage": "exploratory",
+      "variant": "trend_ema"
+    },
+    {
+      "experiment": "xc554342553",
+      "family": "trend_ema",
+      "gates": {
+        "deflated_sharpe": {
+          "pass": false,
+          "threshold": 0.8,
+          "value": 0.0656
+        },
+        "max_drawdown": {
+          "pass": true,
+          "threshold": 0.2,
+          "value": 0.0715
+        },
+        "monte_carlo": {
+          "pass": true,
+          "threshold": 0.8,
+          "value": 0.85
+        },
+        "profit_factor": {
+          "pass": true,
+          "threshold": 1.15,
+          "value": 1.3113
+        },
+        "robustness": {
+          "pass": false,
+          "threshold": 0.6,
+          "value": 0.333
+        },
+        "sharpe": {
+          "pass": true,
+          "threshold": 0.75,
+          "value": 1.4716
+        },
+        "stress_pf": {
+          "pass": true,
+          "threshold": 1.0,
+          "value": 1.2223
+        },
+        "trades": {
+          "pass": true,
+          "threshold": 25,
+          "value": 79.0
+        },
+        "wfe": {
+          "pass": false,
+          "threshold": 0.3,
+          "value": 0.0
+        }
+      },
+      "id": "b20261120-44725886469-trend-23",
+      "oos": {
+        "annual_return": 0.23647,
+        "avg_profit_abs": 9.1491,
+        "daily_sharpe": 0.077027,
+        "days": 120.0,
+        "dsr": 0.0656,
+        "expectancy": 0.01652,
+        "kurtosis": 8.1766,
+        "long_trades": 26,
+        "max_drawdown": 0.0715,
+        "mc": {
+          "dd_p95": 0.09787,
+          "prob_profit": 0.85,
+          "ret_p5": -0.04247,
+          "ret_p50": 0.07644
+        },
+        "n_days": 121,
+        "profit_factor": 1.3113,
+        "sharpe": 1.4716,
+        "short_trades": 53,
+        "skew": 1.8599,
+        "sortino": 2.9924,
+        "total_return": 0.07228,
+        "trades": 79,
+        "variant": "trend_ema",
+        "wfe": 0.0,
+        "win_rate": 0.4304
+      },
+      "pairs": [
+        "OP/USDT:USDT",
+        "BCH/USDT:USDT",
+        "XRP/USDT:USDT",
+        "LTC/USDT:USDT",
+        "BTC/USDT:USDT"
+      ],
+      "params": {
+        "adx_min": 34.9,
+        "conv_w": 0.98,
+        "fast": 12,
+        "max_hold": 112,
+        "pullback_rsi": 53.9,
+        "sl_atr": 3.3,
+        "slow": 51,
+        "tp_rr": 2.0,
+        "trail_atr": 3.7,
+        "trail_rr": 2.7
+      },
+      "score": 0.6471,
+      "sides": [
+        "long",
+        "short"
+      ],
+      "stage": "exploratory",
+      "variant": "trend_ema"
+    },
+    {
+      "experiment": "x59fc343d57",
+      "family": "meanrev_bb",
+      "gates": {
+        "deflated_sharpe": {
+          "pass": false,
+          "threshold": 0.8,
+          "value": 0.0856
+        },
+        "max_drawdown": {
+          "pass": true,
+          "threshold": 0.2,
+          "value": 0.0476
+        },
+        "monte_carlo": {
+          "pass": true,
+          "threshold": 0.8,
+          "value": 0.8315
+        },
+        "profit_factor": {
+          "pass": true,
+          "threshold": 1.15,
+          "value": 1.5045
+        },
+        "robustness": {
+          "pass": true,
+          "threshold": 0.6,
+          "value": 0.667
+        },
+        "sharpe": {
+          "pass": true,
+          "threshold": 0.75,
+          "value": 1.6027
+        },
+        "stress_pf": {
+          "pass": true,
+          "threshold": 1.0,
+          "value": 1.3705
+        },
+        "trades": {
+          "pass": true,
+          "threshold": 25,
+          "value": 31.0
+        },
+        "wfe": {
+          "pass": true,
+          "threshold": 0.3,
+          "value": 20.3766
+        }
+      },
+      "id": "b20261120-44725886469-meanr-16",
+      "oos": {
+        "annual_return": 0.21282,
+        "avg_profit_abs": 21.1258,
+        "daily_sharpe": 0.083891,
+        "days": 120.0,
+        "dsr": 0.0856,
+        "expectancy": 0.027947,
+        "kurtosis": 11.307,
+        "long_trades": 10,
+        "max_drawdown": 0.0476,
+        "mc": {
+          "dd_p95": 0.08993,
+          "prob_profit": 0.8315,
+          "ret_p5": -0.04064,
+          "ret_p50": 0.06595
+        },
+        "n_days": 121,
+        "profit_factor": 1.5045,
+        "sharpe": 1.6027,
+        "short_trades": 21,
+        "skew": 0.8755,
+        "sortino": 2.6847,
+        "total_return": 0.06549,
+        "trades": 31,
+        "variant": "meanrev_bb",
+        "wfe": 20.3766,
+        "win_rate": 0.6774
+      },
+      "pairs": [
+        "AVAX/USDT:USDT",
+        "DOT/USDT:USDT",
+        "NEAR/USDT:USDT",
+        "SOL/USDT:USDT",
+        "ADA/USDT:USDT",
+        "BTC/USDT:USDT"
+      ],
+      "params": {
+        "adx_max": 33.9,
+        "bb_k": 1.7,
+        "bb_len": 25,
+        "conv_w": 0.02,
+        "max_hold": 118,
+        "rsi_low": 16.6,
+        "sl_atr": 4.0,
+        "tp_rr": 2.5,
+        "trail_atr": 3.5,
+        "trail_rr": 2.1
+      },
+      "score": 0.4613,
+      "sides": [
+        "long",
+        "short"
+      ],
+      "stage": "exploratory",
+      "variant": "meanrev_bb"
+    },
+    {
+      "experiment": "xc324f18b8c",
+      "family": "meanrev_bb",
+      "gates": {
+        "deflated_sharpe": {
+          "pass": false,
+          "threshold": 0.8,
+          "value": 0.0466
+        },
+        "max_drawdown": {
+          "pass": true,
+          "threshold": 0.2,
+          "value": 0.0613
+        },
+        "monte_carlo": {
+          "pass": false,
+          "threshold": 0.8,
+          "value": 0.73
+        },
+        "profit_factor": {
+          "pass": true,
+          "threshold": 1.15,
+          "value": 1.1779
+        },
+        "robustness": {
+          "pass": true,
+          "threshold": 0.6,
+          "value": 1.0
+        },
+        "sharpe": {
+          "pass": true,
+          "threshold": 0.75,
+          "value": 0.96
+        },
+        "stress_pf": {
+          "pass": true,
+          "threshold": 1.0,
+          "value": 1.0468
+        },
+        "trades": {
+          "pass": true,
+          "threshold": 25,
+          "value": 63.0
+        },
+        "wfe": {
+          "pass": false,
+          "threshold": 0.3,
+          "value": 0.0
+        }
+      },
+      "id": "b20261120-44725886469-meanr-28",
+      "oos": {
+        "annual_return": 0.13816,
+        "avg_profit_abs": 6.8991,
+        "daily_sharpe": 0.050247,
+        "days": 120.0,
+        "dsr": 0.0466,
+        "expectancy": 0.009463,
+        "kurtosis": 7.0756,
+        "long_trades": 37,
+        "max_drawdown": 0.0613,
+        "mc": {
+          "dd_p95": 0.13008,
+          "prob_profit": 0.73,
+          "ret_p5": -0.08287,
+          "ret_p50": 0.04313
+        },
+        "n_days": 121,
+        "profit_factor": 1.1779,
+        "sharpe": 0.96,
+        "short_trades": 26,
+        "skew": -0.4056,
+        "sortino": 1.3408,
+        "total_return": 0.04346,
+        "trades": 63,
+        "variant": "meanrev_bb",
+        "wfe": 0.0,
+        "win_rate": 0.6667
+      },
+      "pairs": [
+        "AVAX/USDT:USDT",
+        "SOL/USDT:USDT",
+        "DOT/USDT:USDT",
+        "TRX/USDT:USDT",
+        "ATOM/USDT:USDT",
+        "BTC/USDT:USDT"
+      ],
+      "params": {
+        "adx_max": 18.7,
+        "bb_k": 1.9,
+        "bb_len": 33,
+        "conv_w": 0.59,
+        "max_hold": 142,
+        "rsi_low": 29.6,
+        "sl_atr": 3.5,
+        "tp_rr": 4.9,
+        "trail_atr": 3.3,
+        "trail_rr": 2.7
+      },
+      "score": 0.3743,
+      "sides": [
+        "long",
+        "short"
+      ],
+      "stage": "exploratory",
+      "variant": "meanrev_bb"
+    },
+    {
+      "experiment": "xc830960cf6",
+      "family": "meanrev_bb",
+      "gates": {
+        "deflated_sharpe": {
+          "pass": false,
+          "threshold": 0.8,
+          "value": 0.0615
+        },
+        "max_drawdown": {
+          "pass": true,
+          "threshold": 0.2,
+          "value": 0.0412
+        },
+        "monte_carlo": {
+          "pass": false,
+          "threshold": 0.8,
+          "value": 0.7905
+        },
+        "profit_factor": {
+          "pass": true,
+          "threshold": 1.15,
+          "value": 1.3885
+        },
+        "robustness": {
+          "pass": true,
+          "threshold": 0.6,
+          "value": 0.667
+        },
+        "sharpe": {
+          "pass": true,
+          "threshold": 0.75,
+          "value": 1.2361
+        },
+        "stress_pf": {
+          "pass": true,
+          "threshold": 1.0,
+          "value": 1.2864
+        },
+        "trades": {
+          "pass": true,
+          "threshold": 25,
+          "value": 30.0
+        },
+        "wfe": {
+          "pass": true,
+          "threshold": 0.3,
+          "value": 2.168
+        }
+      },
+      "id": "b20261120-44725886469-meanr-01",
+      "oos": {
+        "annual_return": 0.13666,
+        "avg_profit_abs": 14.3379,
+        "daily_sharpe": 0.064702,
+        "days": 120.0,
+        "dsr": 0.0615,
+        "expectancy": 0.01967,
+        "kurtosis": 13.3471,
+        "long_trades": 6,
+        "max_drawdown": 0.0412,
+        "mc": {
+          "dd_p95": 0.08235,
+          "prob_profit": 0.7905,
+          "ret_p5": -0.04925,
+          "ret_p50": 0.04407
+        },
+        "n_days": 121,
+        "profit_factor": 1.3885,
+        "sharpe": 1.2361,
+        "short_trades": 24,
+        "skew": 0.2327,
+        "sortino": 1.9021,
+        "total_return": 0.04301,
+        "trades": 30,
+        "variant": "meanrev_bb",
+        "wfe": 2.168,
+        "win_rate": 0.6667
+      },
+      "pairs": [
+        "AVAX/USDT:USDT",
+        "NEAR/USDT:USDT",
+        "SOL/USDT:USDT",
+        "ADA/USDT:USDT",
+        "ARB/USDT:USDT",
+        "LTC/USDT:USDT"
+      ],
+      "params": {
+        "adx_max": 15.2,
+        "bb_k": 2.5,
+        "bb_len": 39,
+        "conv_w": 0.36,
+        "max_hold": 53,
+        "rsi_low": 35.0,
+        "sl_atr": 3.8,
+        "tp_rr": 3.7,
+        "trail_atr": 3.1,
+        "trail_rr": 2.6
+      },
+      "score": 0.3445,
+      "sides": [
+        "long",
+        "short"
+      ],
+      "stage": "exploratory",
+      "variant": "meanrev_bb"
+    },
+    {
+      "experiment": "xcebb2bde35",
+      "family": "meanrev_bb",
+      "gates": {
+        "deflated_sharpe": {
+          "pass": false,
+          "threshold": 0.8,
+          "value": 0.0317
+        },
+        "max_drawdown": {
+          "pass": true,
+          "threshold": 0.2,
+          "value": 0.074
+        },
+        "monte_carlo": {
+          "pass": false,
+          "threshold": 0.8,
+          "value": 0.7075
+        },
+        "profit_factor": {
+          "pass": true,
+          "threshold": 1.15,
+          "value": 1.1538
+        },
+        "robustness": {
+          "pass": true,
+          "threshold": 0.6,
+          "value": 1.0
+        },
+        "sharpe": {
+          "pass": false,
+          "threshold": 0.75,
+          "value": 0.6905
+        },
+        "stress_pf": {
+          "pass": true,
+          "threshold": 1.0,
+          "value": 1.0388
+        },
+        "trades": {
+          "pass": true,
+          "threshold": 25,
+          "value": 61.0
+        },
+        "wfe": {
+          "pass": false,
+          "threshold": 0.3,
+          "value": 0.0
+        }
+      },
+      "id": "b20261120-44725886469-meanr-13",
+      "oos": {
+        "annual_return": 0.11417,
+        "avg_profit_abs": 5.9317,
+        "daily_sharpe": 0.036144,
+        "days": 120.0,
+        "dsr": 0.0317,
+        "expectancy": 0.011356,
+        "kurtosis": 16.0334,
+        "long_trades": 33,
+        "max_drawdown": 0.074,
+        "mc": {
+          "dd_p95": 0.12708,
+          "prob_profit": 0.7075,
+          "ret_p5": -0.07828,
+          "ret_p50": 0.03932
+        },
+        "n_days": 121,
+        "profit_factor": 1.1538,
+        "sharpe": 0.6905,
+        "short_trades": 28,
+        "skew": 0.2441,
+        "sortino": 1.0059,
+        "total_return": 0.03618,
+        "trades": 61,
+        "variant": "meanrev_bb",
+        "wfe": 0.0,
+        "win_rate": 0.623
+      },
+      "pairs": [
+        "AVAX/USDT:USDT",
+        "LTC/USDT:USDT",
+        "TRX/USDT:USDT",
+        "SOL/USDT:USDT",
+        "NEAR/USDT:USDT"
+      ],
+      "params": {
+        "adx_max": 27.7,
+        "bb_k": 2.1,
+        "bb_len": 36,
+        "conv_w": 0.7,
+        "max_hold": 130,
+        "rsi_low": 23.9,
+        "sl_atr": 3.6,
+        "tp_rr": 4.8,
+        "trail_atr": 2.7,
+        "trail_rr": 2.6
+      },
+      "score": 0.2576,
+      "sides": [
+        "long",
+        "short"
+      ],
+      "stage": "exploratory",
+      "variant": "meanrev_bb"
+    },
+    {
+      "experiment": "x9cc725a226",
+      "family": "trend_ema",
+      "gates": {
+        "deflated_sharpe": {
+          "pass": false,
+          "threshold": 0.8,
+          "value": 0.0244
+        },
+        "max_drawdown": {
+          "pass": true,
+          "threshold": 0.2,
+          "value": 0.0546
+        },
+        "monte_carlo": {
+          "pass": false,
+          "threshold": 0.8,
+          "value": 0.662
+        },
+        "profit_factor": {
+          "pass": true,
+          "threshold": 1.15,
+          "value": 1.1863
+        },
+        "robustness": {
+          "pass": false,
+          "threshold": 0.6,
+          "value": 0.0
+        },
+        "sharpe": {
+          "pass": false,
+          "threshold": 0.75,
+          "value": 0.7271
+        },
+        "stress_pf": {
+          "pass": true,
+          "threshold": 1.0,
+          "value": 1.1042
+        },
+        "trades": {
+          "pass": true,
+          "threshold": 25,
+          "value": 46.0
+        },
+        "wfe": {
+          "pass": true,
+          "threshold": 0.3,
+          "value": 4.5858
+        }
+      },
+      "id": "b20261120-44725886469-trend-00",
+      "oos": {
+        "annual_return": 0.07813,
+        "avg_profit_abs": 5.4435,
+        "daily_sharpe": 0.038056,
+        "days": 120.0,
+        "dsr": 0.0244,
+        "expectancy": 0.01015,
+        "kurtosis": 29.864,
+        "long_trades": 20,
+        "max_drawdown": 0.0546,
+        "mc": {
+          "dd_p95": 0.09053,
+          "prob_profit": 0.662,
+          "ret_p5": -0.06479,
+          "ret_p50": 0.02381
+        },
+        "n_days": 121,
+        "profit_factor": 1.1863,
+        "sharpe": 0.7271,
+        "short_trades": 26,
+        "skew": 3.837,
+        "sortino": 1.5097,
+        "total_return": 0.02504,
+        "trades": 46,
+        "variant": "trend_ema",
+        "wfe": 4.5858,
+        "win_rate": 0.4565
+      },
+      "pairs": [
+        "OP/USDT:USDT",
+        "APT/USDT:USDT",
+        "FIL/USDT:USDT",
+        "ADA/USDT:USDT",
+        "XRP/USDT:USDT"
+      ],
+      "params": {
+        "adx_min": 35.0,
+        "conv_w": 0.56,
+        "fast": 22,
+        "max_hold": 27,
+        "pullback_rsi": 40.3,
+        "sl_atr": 3.1,
+        "slow": 78,
+        "tp_rr": 4.1,
+        "trail_atr": 3.7,
+        "trail_rr": 1.6
+      },
+      "score": 0.2388,
+      "sides": [
+        "long",
+        "short"
+      ],
+      "stage": "exploratory",
+      "variant": "trend_ema"
+    },
+    {
+      "experiment": "xb9098941c9",
+      "family": "trend_ema",
+      "gates": {
+        "deflated_sharpe": {
+          "pass": false,
+          "threshold": 0.8,
+          "value": 0.021
+        },
+        "max_drawdown": {
+          "pass": true,
+          "threshold": 0.2,
+          "value": 0.1274
+        },
+        "monte_carlo": {
+          "pass": false,
+          "threshold": 0.8,
+          "value": 0.584
+        },
+        "profit_factor": {
+          "pass": false,
+          "threshold": 1.15,
+          "value": 1.0672
+        },
+        "robustness": {
+          "pass": false,
+          "threshold": 0.6,
+          "value": 0.0
+        },
+        "sharpe": {
+          "pass": false,
+          "threshold": 0.75,
+          "value": 0.4668
+        },
+        "stress_pf": {
+          "pass": false,
+          "threshold": 1.0,
+          "value": 0.9896
+        },
+        "trades": {
+          "pass": true,
+          "threshold": 25,
+          "value": 98.0
+        },
+        "wfe": {
+          "pass": false,
+          "threshold": 0.3,
+          "value": 0.0
+        }
+      },
+      "id": "b20261120-44725886469-trend-27",
+      "oos": {
+        "annual_return": 0.06694,
+        "avg_profit_abs": 2.1971,
+        "daily_sharpe": 0.024433,
+        "days": 120.0,
+        "dsr": 0.021,
+        "expectancy": 0.004223,
+        "kurtosis": 10.779,
+        "long_trades": 46,
+        "max_drawdown": 0.1274,
+        "mc": {
+          "dd_p95": 0.16301,
+          "prob_profit": 0.584,
+          "ret_p5": -0.12954,
+          "ret_p50": 0.01875
+        },
+        "n_days": 121,
+        "profit_factor": 1.0672,
+        "sharpe": 0.4668,
+        "short_trades": 52,
+        "skew": 2.1207,
+        "sortino": 0.8885,
+        "total_return": 0.02153,
+        "trades": 98,
+        "variant": "trend_ema",
+        "wfe": 0.0,
+        "win_rate": 0.3776
+      },
+      "pairs": [
+        "LTC/USDT:USDT",
+        "APT/USDT:USDT",
+        "OP/USDT:USDT",
+        "BCH/USDT:USDT",
+        "FIL/USDT:USDT",
+        "XRP/USDT:USDT",
+        "BTC/USDT:USDT",
+        "ADA/USDT:USDT"
+      ],
+      "params": {
+        "adx_min": 30.3,
+        "conv_w": 0.87,
+        "fast": 21,
+        "max_hold": 17,
+        "pullback_rsi": 43.7,
+        "sl_atr": 3.0,
+        "slow": 101,
+        "tp_rr": 1.7,
+        "trail_atr": 3.0,
+        "trail_rr": 1.7
+      },
+      "score": 0.2059,
+      "sides": [
+        "long",
+        "short"
+      ],
+      "stage": "exploratory",
+      "variant": "trend_ema"
+    },
+    {
+      "experiment": "x83e3ef71a2",
+      "family": "meanrev_bb",
+      "gates": {
+        "deflated_sharpe": {
+          "pass": false,
+          "threshold": 0.8,
+          "value": 0.0152
+        },
+        "max_drawdown": {
+          "pass": true,
+          "threshold": 0.2,
+          "value": 0.0388
+        },
+        "monte_carlo": {
+          "pass": false,
+          "threshold": 0.8,
+          "value": 0.5075
+        },
+        "profit_factor": {
+          "pass": false,
+          "threshold": 1.15,
+          "value": 1.0398
+        },
+        "robustness": {
+          "pass": false,
+          "threshold": 0.6,
+          "value": 0.0
+        },
+        "sharpe": {
+          "pass": false,
+          "threshold": 0.75,
+          "value": 0.1643
+        },
+        "stress_pf": {
+          "pass": false,
+          "threshold": 1.0,
+          "value": 0.9695
+        },
+        "trades": {
+          "pass": false,
+          "threshold": 25,
+          "value": 20.0
+        },
+        "wfe": {
+          "pass": false,
+          "threshold": 0.3,
+          "value": 0.1865
+        }
+      },
+      "id": "b20261120-44725886469-meanr-24",
+      "oos": {
+        "annual_return": 0.00952,
+        "avg_profit_abs": 1.5602,
+        "daily_sharpe": 0.0086,
+        "days": 120.0,
+        "dsr": 0.0152,
+        "expectancy": -0.009362,
+        "kurtosis": 17.0018,
+        "long_trades": 7,
+        "max_drawdown": 0.0388,
+        "mc": {
+          "dd_p95": 0.08395,
+          "prob_profit": 0.5075,
+          "ret_p5": -0.06769,
+          "ret_p50": 0.0006
+        },
+        "n_days": 121,
+        "profit_factor": 1.0398,
+        "sharpe": 0.1643,
+        "short_trades": 13,
+        "skew": 1.2003,
+        "sortino": 0.254,
+        "total_return": 0.00312,
+        "trades": 20,
+        "variant": "meanrev_bb",
+        "wfe": 0.1865,
+        "win_rate": 0.6
+      },
+      "pairs": [
+        "AVAX/USDT:USDT",
+        "DOGE/USDT:USDT",
+        "XRP/USDT:USDT"
+      ],
+      "params": {
+        "adx_max": 34.8,
+        "bb_k": 1.8,
+        "bb_len": 33,
+        "conv_w": 0.85,
+        "max_hold": 104,
+        "rsi_low": 15.4,
+        "sl_atr": 4.0,
+        "tp_rr": 4.2,
+        "trail_atr": 2.2,
+        "trail_rr": 2.9
+      },
+      "score": 0.0358,
+      "sides": [
+        "long",
+        "short"
+      ],
+      "stage": "exploratory",
+      "variant": "meanrev_bb"
+    }
+  ],
+  "created": "2026-11-20T13:59:53Z",
+  "exchange": "okx",
+  "n_completed": 29,
+  "n_experiments": 29,
+  "n_trials_for_dsr": 29,
+  "summary": [
+    {
+      "batch_dsr": 0.0244,
+      "batch_verdict": "exploratory",
+      "error": null,
+      "family": "trend_ema",
+      "gates": {
+        "deflated_sharpe": {
+          "pass": false,
+          "threshold": 0.8,
+          "value": 0.0244
+        },
+        "max_drawdown": {
+          "pass": true,
+          "threshold": 0.2,
+          "value": 0.0546
+        },
+        "monte_carlo": {
+          "pass": false,
+          "threshold": 0.8,
+          "value": 0.662
+        },
+        "profit_factor": {
+          "pass": true,
+          "threshold": 1.15,
+          "value": 1.1863
+        },
+        "robustness": {
+          "pass": false,
+          "threshold": 0.6,
+          "value": 0.0
+        },
+        "sharpe": {
+          "pass": false,
+          "threshold": 0.75,
+          "value": 0.7271
+        },
+        "stress_pf": {
+          "pass": true,
+          "threshold": 1.0,
+          "value": 1.1042
+        },
+        "trades": {
+          "pass": true,
+          "threshold": 25,
+          "value": 46.0
+        },
+        "wfe": {
+          "pass": true,
+          "threshold": 0.3,
+          "value": 4.5858
+        }
+      },
+      "id": "x9cc725a226",
+      "oos": {
+        "annual_return": 0.07813,
+        "avg_profit_abs": 5.4435,
+        "daily_sharpe": 0.038056,
+        "days": 120.0,
+        "expectancy": 0.01015,
+        "kurtosis": 29.864,
+        "long_trades": 20,
+        "max_drawdown": 0.0546,
+        "n_days": 121,
+        "profit_factor": 1.1863,
+        "sharpe": 0.7271,
+        "short_trades": 26,
+        "skew": 3.837,
+        "sortino": 1.5097,
+        "total_return": 0.02504,
+        "trades": 46,
+        "win_rate": 0.4565
+      },
+      "pairs": [
+        "ADA/USDT:USDT",
+        "APT/USDT:USDT",
+        "DOGE/USDT:USDT",
+        "ETH/USDT:USDT",
+        "FIL/USDT:USDT",
+        "NEAR/USDT:USDT",
+        "OP/USDT:USDT",
+        "SUI/USDT:USDT",
+        "TRX/USDT:USDT",
+        "XRP/USDT:USDT"
+      ]
+    },
+    {
+      "batch_dsr": 0.0615,
+      "batch_verdict": "exploratory",
+      "error": null,
+      "family": "meanrev_bb",
+      "gates": {
+        "deflated_sharpe": {
+          "pass": false,
+          "threshold": 0.8,
+          "value": 0.0615
+        },
+        "max_drawdown": {
+          "pass": true,
+          "threshold": 0.2,
+          "value": 0.0412
+        },
+        "monte_carlo": {
+          "pass": false,
+          "threshold": 0.8,
+          "value": 0.7905
+        },
+        "profit_factor": {
+          "pass": true,
+          "threshold": 1.15,
+          "value": 1.3885
+        },
+        "robustness": {
+          "pass": true,
+          "threshold": 0.6,
+          "value": 0.667
+        },
+        "sharpe": {
+          "pass": true,
+          "threshold": 0.75,
+          "value": 1.2361
+        },
+        "stress_pf": {
+          "pass": true,
+          "threshold": 1.0,
+          "value": 1.2864
+        },
+        "trades": {
+          "pass": true,
+          "threshold": 25,
+          "value": 30.0
+        },
+        "wfe": {
+          "pass": true,
+          "threshold": 0.3,
+          "value": 2.168
+        }
+      },
+      "id": "xc830960cf6",
+      "oos": {
+        "annual_return": 0.13666,
+        "avg_profit_abs": 14.3379,
+        "daily_sharpe": 0.064702,
+        "days": 120.0,
+        "expectancy": 0.01967,
+        "kurtosis": 13.3471,
+        "long_trades": 6,
+        "max_drawdown": 0.0412,
+        "n_days": 121,
+        "profit_factor": 1.3885,
+        "sharpe": 1.2361,
+        "short_trades": 24,
+        "skew": 0.2327,
+        "sortino": 1.9021,
+        "total_return": 0.04301,
+        "trades": 30,
+        "win_rate": 0.6667
+      },
+      "pairs": [
+        "ADA/USDT:USDT",
+        "ARB/USDT:USDT",
+        "AVAX/USDT:USDT",
+        "BCH/USDT:USDT",
+        "BNB/USDT:USDT",
+        "DOGE/USDT:USDT",
+        "LTC/USDT:USDT",
+        "NEAR/USDT:USDT",
+        "SOL/USDT:USDT",
+        "XRP/USDT:USDT"
+      ]
+    },
+    {
+      "batch_dsr": 0.0002,
+      "batch_verdict": "rejected",
+      "error": null,
+      "family": "donchian_breakout",
+      "gates": {
+        "deflated_sharpe": {
+          "pass": false,
+          "threshold": 0.8,
+          "value": 0.0002
+        },
+        "max_drawdown": {
+          "pass": false,
+          "threshold": 0.2,
+          "value": 0.4902
+        },
+        "monte_carlo": {
+          "pass": false,
+          "threshold": 0.8,
+          "value": 0.0065
+        },
+        "profit_factor": {
+          "pass": false,
+          "threshold": 1.15,
+          "value": 0.7281
+        },
+        "robustness": {
+          "pass": false,
+          "threshold": 0.6,
+          "value": 0.0
+        },
+        "sharpe": {
+          "pass": false,
+          "threshold": 0.75,
+          "value": -2.9155
+        },
+        "stress_pf": {
+          "pass": false,
+          "threshold": 1.0,
+          "value": 0.691
+        },
+        "trades": {
+          "pass": true,
+          "threshold": 25,
+          "value": 292.0
+        },
+        "wfe": {
+          "pass": false,
+          "threshold": 0.3,
+          "value": 0.0
+        }
+      },
+      "id": "xf62a274e8a",
+      "oos": {
+        "annual_return": -0.75282,
+        "avg_profit_abs": -12.6163,
+        "daily_sharpe": -0.152606,
+        "days": 120.0,
+        "expectancy": -0.015793,
+        "kurtosis": 8.2976,
+        "long_trades": 126,
+        "max_drawdown": 0.4902,
+        "n_days": 121,
+        "profit_factor": 0.7281,
+        "sharpe": -2.9155,
+        "short_trades": 166,
+        "skew": 0.9528,
+        "sortino": -3.9824,
+        "total_return": -0.3684,
+        "trades": 292,
+        "win_rate": 0.4007
+      },
+      "pairs": [
+        "ADA/USDT:USDT",
+        "APT/USDT:USDT",
+        "BCH/USDT:USDT",
+        "ETH/USDT:USDT",
+        "LINK/USDT:USDT",
+        "LTC/USDT:USDT",
+        "NEAR/USDT:USDT",
+        "OP/USDT:USDT",
+        "TRX/USDT:USDT",
+        "XRP/USDT:USDT"
+      ]
+    },
+    {
+      "batch_dsr": 0.0001,
+      "batch_verdict": "rejected",
+      "error": null,
+      "family": "squeeze_momentum",
+      "gates": {
+        "deflated_sharpe": {
+          "pass": false,
+          "threshold": 0.8,
+          "value": 0.0001
+        },
+        "max_drawdown": {
+          "pass": false,
+          "threshold": 0.2,
+          "value": 0.2513
+        },
+        "monte_carlo": {
+          "pass": false,
+          "threshold": 0.8,
+          "value": 0.0115
+        },
+        "profit_factor": {
+          "pass": false,
+          "threshold": 1.15,
+          "value": 0.7109
+        },
+        "robustness": {
+          "pass": false,
+          "threshold": 0.6,
+          "value": 0.0
+        },
+        "sharpe": {
+          "pass": false,
+          "threshold": 0.75,
+          "value": -2.5924
+        },
+        "stress_pf": {
+          "pass": false,
+          "threshold": 1.0,
+          "value": 0.6016
+        },
+        "trades": {
+          "pass": true,
+          "threshold": 25,
+          "value": 339.0
+        },
+        "wfe": {
+          "pass": false,
+          "threshold": 0.3,
+          "value": 0.0
+        }
+      },
+      "id": "x0f7ca78499",
+      "oos": {
+        "annual_return": -0.5597,
+        "avg_profit_abs": -6.9729,
+        "daily_sharpe": -0.135693,
+        "days": 120.0,
+        "expectancy": -0.003783,
+        "kurtosis": 5.128,
+        "long_trades": 150,
+        "max_drawdown": 0.2513,
+        "n_days": 121,
+        "profit_factor": 0.7109,
+        "sharpe": -2.5924,
+        "short_trades": 189,
+        "skew": 0.0671,
+        "sortino": -3.3419,
+        "total_return": -0.23638,
+        "trades": 339,
+        "win_rate": 0.2655
+      },
+      "pairs": [
+        "ADA/USDT:USDT",
+        "APT/USDT:USDT",
+        "BCH/USDT:USDT",
+        "BTC/USDT:USDT",
+        "ETH/USDT:USDT",
+        "LINK/USDT:USDT",
+        "NEAR/USDT:USDT",
+        "OP/USDT:USDT",
+        "TRX/USDT:USDT",
+        "XRP/USDT:USDT"
+      ]
+    },
+    {
+      "batch_dsr": 0.1785,
+      "batch_verdict": "exploratory",
+      "error": null,
+      "family": "trend_ema",
+      "gates": {
+        "deflated_sharpe": {
+          "pass": false,
+          "threshold": 0.8,
+          "value": 0.1785
+        },
+        "max_drawdown": {
+          "pass": true,
+          "threshold": 0.2,
+          "value": 0.0321
+        },
+        "monte_carlo": {
+          "pass": true,
+          "threshold": 0.8,
+          "value": 0.9815
+        },
+        "profit_factor": {
+          "pass": true,
+          "threshold": 1.15,
+          "value": 2.3183
+        },
+        "robustness": {
+          "pass": true,
+          "threshold": 0.6,
+          "value": 0.667
+        },
+        "sharpe": {
+          "pass": true,
+          "threshold": 0.75,
+          "value": 2.6198
+        },
+        "stress_pf": {
+          "pass": true,
+          "threshold": 1.0,
+          "value": 2.2231
+        },
+        "trades": {
+          "pass": true,
+          "threshold": 25,
+          "value": 34.0
+        },
+        "wfe": {
+          "pass": false,
+          "threshold": 0.3,
+          "value": 0.0
+        }
+      },
+      "id": "x23f15f5675",
+      "oos": {
+        "annual_return": 0.4604,
+        "avg_profit_abs": 38.9969,
+        "daily_sharpe": 0.137125,
+        "days": 120.0,
+        "expectancy": 0.047003,
+        "kurtosis": 17.7601,
+        "long_trades": 15,
+        "max_drawdown": 0.0321,
+        "n_days": 121,
+        "profit_factor": 2.3183,
+        "sharpe": 2.6198,
+        "short_trades": 19,
+        "skew": 3.072,
+        "sortino": 6.7696,
+        "total_return": 0.13259,
+        "trades": 34,
+        "win_rate": 0.5294
+      },
+      "pairs": [
+        "ADA/USDT:USDT",
+        "APT/USDT:USDT",
+        "BCH/USDT:USDT",
+        "DOGE/USDT:USDT",
+        "ETH/USDT:USDT",
+        "FIL/USDT:USDT",
+        "LINK/USDT:USDT",
+        "LTC/USDT:USDT",
+        "SUI/USDT:USDT",
+        "XRP/USDT:USDT"
+      ]
+    },
+    {
+      "batch_dsr": 0.0,
+      "batch_verdict": "rejected",
+      "error": null,
+      "family": "meanrev_bb",
+      "gates": {
+        "deflated_sharpe": {
+          "pass": false,
+          "threshold": 0.8,
+          "value": 0.0
+        },
+        "max_drawdown": {
+          "pass": true,
+          "threshold": 0.2,
+          "value": 0.1283
+        },
+        "monte_carlo": {
+          "pass": false,
+          "threshold": 0.8,
+          "value": 0.015
+        },
+        "profit_factor": {
+          "pass": false,
+          "threshold": 1.15,
+          "value": 0.3817
+        },
+        "robustness": {
+          "pass": false,
+          "threshold": 0.6,
+          "value": 0.0
+        },
+        "sharpe": {
+          "pass": false,
+          "threshold": 0.75,
+          "value": -2.9564
+        },
+        "stress_pf": {
+          "pass": false,
+          "threshold": 1.0,
+          "value": 0.3143
+        },
+        "trades": {
+          "pass": true,
+          "threshold": 25,
+          "value": 26.0
+        },
+        "wfe": {
+          "pass": false,
+          "threshold": 0.3,
+          "value": 0.0
+        }
+      },
+      "id": "x325cc7c8d5",
+      "oos": {
+        "annual_return": -0.29249,
+        "avg_profit_abs": -41.3552,
+        "daily_sharpe": -0.154745,
+        "days": 120.0,
+        "expectancy": -0.038624,
+        "kurtosis": 16.5088,
+        "long_trades": 10,
+        "max_drawdown": 0.1283,
+        "n_days": 121,
+        "profit_factor": 0.3817,
+        "sharpe": -2.9564,
+        "short_trades": 16,
+        "skew": -2.8485,
+        "sortino": -3.198,
+        "total_return": -0.10752,
+        "trades": 26,
+        "win_rate": 0.4231
+      },
+      "pairs": [
+        "ADA/USDT:USDT",
+        "ARB/USDT:USDT",
+        "BCH/USDT:USDT",
+        "BNB/USDT:USDT",
+        "BTC/USDT:USDT",
+        "DOT/USDT:USDT",
+        "NEAR/USDT:USDT",
+        "SOL/USDT:USDT",
+        "TRX/USDT:USDT",
+        "XRP/USDT:USDT"
+      ]
+    },
+    {
+      "batch_dsr": 0.0012,
+      "batch_verdict": "rejected",
+      "error": null,
+      "family": "donchian_breakout",
+      "gates": {
+        "deflated_sharpe": {
+          "pass": false,
+          "threshold": 0.8,
+          "value": 0.0012
+        },
+        "max_drawdown": {
+          "pass": false,
+          "threshold": 0.2,
+          "value": 0.5662
+        },
+        "monte_carlo": {
+          "pass": false,
+          "threshold": 0.8,
+          "value": 0.0255
+        },
+        "profit_factor": {
+          "pass": false,
+          "threshold": 1.15,
+          "value": 0.7815
+        },
+        "robustness": {
+          "pass": false,
+          "threshold": 0.6,
+          "value": 0.0
+        },
+        "sharpe": {
+          "pass": false,
+          "threshold": 0.75,
+          "value": -2.0093
+        },
+        "stress_pf": {
+          "pass": false,
+          "threshold": 1.0,
+          "value": 0.7166
+        },
+        "trades": {
+          "pass": true,
+          "threshold": 25,
+          "value": 375.0
+        },
+        "wfe": {
+          "pass": false,
+          "threshold": 0.3,
+          "value": -26.9111
+        }
+      },
+      "id": "xf6f1afa742",
+      "oos": {
+        "annual_return": -0.75718,
+        "avg_profit_abs": -9.9223,
+        "daily_sharpe": -0.105169,
+        "days": 120.0,
+        "expectancy": -0.005861,
+        "kurtosis": 11.9178,
+        "long_trades": 179,
+        "max_drawdown": 0.5662,
+        "n_days": 121,
+        "profit_factor": 0.7815,
+        "sharpe": -2.0093,
+        "short_trades": 196,
+        "skew": 2.1794,
+        "sortino": -3.2636,
+        "total_return": -0.37209,
+        "trades": 375,
+        "win_rate": 0.384
+      },
+      "pairs": [
+        "ADA/USDT:USDT",
+        "APT/USDT:USDT",
+        "BCH/USDT:USDT",
+        "BTC/USDT:USDT",
+        "ETH/USDT:USDT",
+        "LTC/USDT:USDT",
+        "NEAR/USDT:USDT",
+        "OP/USDT:USDT",
+        "SUI/USDT:USDT",
+        "TRX/USDT:USDT"
+      ]
+    },
+    {
+      "batch_dsr": 0.0,
+      "batch_verdict": "rejected",
+      "error": null,
+      "family": "squeeze_momentum",
+      "gates": {
+        "deflated_sharpe": {
+          "pass": false,
+          "threshold": 0.8,
+          "value": 0.0
+        },
+        "max_drawdown": {
+          "pass": false,
+          "threshold": 0.2,
+          "value": 0.3209
+        },
+        "monte_carlo": {
+          "pass": false,
+          "threshold": 0.8,
+          "value": 0.0085
+        },
+        "profit_factor": {
+          "pass": false,
+          "threshold": 1.15,
+          "value": 0.6454
+        },
+        "robustness": {
+          "pass": false,
+          "threshold": 0.6,
+          "value": 0.0
+        },
+        "sharpe": {
+          "pass": false,
+          "threshold": 0.75,
+          "value": -3.0244
+        },
+        "stress_pf": {
+          "pass": false,
+          "threshold": 1.0,
+          "value": 0.5537
+        },
+        "trades": {
+          "pass": true,
+          "threshold": 25,
+          "value": 228.0
+        },
+        "wfe": {
+          "pass": false,
+          "threshold": 0.3,
+          "value": 0.0
+        }
+      },
+      "id": "xf6ed8b4223",
+      "oos": {
+        "annual_return": -0.63599,
+        "avg_profit_abs": -12.3985,
+        "daily_sharpe": -0.158304,
+        "days": 120.0,
+        "expectancy": -0.006448,
+        "kurtosis": 6.6844,
+        "long_trades": 96,
+        "max_drawdown": 0.3209,
+        "n_days": 121,
+        "profit_factor": 0.6454,
+        "sharpe": -3.0244,
+        "short_trades": 132,
+        "skew": -0.354,
+        "sortino": -3.7761,
+        "total_return": -0.28269,
+        "trades": 228,
+        "win_rate": 0.2675
+      },
+      "pairs": [
+        "ADA/USDT:USDT",
+        "APT/USDT:USDT",
+        "BCH/USDT:USDT",
+        "BTC/USDT:USDT",
+        "DOGE/USDT:USDT",
+        "ETH/USDT:USDT",
+        "LINK/USDT:USDT",
+        "LTC/USDT:USDT",
+        "NEAR/USDT:USDT",
+        "TRX/USDT:USDT"
+      ]
+    },
+    {
+      "batch_dsr": 0.0101,
+      "batch_verdict": "rejected",
+      "error": null,
+      "family": "trend_ema",
+      "gates": {
+        "deflated_sharpe": {
+          "pass": false,
+          "threshold": 0.8,
+          "value": 0.0101
+        },
+        "max_drawdown": {
+          "pass": true,
+          "threshold": 0.2,
+          "value": 0.1052
+        },
+        "monte_carlo": {
+          "pass": false,
+          "threshold": 0.8,
+          "value": 0.4385
+        },
+        "profit_factor": {
+          "pass": false,
+          "threshold": 1.15,
+          "value": 0.9573
+        },
+        "robustness": {
+          "pass": true,
+          "threshold": 0.6,
+          "value": 1.0
+        },
+        "sharpe": {
+          "pass": false,
+          "threshold": 0.75,
+          "value": -0.1562
+        },
+        "stress_pf": {
+          "pass": false,
+          "threshold": 1.0,
+          "value": 0.893
+        },
+        "trades": {
+          "pass": true,
+          "threshold": 25,
+          "value": 65.0
+        },
+        "wfe": {
+          "pass": false,
+          "threshold": 0.3,
+          "value": 0.0
+        }
+      },
+      "id": "x22eea239f9",
+      "oos": {
+        "annual_return": -0.03317,
+        "avg_profit_abs": -1.6967,
+        "daily_sharpe": -0.008175,
+        "days": 120.0,
+        "expectancy": 0.002051,
+        "kurtosis": 8.2952,
+        "long_trades": 28,
+        "max_drawdown": 0.1052,
+        "n_days": 121,
+        "profit_factor": 0.9573,
+        "sharpe": -0.1562,
+        "short_trades": 37,
+        "skew": 1.5389,
+        "sortino": -0.2667,
+        "total_return": -0.01103,
+        "trades": 65,
+        "win_rate": 0.4
+      },
+      "pairs": [
+        "ADA/USDT:USDT",
+        "APT/USDT:USDT",
+        "BTC/USDT:USDT",
+        "DOGE/USDT:USDT",
+        "LINK/USDT:USDT",
+        "LTC/USDT:USDT",
+        "NEAR/USDT:USDT",
+        "SUI/USDT:USDT",
+        "TRX/USDT:USDT",
+        "XRP/USDT:USDT"
+      ]
+    },
+    {
+      "batch_dsr": 0.0,
+      "batch_verdict": "rejected",
+      "error": null,
+      "family": "meanrev_bb",
+      "gates": {
+        "deflated_sharpe": {
+          "pass": false,
+          "threshold": 0.8,
+          "value": 0.0
+        },
+        "max_drawdown": {
+          "pass": true,
+          "threshold": 0.2,
+          "value": 0.1182
+        },
+        "monte_carlo": {
+          "pass": false,
+          "threshold": 0.8,
+          "value": 0.046
+        },
+        "profit_factor": {
+          "pass": false,
+          "threshold": 1.15,
+          "value": 0.3751
+        },
+        "robustness": {
+          "pass": false,
+          "threshold": 0.6,
+          "value": 0.0
+        },
+        "sharpe": {
+          "pass": false,
+          "threshold": 0.75,
+          "value": -2.029
+        },
+        "stress_pf": {
+          "pass": false,
+          "threshold": 1.0,
+          "value": 0.3278
+        },
+        "trades": {
+          "pass": false,
+          "threshold": 25,
+          "value": 20.0
+        },
+        "wfe": {
+          "pass": false,
+          "threshold": 0.3,
+          "value": 0.0
+        }
+      },
+      "id": "xb0a62d0f15",
+      "oos": {
+        "annual_return": -0.26398,
+        "avg_profit_abs": -47.9282,
+        "daily_sharpe": -0.1062,
+        "days": 120.0,
+        "expectancy": -0.019288,
+        "kurtosis": 43.7491,
+        "long_trades": 4,
+        "max_drawdown": 0.1182,
+        "n_days": 121,
+        "profit_factor": 0.3751,
+        "sharpe": -2.029,
+        "short_trades": 16,
+        "skew": -3.621,
+        "sortino": -2.3238,
+        "total_return": -0.09586,
+        "trades": 20,
+        "win_rate": 0.25
+      },
+      "pairs": [
+        "ADA/USDT:USDT",
+        "ATOM/USDT:USDT",
+        "BCH/USDT:USDT",
+        "BNB/USDT:USDT",
+        "BTC/USDT:USDT",
+        "DOGE/USDT:USDT",
+        "LTC/USDT:USDT",
+        "NEAR/USDT:USDT",
+        "TRX/USDT:USDT",
+        "XRP/USDT:USDT"
+      ]
+    },
+    {
+      "batch_dsr": 0.0114,
+      "batch_verdict": "rejected",
+      "error": null,
+      "family": "donchian_breakout",
+      "gates": {
+        "deflated_sharpe": {
+          "pass": false,
+          "threshold": 0.8,
+          "value": 0.0114
+        },
+        "max_drawdown": {
+          "pass": false,
+          "threshold": 0.2,
+          "value": 0.3256
+        },
+        "monte_carlo": {
+          "pass": false,
+          "threshold": 0.8,
+          "value": 0.379
+        },
+        "profit_factor": {
+          "pass": false,
+          "threshold": 1.15,
+          "value": 0.9615
+        },
+        "robustness": {
+          "pass": false,
+          "threshold": 0.6,
+          "value": 0.0
+        },
+        "sharpe": {
+          "pass": false,
+          "threshold": 0.75,
+          "value": -0.0573
+        },
+        "stress_pf": {
+          "pass": false,
+          "threshold": 1.0,
+          "value": 0.9086
+        },
+        "trades": {
+          "pass": true,
+          "threshold": 25,
+          "value": 338.0
+        },
+        "wfe": {
+          "pass": false,
+          "threshold": 0.3,
+          "value": 0.0
+        }
+      },
+      "id": "x4a361f4f67",
+      "oos": {
+        "annual_return": -0.172,
+        "avg_profit_abs": -1.78,
+        "daily_sharpe": -0.002998,
+        "days": 120.0,
+        "expectancy": -0.001909,
+        "kurtosis": 9.2272,
+        "long_trades": 161,
+        "max_drawdown": 0.3256,
+        "n_days": 121,
+        "profit_factor": 0.9615,
+        "sharpe": -0.0573,
+        "short_trades": 177,
+        "skew": 1.8624,
+        "sortino": -0.1041,
+        "total_return": -0.06017,
+        "trades": 338,
+        "win_rate": 0.4053
+      },
+      "pairs": [
+        "APT/USDT:USDT",
+        "BTC/USDT:USDT",
+        "DOGE/USDT:USDT",
+        "FIL/USDT:USDT",
+        "LINK/USDT:USDT",
+        "LTC/USDT:USDT",
+        "NEAR/USDT:USDT",
+        "OP/USDT:USDT",
+        "SUI/USDT:USDT",
+        "XRP/USDT:USDT"
+      ]
+    },
+    {
+      "batch_dsr": 0.0,
+      "batch_verdict": "rejected",
+      "error": null,
+      "family": "squeeze_momentum",
+      "gates": {
+        "deflated_sharpe": {
+          "pass": false,
+          "threshold": 0.8,
+          "value": 0.0
+        },
+        "max_drawdown": {
+          "pass": false,
+          "threshold": 0.2,
+          "value": 0.4796
+        },
+        "monte_carlo": {
+          "pass": false,
+          "threshold": 0.8,
+          "value": 0.0
+        },
+        "profit_factor": {
+          "pass": false,
+          "threshold": 1.15,
+          "value": 0.4791
+        },
+        "robustness": {
+          "pass": false,
+          "threshold": 0.6,
+          "value": 0.0
+        },
+        "sharpe": {
+          "pass": false,
+          "threshold": 0.75,
+          "value": -5.868
+        },
+        "stress_pf": {
+          "pass": false,
+          "threshold": 1.0,
+          "value": 0.4148
+        },
+        "trades": {
+          "pass": true,
+          "threshold": 25,
+          "value": 315.0
+        },
+        "wfe": {
+          "pass": false,
+          "threshold": 0.3,
+          "value": 0.0
+        }
+      },
+      "id": "x0900dc10a3",
+      "oos": {
+        "annual_return": -0.86282,
+        "avg_profit_abs": -15.2242,
+        "daily_sharpe": -0.307143,
+        "days": 120.0,
+        "expectancy": -0.014167,
+        "kurtosis": 4.3652,
+        "long_trades": 129,
+        "max_drawdown": 0.4796,
+        "n_days": 121,
+        "profit_factor": 0.4791,
+        "sharpe": -5.868,
+        "short_trades": 186,
+        "skew": -0.4359,
+        "sortino": -6.4775,
+        "total_return": -0.47956,
+        "trades": 315,
+        "win_rate": 0.273
+      },
+      "pairs": [
+        "ADA/USDT:USDT",
+        "BCH/USDT:USDT",
+        "BTC/USDT:USDT",
+        "FIL/USDT:USDT",
+        "LTC/USDT:USDT",
+        "NEAR/USDT:USDT",
+        "OP/USDT:USDT",
+        "SUI/USDT:USDT",
+        "TRX/USDT:USDT",
+        "XRP/USDT:USDT"
+      ]
+    },
+    {
+      "batch_dsr": 0.0001,
+      "batch_verdict": "rejected",
+      "error": null,
+      "family": "trend_ema",
+      "gates": {
+        "deflated_sharpe": {
+          "pass": false,
+          "threshold": 0.8,
+          "value": 0.0001
+        },
+        "max_drawdown": {
+          "pass": true,
+          "threshold": 0.2,
+          "value": 0.1194
+        },
+        "monte_carlo": {
+          "pass": false,
+          "threshold": 0.8,
+          "value": 0.0905
+        },
+        "profit_factor": {
+          "pass": false,
+          "threshold": 1.15,
+          "value": 0.6686
+        },
+        "robustness": {
+          "pass": false,
+          "threshold": 0.6,
+          "value": 0.0
+        },
+        "sharpe": {
+          "pass": false,
+          "threshold": 0.75,
+          "value": -1.8969
+        },
+        "stress_pf": {
+          "pass": false,
+          "threshold": 1.0,
+          "value": 0.6046
+        },
+        "trades": {
+          "pass": true,
+          "threshold": 25,
+          "value": 71.0
+        },
+        "wfe": {
+          "pass": false,
+          "threshold": 0.3,
+          "value": -13.4389
+        }
+      },
+      "id": "x9ded9d2a9f",
+      "oos": {
+        "annual_return": -0.22941,
+        "avg_profit_abs": -11.5648,
+        "daily_sharpe": -0.099286,
+        "days": 120.0,
+        "expectancy": 0.001456,
+        "kurtosis": 20.1981,
+        "long_trades": 31,
+        "max_drawdown": 0.1194,
+        "n_days": 121,
+        "profit_factor": 0.6686,
+        "sharpe": -1.8969,
+        "short_trades": 40,
+        "skew": -2.1282,
+        "sortino": -2.2833,
+        "total_return": -0.08211,
+        "trades": 71,
+        "win_rate": 0.4366
+      },
+      "pairs": [
+        "APT/USDT:USDT",
+        "BCH/USDT:USDT",
+        "BTC/USDT:USDT",
+        "ETH/USDT:USDT",
+        "FIL/USDT:USDT",
+        "LINK/USDT:USDT",
+        "LTC/USDT:USDT",
+        "SUI/USDT:USDT",
+        "TRX/USDT:USDT",
+        "XRP/USDT:USDT"
+      ]
+    },
+    {
+      "batch_dsr": 0.0317,
+      "batch_verdict": "exploratory",
+      "error": null,
+      "family": "meanrev_bb",
+      "gates": {
+        "deflated_sharpe": {
+          "pass": false,
+          "threshold": 0.8,
+          "value": 0.0317
+        },
+        "max_drawdown": {
+          "pass": true,
+          "threshold": 0.2,
+          "value": 0.074
+        },
+        "monte_carlo": {
+          "pass": false,
+          "threshold": 0.8,
+          "value": 0.7075
+        },
+        "profit_factor": {
+          "pass": true,
+          "threshold": 1.15,
+          "value": 1.1538
+        },
+        "robustness": {
+          "pass": true,
+          "threshold": 0.6,
+          "value": 1.0
+        },
+        "sharpe": {
+          "pass": false,
+          "threshold": 0.75,
+          "value": 0.6905
+        },
+        "stress_pf": {
+          "pass": true,
+          "threshold": 1.0,
+          "value": 1.0388
+        },
+        "trades": {
+          "pass": true,
+          "threshold": 25,
+          "value": 61.0
+        },
+        "wfe": {
+          "pass": false,
+          "threshold": 0.3,
+          "value": 0.0
+        }
+      },
+      "id": "xcebb2bde35",
+      "oos": {
+        "annual_return": 0.11417,
+        "avg_profit_abs": 5.9317,
+        "daily_sharpe": 0.036144,
+        "days": 120.0,
+        "expectancy": 0.011356,
+        "kurtosis": 16.0334,
+        "long_trades": 33,
+        "max_drawdown": 0.074,
+        "n_days": 121,
+        "profit_factor": 1.1538,
+        "sharpe": 0.6905,
+        "short_trades": 28,
+        "skew": 0.2441,
+        "sortino": 1.0059,
+        "total_return": 0.03618,
+        "trades": 61,
+        "win_rate": 0.623
+      },
+      "pairs": [
+        "ADA/USDT:USDT",
+        "ATOM/USDT:USDT",
+        "AVAX/USDT:USDT",
+        "BTC/USDT:USDT",
+        "DOGE/USDT:USDT",
+        "LTC/USDT:USDT",
+        "NEAR/USDT:USDT",
+        "SOL/USDT:USDT",
+        "TRX/USDT:USDT",
+        "XRP/USDT:USDT"
+      ]
+    },
+    {
+      "batch_dsr": 0.0034,
+      "batch_verdict": "rejected",
+      "error": null,
+      "family": "squeeze_momentum",
+      "gates": {
+        "deflated_sharpe": {
+          "pass": false,
+          "threshold": 0.8,
+          "value": 0.0034
+        },
+        "max_drawdown": {
+          "pass": true,
+          "threshold": 0.2,
+          "value": 0.1279
+        },
+        "monte_carlo": {
+          "pass": false,
+          "threshold": 0.8,
+          "value": 0.2035
+        },
+        "profit_factor": {
+          "pass": false,
+          "threshold": 1.15,
+          "value": 0.8645
+        },
+        "robustness": {
+          "pass": false,
+          "threshold": 0.6,
+          "value": 0.0
+        },
+        "sharpe": {
+          "pass": false,
+          "threshold": 0.75,
+          "value": -0.9218
+        },
+        "stress_pf": {
+          "pass": false,
+          "threshold": 1.0,
+          "value": 0.7664
+        },
+        "trades": {
+          "pass": true,
+          "threshold": 25,
+          "value": 243.0
+        },
+        "wfe": {
+          "pass": false,
+          "threshold": 0.3,
+          "value": 0.0
+        }
+      },
+      "id": "x872c90e6d6",
+      "oos": {
+        "annual_return": -0.23152,
+        "avg_profit_abs": -3.4131,
+        "daily_sharpe": -0.048249,
+        "days": 120.0,
+        "expectancy": -0.002968,
+        "kurtosis": 5.9171,
+        "long_trades": 94,
+        "max_drawdown": 0.1279,
+        "n_days": 121,
+        "profit_factor": 0.8645,
+        "sharpe": -0.9218,
+        "short_trades": 149,
+        "skew": 0.9854,
+        "sortino": -1.433,
+        "total_return": -0.08294,
+        "trades": 243,
+        "win_rate": 0.3416
+      },
+      "pairs": [
+        "ADA/USDT:USDT",
+        "APT/USDT:USDT",
+        "BCH/USDT:USDT",
+        "BTC/USDT:USDT",
+        "ETH/USDT:USDT",
+        "LINK/USDT:USDT",
+        "LTC/USDT:USDT",
+        "OP/USDT:USDT",
+        "SUI/USDT:USDT",
+        "XRP/USDT:USDT"
+      ]
+    },
+    {
+      "batch_dsr": 0.0001,
+      "batch_verdict": "rejected",
+      "error": null,
+      "family": "trend_ema",
+      "gates": {
+        "deflated_sharpe": {
+          "pass": false,
+          "threshold": 0.8,
+          "value": 0.0001
+        },
+        "max_drawdown": {
+          "pass": true,
+          "threshold": 0.2,
+          "value": 0.0804
+        },
+        "monte_carlo": {
+          "pass": false,
+          "threshold": 0.8,
+          "value": 0.0525
+        },
+        "profit_factor": {
+          "pass": false,
+          "threshold": 1.15,
+          "value": 0.566
+        },
+        "robustness": {
+          "pass": false,
+          "threshold": 0.6,
+          "value": 0.0
+        },
+        "sharpe": {
+          "pass": false,
+          "threshold": 0.75,
+          "value": -2.2543
+        },
+        "stress_pf": {
+          "pass": false,
+          "threshold": 1.0,
+          "value": 0.5246
+        },
+        "trades": {
+          "pass": true,
+          "threshold": 25,
+          "value": 46.0
+        },
+        "wfe": {
+          "pass": false,
+          "threshold": 0.3,
+          "value": -6.2096
+        }
+      },
+      "id": "x9baaa213fe",
+      "oos": {
+        "annual_return": -0.17398,
+        "avg_profit_abs": -13.2406,
+        "daily_sharpe": -0.117993,
+        "days": 120.0,
+        "expectancy": -0.01995,
+        "kurtosis": 10.4471,
+        "long_trades": 22,
+        "max_drawdown": 0.0804,
+        "n_days": 121,
+        "profit_factor": 0.566,
+        "sharpe": -2.2543,
+        "short_trades": 24,
+        "skew": -1.1105,
+        "sortino": -2.6939,
+        "total_return": -0.06091,
+        "trades": 46,
+        "win_rate": 0.3478
+      },
+      "pairs": [
+        "ADA/USDT:USDT",
+        "APT/USDT:USDT",
+        "BCH/USDT:USDT",
+        "BTC/USDT:USDT",
+        "DOGE/USDT:USDT",
+        "ETH/USDT:USDT",
+        "FIL/USDT:USDT",
+        "NEAR/USDT:USDT",
+        "SUI/USDT:USDT",
+        "XRP/USDT:USDT"
+      ]
+    },
+    {
+      "batch_dsr": 0.0856,
+      "batch_verdict": "exploratory",
+      "error": null,
+      "family": "meanrev_bb",
+      "gates": {
+        "deflated_sharpe": {
+          "pass": false,
+          "threshold": 0.8,
+          "value": 0.0856
+        },
+        "max_drawdown": {
+          "pass": true,
+          "threshold": 0.2,
+          "value": 0.0476
+        },
+        "monte_carlo": {
+          "pass": true,
+          "threshold": 0.8,
+          "value": 0.8315
+        },
+        "profit_factor": {
+          "pass": true,
+          "threshold": 1.15,
+          "value": 1.5045
+        },
+        "robustness": {
+          "pass": true,
+          "threshold": 0.6,
+          "value": 0.667
+        },
+        "sharpe": {
+          "pass": true,
+          "threshold": 0.75,
+          "value": 1.6027
+        },
+        "stress_pf": {
+          "pass": true,
+          "threshold": 1.0,
+          "value": 1.3705
+        },
+        "trades": {
+          "pass": true,
+          "threshold": 25,
+          "value": 31.0
+        },
+        "wfe": {
+          "pass": true,
+          "threshold": 0.3,
+          "value": 20.3766
+        }
+      },
+      "id": "x59fc343d57",
+      "oos": {
+        "annual_return": 0.21282,
+        "avg_profit_abs": 21.1258,
+        "daily_sharpe": 0.083891,
+        "days": 120.0,
+        "expectancy": 0.027947,
+        "kurtosis": 11.307,
+        "long_trades": 10,
+        "max_drawdown": 0.0476,
+        "n_days": 121,
+        "profit_factor": 1.5045,
+        "sharpe": 1.6027,
+        "short_trades": 21,
+        "skew": 0.8755,
+        "sortino": 2.6847,
+        "total_return": 0.06549,
+        "trades": 31,
+        "win_rate": 0.6774
+      },
+      "pairs": [
+        "ADA/USDT:USDT",
+        "AVAX/USDT:USDT",
+        "BCH/USDT:USDT",
+        "BNB/USDT:USDT",
+        "BTC/USDT:USDT",
+        "DOGE/USDT:USDT",
+        "DOT/USDT:USDT",
+        "NEAR/USDT:USDT",
+        "SOL/USDT:USDT",
+        "TRX/USDT:USDT"
+      ]
+    },
+    {
+      "batch_dsr": 0.0003,
+      "batch_verdict": "rejected",
+      "error": null,
+      "family": "donchian_breakout",
+      "gates": {
+        "deflated_sharpe": {
+          "pass": false,
+          "threshold": 0.8,
+          "value": 0.0003
+        },
+        "max_drawdown": {
+          "pass": false,
+          "threshold": 0.2,
+          "value": 0.5769
+        },
+        "monte_carlo": {
+          "pass": false,
+          "threshold": 0.8,
+          "value": 0.005
+        },
+        "profit_factor": {
+          "pass": false,
+          "threshold": 1.15,
+          "value": 0.7486
+        },
+        "robustness": {
+          "pass": false,
+          "threshold": 0.6,
+          "value": 0.0
+        },
+        "sharpe": {
+          "pass": false,
+          "threshold": 0.75,
+          "value": -2.5297
+        },
+        "stress_pf": {
+          "pass": false,
+          "threshold": 1.0,
+          "value": 0.6896
+        },
+        "trades": {
+          "pass": true,
+          "threshold": 25,
+          "value": 447.0
+        },
+        "wfe": {
+          "pass": false,
+          "threshold": 0.3,
+          "value": 0.0
+        }
+      },
+      "id": "x94e36d6599",
+      "oos": {
+        "annual_return": -0.8364,
+        "avg_profit_abs": -10.0344,
+        "daily_sharpe": -0.132413,
+        "days": 120.0,
+        "expectancy": -0.006002,
+        "kurtosis": 6.3975,
+        "long_trades": 210,
+        "max_drawdown": 0.5769,
+        "n_days": 121,
+        "profit_factor": 0.7486,
+        "sharpe": -2.5297,
+        "short_trades": 237,
+        "skew": 0.8744,
+        "sortino": -3.5387,
+        "total_return": -0.44854,
+        "trades": 447,
+        "win_rate": 0.4094
+      },
+      "pairs": [
+        "APT/USDT:USDT",
+        "BCH/USDT:USDT",
+        "BTC/USDT:USDT",
+        "DOGE/USDT:USDT",
+        "FIL/USDT:USDT",
+        "LINK/USDT:USDT",
+        "NEAR/USDT:USDT",
+        "OP/USDT:USDT",
+        "SUI/USDT:USDT",
+        "TRX/USDT:USDT"
+      ]
+    },
+    {
+      "batch_dsr": 0.0003,
+      "batch_verdict": "rejected",
+      "error": null,
+      "family": "squeeze_momentum",
+      "gates": {
+        "deflated_sharpe": {
+          "pass": false,
+          "threshold": 0.8,
+          "value": 0.0003
+        },
+        "max_drawdown": {
+          "pass": false,
+          "threshold": 0.2,
+          "value": 0.3985
+        },
+        "monte_carlo": {
+          "pass": false,
+          "threshold": 0.8,
+          "value": 0.0055
+        },
+        "profit_factor": {
+          "pass": false,
+          "threshold": 1.15,
+          "value": 0.7175
+        },
+        "robustness": {
+          "pass": false,
+          "threshold": 0.6,
+          "value": 0.0
+        },
+        "sharpe": {
+          "pass": false,
+          "threshold": 0.75,
+          "value": -2.4943
+        },
+        "stress_pf": {
+          "pass": false,
+          "threshold": 1.0,
+          "value": 0.6273
+        },
+        "trades": {
+          "pass": true,
+          "threshold": 25,
+          "value": 444.0
+        },
+        "wfe": {
+          "pass": false,
+          "threshold": 0.3,
+          "value": 0.0
+        }
+      },
+      "id": "x1fafa1e95d",
+      "oos": {
+        "annual_return": -0.70001,
+        "avg_profit_abs": -7.3623,
+        "daily_sharpe": -0.130559,
+        "days": 120.0,
+        "expectancy": -0.005931,
+        "kurtosis": 7.8207,
+        "long_trades": 187,
+        "max_drawdown": 0.3985,
+        "n_days": 121,
+        "profit_factor": 0.7175,
+        "sharpe": -2.4943,
+        "short_trades": 257,
+        "skew": 1.1032,
+        "sortino": -3.5682,
+        "total_return": -0.32688,
+        "trades": 444,
+        "win_rate": 0.2838
+      },
+      "pairs": [
+        "ADA/USDT:USDT",
+        "APT/USDT:USDT",
+        "BTC/USDT:USDT",
+        "ETH/USDT:USDT",
+        "FIL/USDT:USDT",
+        "LINK/USDT:USDT",
+        "NEAR/USDT:USDT",
+        "OP/USDT:USDT",
+        "TRX/USDT:USDT",
+        "XRP/USDT:USDT"
+      ]
+    },
+    {
+      "batch_dsr": 0.0064,
+      "batch_verdict": "rejected",
+      "error": null,
+      "family": "trend_ema",
+      "gates": {
+        "deflated_sharpe": {
+          "pass": false,
+          "threshold": 0.8,
+          "value": 0.0064
+        },
+        "max_drawdown": {
+          "pass": true,
+          "threshold": 0.2,
+          "value": 0.0704
+        },
+        "monte_carlo": {
+          "pass": false,
+          "threshold": 0.8,
+          "value": 0.3485
+        },
+        "profit_factor": {
+          "pass": false,
+          "threshold": 1.15,
+          "value": 0.9012
+        },
+        "robustness": {
+          "pass": false,
+          "threshold": 0.6,
+          "value": 0.0
+        },
+        "sharpe": {
+          "pass": false,
+          "threshold": 0.75,
+          "value": -0.4762
+        },
+        "stress_pf": {
+          "pass": false,
+          "threshold": 1.0,
+          "value": 0.8476
+        },
+        "trades": {
+          "pass": true,
+          "threshold": 25,
+          "value": 65.0
+        },
+        "wfe": {
+          "pass": false,
+          "threshold": 0.3,
+          "value": -5.7432
+        }
+      },
+      "id": "xe71534399d",
+      "oos": {
+        "annual_return": -0.06478,
+        "avg_profit_abs": -3.3504,
+        "daily_sharpe": -0.024925,
+        "days": 120.0,
+        "expectancy": 0.002889,
+        "kurtosis": 12.307,
+        "long_trades": 39,
+        "max_drawdown": 0.0704,
+        "n_days": 121,
+        "profit_factor": 0.9012,
+        "sharpe": -0.4762,
+        "short_trades": 26,
+        "skew": 1.0568,
+        "sortino": -0.7301,
+        "total_return": -0.02178,
+        "trades": 65,
+        "win_rate": 0.4
+      },
+      "pairs": [
+        "ADA/USDT:USDT",
+        "APT/USDT:USDT",
+        "BTC/USDT:USDT",
+        "DOGE/USDT:USDT",
+        "LINK/USDT:USDT",
+        "LTC/USDT:USDT",
+        "NEAR/USDT:USDT",
+        "OP/USDT:USDT",
+        "SUI/USDT:USDT",
+        "TRX/USDT:USDT"
+      ]
+    },
+    {
+      "batch_dsr": 0.0016,
+      "batch_verdict": "rejected",
+      "error": null,
+      "family": "meanrev_bb",
+      "gates": {
+        "deflated_sharpe": {
+          "pass": false,
+          "threshold": 0.8,
+          "value": 0.0016
+        },
+        "max_drawdown": {
+          "pass": true,
+          "threshold": 0.2,
+          "value": 0.0773
+        },
+        "monte_carlo": {
+          "pass": false,
+          "threshold": 0.8,
+          "value": 0.218
+        },
+        "profit_factor": {
+          "pass": false,
+          "threshold": 1.15,
+          "value": 0.6878
+        },
+        "robustness": {
+          "pass": true,
+          "threshold": 0.6,
+          "value": 1.0
+        },
+        "sharpe": {
+          "pass": false,
+          "threshold": 0.75,
+          "value": -1.3086
+        },
+        "stress_pf": {
+          "pass": false,
+          "threshold": 1.0,
+          "value": 0.61
+        },
+        "trades": {
+          "pass": true,
+          "threshold": 25,
+          "value": 27.0
+        },
+        "wfe": {
+          "pass": false,
+          "threshold": 0.3,
+          "value": 0.0
+        }
+      },
+      "id": "x90808e705d",
+      "oos": {
+        "annual_return": -0.09807,
+        "avg_profit_abs": -12.3573,
+        "daily_sharpe": -0.068494,
+        "days": 120.0,
+        "expectancy": -0.015766,
+        "kurtosis": 13.7408,
+        "long_trades": 11,
+        "max_drawdown": 0.0773,
+        "n_days": 121,
+        "profit_factor": 0.6878,
+        "sharpe": -1.3086,
+        "short_trades": 16,
+        "skew": 0.2323,
+        "sortino": -1.7186,
+        "total_return": -0.03336,
+        "trades": 27,
+        "win_rate": 0.5185
+      },
+      "pairs": [
+        "ADA/USDT:USDT",
+        "ARB/USDT:USDT",
+        "ATOM/USDT:USDT",
+        "BCH/USDT:USDT",
+        "BNB/USDT:USDT",
+        "BTC/USDT:USDT",
+        "DOGE/USDT:USDT",
+        "LTC/USDT:USDT",
+        "SOL/USDT:USDT",
+        "TRX/USDT:USDT"
+      ]
+    },
+    {
+      "batch_dsr": 0.0015,
+      "batch_verdict": "rejected",
+      "error": null,
+      "family": "donchian_breakout",
+      "gates": {
+        "deflated_sharpe": {
+          "pass": false,
+          "threshold": 0.8,
+          "value": 0.0015
+        },
+        "max_drawdown": {
+          "pass": false,
+          "threshold": 0.2,
+          "value": 0.5156
+        },
+        "monte_carlo": {
+          "pass": false,
+          "threshold": 0.8,
+          "value": 0.0305
+        },
+        "profit_factor": {
+          "pass": false,
+          "threshold": 1.15,
+          "value": 0.8268
+        },
+        "robustness": {
+          "pass": false,
+          "threshold": 0.6,
+          "value": 0.0
+        },
+        "sharpe": {
+          "pass": false,
+          "threshold": 0.75,
+          "value": -1.635
+        },
+        "stress_pf": {
+          "pass": false,
+          "threshold": 1.0,
+          "value": 0.7551
+        },
+        "trades": {
+          "pass": true,
+          "threshold": 25,
+          "value": 560.0
+        },
+        "wfe": {
+          "pass": false,
+          "threshold": 0.3,
+          "value": 0.0
+        }
+      },
+      "id": "xaf943c2735",
+      "oos": {
+        "annual_return": -0.76564,
+        "avg_profit_abs": -6.7744,
+        "daily_sharpe": -0.085581,
+        "days": 120.0,
+        "expectancy": -0.001436,
+        "kurtosis": 9.6038,
+        "long_trades": 251,
+        "max_drawdown": 0.5156,
+        "n_days": 121,
+        "profit_factor": 0.8268,
+        "sharpe": -1.635,
+        "short_trades": 309,
+        "skew": 1.6704,
+        "sortino": -2.5954,
+        "total_return": -0.37936,
+        "trades": 560,
+        "win_rate": 0.4536
+      },
+      "pairs": [
+        "ADA/USDT:USDT",
+        "APT/USDT:USDT",
+        "BCH/USDT:USDT",
+        "BTC/USDT:USDT",
+        "DOGE/USDT:USDT",
+        "ETH/USDT:USDT",
+        "LINK/USDT:USDT",
+        "OP/USDT:USDT",
+        "SUI/USDT:USDT",
+        "TRX/USDT:USDT"
+      ]
+    },
+    {
+      "batch_dsr": 0.0,
+      "batch_verdict": "rejected",
+      "error": null,
+      "family": "squeeze_momentum",
+      "gates": {
+        "deflated_sharpe": {
+          "pass": false,
+          "threshold": 0.8,
+          "value": 0.0
+        },
+        "max_drawdown": {
+          "pass": false,
+          "threshold": 0.2,
+          "value": 0.2276
+        },
+        "monte_carlo": {
+          "pass": false,
+          "threshold": 0.8,
+          "value": 0.004
+        },
+        "profit_factor": {
+          "pass": false,
+          "threshold": 1.15,
+          "value": 0.5815
+        },
+        "robustness": {
+          "pass": false,
+          "threshold": 0.6,
+          "value": 0.0
+        },
+        "sharpe": {
+          "pass": false,
+          "threshold": 0.75,
+          "value": -4.0231
+        },
+        "stress_pf": {
+          "pass": false,
+          "threshold": 1.0,
+          "value": 0.5075
+        },
+        "trades": {
+          "pass": true,
+          "threshold": 25,
+          "value": 193.0
+        },
+        "wfe": {
+          "pass": false,
+          "threshold": 0.3,
+          "value": 0.0
+        }
+      },
+      "id": "xaaa95f39ab",
+      "oos": {
+        "annual_return": -0.52514,
+        "avg_profit_abs": -11.2526,
+        "daily_sharpe": -0.210581,
+        "days": 120.0,
+        "expectancy": -0.013804,
+        "kurtosis": 5.3057,
+        "long_trades": 69,
+        "max_drawdown": 0.2276,
+        "n_days": 121,
+        "profit_factor": 0.5815,
+        "sharpe": -4.0231,
+        "short_trades": 124,
+        "skew": -0.0916,
+        "sortino": -4.8889,
+        "total_return": -0.21718,
+        "trades": 193,
+        "win_rate": 0.2798
+      },
+      "pairs": [
+        "APT/USDT:USDT",
+        "BCH/USDT:USDT",
+        "BTC/USDT:USDT",
+        "DOGE/USDT:USDT",
+        "FIL/USDT:USDT",
+        "NEAR/USDT:USDT",
+        "OP/USDT:USDT",
+        "SUI/USDT:USDT",
+        "TRX/USDT:USDT",
+        "XRP/USDT:USDT"
+      ]
+    },
+    {
+      "batch_dsr": 0.0656,
+      "batch_verdict": "exploratory",
+      "error": null,
+      "family": "trend_ema",
+      "gates": {
+        "deflated_sharpe": {
+          "pass": false,
+          "threshold": 0.8,
+          "value": 0.0656
+        },
+        "max_drawdown": {
+          "pass": true,
+          "threshold": 0.2,
+          "value": 0.0715
+        },
+        "monte_carlo": {
+          "pass": true,
+          "threshold": 0.8,
+          "value": 0.85
+        },
+        "profit_factor": {
+          "pass": true,
+          "threshold": 1.15,
+          "value": 1.3113
+        },
+        "robustness": {
+          "pass": false,
+          "threshold": 0.6,
+          "value": 0.333
+        },
+        "sharpe": {
+          "pass": true,
+          "threshold": 0.75,
+          "value": 1.4716
+        },
+        "stress_pf": {
+          "pass": true,
+          "threshold": 1.0,
+          "value": 1.2223
+        },
+        "trades": {
+          "pass": true,
+          "threshold": 25,
+          "value": 79.0
+        },
+        "wfe": {
+          "pass": false,
+          "threshold": 0.3,
+          "value": 0.0
+        }
+      },
+      "id": "xc554342553",
+      "oos": {
+        "annual_return": 0.23647,
+        "avg_profit_abs": 9.1491,
+        "daily_sharpe": 0.077027,
+        "days": 120.0,
+        "expectancy": 0.01652,
+        "kurtosis": 8.1766,
+        "long_trades": 26,
+        "max_drawdown": 0.0715,
+        "n_days": 121,
+        "profit_factor": 1.3113,
+        "sharpe": 1.4716,
+        "short_trades": 53,
+        "skew": 1.8599,
+        "sortino": 2.9924,
+        "total_return": 0.07228,
+        "trades": 79,
+        "win_rate": 0.4304
+      },
+      "pairs": [
+        "ADA/USDT:USDT",
+        "BCH/USDT:USDT",
+        "BTC/USDT:USDT",
+        "ETH/USDT:USDT",
+        "LINK/USDT:USDT",
+        "LTC/USDT:USDT",
+        "NEAR/USDT:USDT",
+        "OP/USDT:USDT",
+        "TRX/USDT:USDT",
+        "XRP/USDT:USDT"
+      ]
+    },
+    {
+      "batch_dsr": 0.0152,
+      "batch_verdict": "exploratory",
+      "error": null,
+      "family": "meanrev_bb",
+      "gates": {
+        "deflated_sharpe": {
+          "pass": false,
+          "threshold": 0.8,
+          "value": 0.0152
+        },
+        "max_drawdown": {
+          "pass": true,
+          "threshold": 0.2,
+          "value": 0.0388
+        },
+        "monte_carlo": {
+          "pass": false,
+          "threshold": 0.8,
+          "value": 0.5075
+        },
+        "profit_factor": {
+          "pass": false,
+          "threshold": 1.15,
+          "value": 1.0398
+        },
+        "robustness": {
+          "pass": false,
+          "threshold": 0.6,
+          "value": 0.0
+        },
+        "sharpe": {
+          "pass": false,
+          "threshold": 0.75,
+          "value": 0.1643
+        },
+        "stress_pf": {
+          "pass": false,
+          "threshold": 1.0,
+          "value": 0.9695
+        },
+        "trades": {
+          "pass": false,
+          "threshold": 25,
+          "value": 20.0
+        },
+        "wfe": {
+          "pass": false,
+          "threshold": 0.3,
+          "value": 0.1865
+        }
+      },
+      "id": "x83e3ef71a2",
+      "oos": {
+        "annual_return": 0.00952,
+        "avg_profit_abs": 1.5602,
+        "daily_sharpe": 0.0086,
+        "days": 120.0,
+        "expectancy": -0.009362,
+        "kurtosis": 17.0018,
+        "long_trades": 7,
+        "max_drawdown": 0.0388,
+        "n_days": 121,
+        "profit_factor": 1.0398,
+        "sharpe": 0.1643,
+        "short_trades": 13,
+        "skew": 1.2003,
+        "sortino": 0.254,
+        "total_return": 0.00312,
+        "trades": 20,
+        "win_rate": 0.6
+      },
+      "pairs": [
+        "ADA/USDT:USDT",
+        "ARB/USDT:USDT",
+        "ATOM/USDT:USDT",
+        "AVAX/USDT:USDT",
+        "BCH/USDT:USDT",
+        "BTC/USDT:USDT",
+        "DOGE/USDT:USDT",
+        "DOT/USDT:USDT",
+        "SOL/USDT:USDT",
+        "XRP/USDT:USDT"
+      ]
+    },
+    {
+      "batch_dsr": 0.0028,
+      "batch_verdict": "rejected",
+      "error": null,
+      "family": "donchian_breakout",
+      "gates": {
+        "deflated_sharpe": {
+          "pass": false,
+          "threshold": 0.8,
+          "value": 0.0028
+        },
+        "max_drawdown": {
+          "pass": false,
+          "threshold": 0.2,
+          "value": 0.4871
+        },
+        "monte_carlo": {
+          "pass": false,
+          "threshold": 0.8,
+          "value": 0.1
+        },
+        "profit_factor": {
+          "pass": false,
+          "threshold": 1.15,
+          "value": 0.8728
+        },
+        "robustness": {
+          "pass": false,
+          "threshold": 0.6,
+          "value": 0.0
+        },
+        "sharpe": {
+          "pass": false,
+          "threshold": 0.75,
+          "value": -1.1572
+        },
+        "stress_pf": {
+          "pass": false,
+          "threshold": 1.0,
+          "value": 0.7952
+        },
+        "trades": {
+          "pass": true,
+          "threshold": 25,
+          "value": 555.0
+        },
+        "wfe": {
+          "pass": false,
+          "threshold": 0.3,
+          "value": 0.0
+        }
+      },
+      "id": "x82ec753526",
+      "oos": {
+        "annual_return": -0.59518,
+        "avg_profit_abs": -4.6339,
+        "daily_sharpe": -0.060571,
+        "days": 120.0,
+        "expectancy": -0.007484,
+        "kurtosis": 7.2781,
+        "long_trades": 268,
+        "max_drawdown": 0.4871,
+        "n_days": 121,
+        "profit_factor": 0.8728,
+        "sharpe": -1.1572,
+        "short_trades": 287,
+        "skew": 1.6187,
+        "sortino": -1.9304,
+        "total_return": -0.25718,
+        "trades": 555,
+        "win_rate": 0.418
+      },
+      "pairs": [
+        "BCH/USDT:USDT",
+        "BTC/USDT:USDT",
+        "DOGE/USDT:USDT",
+        "ETH/USDT:USDT",
+        "LINK/USDT:USDT",
+        "LTC/USDT:USDT",
+        "NEAR/USDT:USDT",
+        "OP/USDT:USDT",
+        "TRX/USDT:USDT",
+        "XRP/USDT:USDT"
+      ]
+    },
+    {
+      "batch_dsr": 0.0001,
+      "batch_verdict": "rejected",
+      "error": null,
+      "family": "squeeze_momentum",
+      "gates": {
+        "deflated_sharpe": {
+          "pass": false,
+          "threshold": 0.8,
+          "value": 0.0001
+        },
+        "max_drawdown": {
+          "pass": false,
+          "threshold": 0.2,
+          "value": 0.2896
+        },
+        "monte_carlo": {
+          "pass": false,
+          "threshold": 0.8,
+          "value": 0.019
+        },
+        "profit_factor": {
+          "pass": false,
+          "threshold": 1.15,
+          "value": 0.74
+        },
+        "robustness": {
+          "pass": false,
+          "threshold": 0.6,
+          "value": 0.0
+        },
+        "sharpe": {
+          "pass": false,
+          "threshold": 0.75,
+          "value": -2.8003
+        },
+        "stress_pf": {
+          "pass": false,
+          "threshold": 1.0,
+          "value": 0.6532
+        },
+        "trades": {
+          "pass": true,
+          "threshold": 25,
+          "value": 366.0
+        },
+        "wfe": {
+          "pass": false,
+          "threshold": 0.3,
+          "value": 0.0
+        }
+      },
+      "id": "x1e355995dc",
+      "oos": {
+        "annual_return": -0.57678,
+        "avg_profit_abs": -6.7281,
+        "daily_sharpe": -0.146573,
+        "days": 120.0,
+        "expectancy": -0.009373,
+        "kurtosis": 5.3738,
+        "long_trades": 137,
+        "max_drawdown": 0.2896,
+        "n_days": 121,
+        "profit_factor": 0.74,
+        "sharpe": -2.8003,
+        "short_trades": 229,
+        "skew": 0.1731,
+        "sortino": -3.6374,
+        "total_return": -0.24625,
+        "trades": 366,
+        "win_rate": 0.2186
+      },
+      "pairs": [
+        "ADA/USDT:USDT",
+        "APT/USDT:USDT",
+        "BTC/USDT:USDT",
+        "DOGE/USDT:USDT",
+        "FIL/USDT:USDT",
+        "LTC/USDT:USDT",
+        "OP/USDT:USDT",
+        "SUI/USDT:USDT",
+        "TRX/USDT:USDT",
+        "XRP/USDT:USDT"
+      ]
+    },
+    {
+      "batch_dsr": 0.021,
+      "batch_verdict": "exploratory",
+      "error": null,
+      "family": "trend_ema",
+      "gates": {
+        "deflated_sharpe": {
+          "pass": false,
+          "threshold": 0.8,
+          "value": 0.021
+        },
+        "max_drawdown": {
+          "pass": true,
+          "threshold": 0.2,
+          "value": 0.1274
+        },
+        "monte_carlo": {
+          "pass": false,
+          "threshold": 0.8,
+          "value": 0.584
+        },
+        "profit_factor": {
+          "pass": false,
+          "threshold": 1.15,
+          "value": 1.0672
+        },
+        "robustness": {
+          "pass": false,
+          "threshold": 0.6,
+          "value": 0.0
+        },
+        "sharpe": {
+          "pass": false,
+          "threshold": 0.75,
+          "value": 0.4668
+        },
+        "stress_pf": {
+          "pass": false,
+          "threshold": 1.0,
+          "value": 0.9896
+        },
+        "trades": {
+          "pass": true,
+          "threshold": 25,
+          "value": 98.0
+        },
+        "wfe": {
+          "pass": false,
+          "threshold": 0.3,
+          "value": 0.0
+        }
+      },
+      "id": "xb9098941c9",
+      "oos": {
+        "annual_return": 0.06694,
+        "avg_profit_abs": 2.1971,
+        "daily_sharpe": 0.024433,
+        "days": 120.0,
+        "expectancy": 0.004223,
+        "kurtosis": 10.779,
+        "long_trades": 46,
+        "max_drawdown": 0.1274,
+        "n_days": 121,
+        "profit_factor": 1.0672,
+        "sharpe": 0.4668,
+        "short_trades": 52,
+        "skew": 2.1207,
+        "sortino": 0.8885,
+        "total_return": 0.02153,
+        "trades": 98,
+        "win_rate": 0.3776
+      },
+      "pairs": [
+        "ADA/USDT:USDT",
+        "APT/USDT:USDT",
+        "BCH/USDT:USDT",
+        "BTC/USDT:USDT",
+        "FIL/USDT:USDT",
+        "LTC/USDT:USDT",
+        "NEAR/USDT:USDT",
+        "OP/USDT:USDT",
+        "TRX/USDT:USDT",
+        "XRP/USDT:USDT"
+      ]
+    },
+    {
+      "batch_dsr": 0.0466,
+      "batch_verdict": "exploratory",
+      "error": null,
+      "family": "meanrev_bb",
+      "gates": {
+        "deflated_sharpe": {
+          "pass": false,
+          "threshold": 0.8,
+          "value": 0.0466
+        },
+        "max_drawdown": {
+          "pass": true,
+          "threshold": 0.2,
+          "value": 0.0613
+        },
+        "monte_carlo": {
+          "pass": false,
+          "threshold": 0.8,
+          "value": 0.73
+        },
+        "profit_factor": {
+          "pass": true,
+          "threshold": 1.15,
+          "value": 1.1779
+        },
+        "robustness": {
+          "pass": true,
+          "threshold": 0.6,
+          "value": 1.0
+        },
+        "sharpe": {
+          "pass": true,
+          "threshold": 0.75,
+          "value": 0.96
+        },
+        "stress_pf": {
+          "pass": true,
+          "threshold": 1.0,
+          "value": 1.0468
+        },
+        "trades": {
+          "pass": true,
+          "threshold": 25,
+          "value": 63.0
+        },
+        "wfe": {
+          "pass": false,
+          "threshold": 0.3,
+          "value": 0.0
+        }
+      },
+      "id": "xc324f18b8c",
+      "oos": {
+        "annual_return": 0.13816,
+        "avg_profit_abs": 6.8991,
+        "daily_sharpe": 0.050247,
+        "days": 120.0,
+        "expectancy": 0.009463,
+        "kurtosis": 7.0756,
+        "long_trades": 37,
+        "max_drawdown": 0.0613,
+        "n_days": 121,
+        "profit_factor": 1.1779,
+        "sharpe": 0.96,
+        "short_trades": 26,
+        "skew": -0.4056,
+        "sortino": 1.3408,
+        "total_return": 0.04346,
+        "trades": 63,
+        "win_rate": 0.6667
+      },
+      "pairs": [
+        "ARB/USDT:USDT",
+        "ATOM/USDT:USDT",
+        "AVAX/USDT:USDT",
+        "BNB/USDT:USDT",
+        "BTC/USDT:USDT",
+        "DOT/USDT:USDT",
+        "LTC/USDT:USDT",
+        "NEAR/USDT:USDT",
+        "SOL/USDT:USDT",
+        "TRX/USDT:USDT"
+      ]
+    }
+  ]
+}
