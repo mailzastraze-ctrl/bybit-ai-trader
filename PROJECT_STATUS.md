@@ -1,6 +1,6 @@
 # PROJECT_STATUS
 
-_Last updated: 2026-11-21 21:00 CET_
+_Last updated: 2026-11-21 20:35 CET (PR #5 merged, deploy d1a0bde)_
 
 ## Summary
 The system is **deployed and running autonomously on Bybit Demo**. It never trades real money: `demo_trading` is hard-required.
@@ -10,7 +10,7 @@ Architecture, split by load:
 - **GitHub Actions research lab** (`research-lab` workflow, public repo, 4 vCPU runners, free minutes): all hyperopt, walk-forward, stress, robustness and Monte Carlo. It sends only compact results to the server.
 
 Links and rules:
-- Web: https://aitrader-production-cf456409.up.railway.app (basic auth: user and password in the Railway variables `WEB_USER` / `WEB_PASSWORD`, set by the owner on 2026-11-21). `/` = **control room** (primary screen), `/hq` = 3D office, `/terminal` = classic terminal.
+- Web: https://aitrader-production-cf456409.up.railway.app (basic auth: user and password in the Railway variables `WEB_USER` / `WEB_PASSWORD`, set by the owner on 2026-11-21). `/` = **control room** (primary screen), `/explorer` = **all strategies in detail** (trades on candles), `/hq` = 3D office, `/terminal` = classic terminal.
 - Repo: `mailzastraze-ctrl/bybit-ai-trader` (**public** since 2026-11-20; no secrets in the repo or its history). Railway deploys on code changes only (`src`, `ft`, `config`, `Dockerfile`, `pyproject.toml`); research commits do not redeploy.
 - No profitability is claimed. Every number comes from real demo fills or from walk-forward out-of-sample backtests.
 
@@ -26,6 +26,16 @@ Links and rules:
 | 7 | Web terminal | ✅ live | **Control room** (primary, desktop + phone): capital curve, positions with protection state, forward-test verdict, 4 live lab runners, results with fold squares, bandit, gates, lifecycle, goals, readiness, log, learnings, closed trades. **3D HQ v3** at `/hq`: real data on every screen (live 1h candles with entry/stop/target, live GitHub hyperopt epochs, fold results, gates, bandit, market map, goals). Company mission board, stand-up meetings built from real numbers, GitHub-lab cloud with data beam, expressive characters. Rendered headlessly on every UI change (`hq-preview` workflow, screenshots in `docs/preview/`, fails on JS errors) |
 | — | Cloud, independent of your PC | ✅ / ⚠️ | Railway **trial** credit runs out in about 15 days. Hobby is needed for indefinite operation |
 | — | GitHub + PROJECT_STATUS | ✅ | CI green with the real Freqtrade image; 113 tests |
+
+## Best strategies first + the owner's systems (2026-11-21, 22:00; owner: "команда не нашла мои стабильные EMA-системы, торгуют не лучшие")
+**Finding.** The company *did* find such systems: the last screener run evaluated ~1.1 M variants; 84 configurations on 2h–12h passed all seven autopilot checks, 36 beat the decoys (10 EMA cross, 17 MACD; 3-year PF 1.4–8). But until 2026-11-21 17:14 UTC the bot's walk-forward replicated them with its *own* exits (break-even ratchet at +0.5 R, TP 5 R instead of 1.5–2 R): 28 of 36 collapsed to PF 0.15–0.6 on the very months the engine shows profitable, were rejected, and the demo lane filled with hyperopt candidates (PF 1.1–1.5). The exact-exit fix (`exit_mode 1`) shipped with PR #3; lab run 44933681420 (started 18:06 UTC) is the first on it, and the survivors are re-tested (`x2` ids).
+**Changes:**
+- **Engine ↔ bot parity check** (`pipeline.parity`): every autopilot replication is compared with the engine's 3-year record; engine PF ≥ 1.3 but bot PF < 1.0 (≥ 10 trades) = broken. If half or more of a batch (≥ 4) is broken: `PARITY ALARM` event and a red line in the control room ("дефект исполнения, а не рынок"). Today's bug would have shown up on day one.
+- **Long replication for fixed configurations** (owner's, autopilot) on 2h–12h: 3 years in 12 quarterly slices instead of the last year in 4 (`replication_days` 1080, `replication_folds` 12). 3× the trades of a slow strategy (a BTC-only 6h system has ~13 trades a year) and its stability over a long distance; still a replication (`clean_oos` fails), the forward test stays the evidence.
+- **Best first** (`Lifecycle.outclasses`): a candidate that is clearly better (higher evidence class, or the same class with research score ≥ 1.5× and ≥ +0.2) takes the slot of the weakest exploration sleeve that has not earned it live (< 10 trades); the moved sleeve goes back to the queue. Order of victims: placeholders, idle sleeves, then the weakest. Sleeves with ≥ 10 live trades and PF ≥ 1.1 are never moved; the margin keeps slots from flipping on noise.
+- **Owner's systems** queue like autopilot finds (class 2): `research/external/owner-btc6h-ema47-76.json` (EMA 47/76, BTC 6h, stop 2×ATR, TP 2R, close on the opposite cross, engine exits) and `owner-sol15m-zscore-x2.json` (the SOL z-score with the engine's exact exits; supersedes the first import, which used the system's exits). More can be dropped into `research/external/` with `"owner": true`.
+- Explorer shows the replication length and "движок → бот" PF per strategy.
+Honest caveat for the owner: PF 2.66 over the whole chart is the record of the best of many variants seen with hindsight; in the last run shuffled-history decoys alone passed the seven checks 32 times against 84 real configurations, so roughly 4 in 10 "stable" finds are luck-level. The forward test on unseen data decides.
 
 ## Strategy explorer `/explorer` (2026-11-21, 21:30; owner: "сделай удобный интерфейс, все стратегии, все сделки на свечах")
 One simple page (link "Все стратегии подробно ↗" in the control room), read-only, works on a phone:

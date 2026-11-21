@@ -549,3 +549,24 @@ def test_daily_loss_limit_pauses_entries_until_the_next_utc_day(env):
     assert any("DAILY LOSS LIMIT" in e["message"] for e in reg.q("SELECT message FROM events"))
     reg.kv_set("day_open", {"day": "2000-01-01", "equity": 10_000, "hit": True})
     assert daily_stop(reg, 9_000, 0.03) is False   # a new day starts from its own first reading
+
+
+def test_engine_bot_parity_flags_a_collapsed_replication():
+    from aitrader.research.pipeline import parity
+    spec = {"screen_holdout": {"A": {"pf": 2.66, "trades": 39}}}
+    assert parity(spec, {"profit_factor": 0.35, "trades": 60})["ok"] is False
+    assert parity(spec, {"profit_factor": 1.6, "trades": 60})["ok"] is True
+    assert parity(spec, {"profit_factor": 0.5, "trades": 4})["ok"] is True  # too few trades to judge
+    assert parity({}, {"profit_factor": 0.5, "trades": 60}) is None  # not an autopilot configuration
+
+
+def test_parity_alarm_needs_half_of_at_least_four(tmp_path):
+    from aitrader.lab import record_parity
+    from aitrader.registry import Registry
+    reg = Registry(tmp_path / "r.db")
+    exp = lambda ok, i: {"spec": {"screen": f"scr-{i}"}, "result": {"parity": {"ok": ok}}}  # noqa: E731
+    out = record_parity(reg, {"batch_id": "b1", "experiments_full": [exp(False, 1), exp(False, 2), exp(True, 3), exp(True, 4)]}, "t")
+    assert out["alarm"] and reg.kv_get("parity")["broken"] == 2
+    out = record_parity(reg, {"batch_id": "b2", "experiments_full": [exp(False, 1), exp(True, 2), exp(True, 3), exp(True, 4)]}, "t")
+    assert not out["alarm"]
+    assert record_parity(reg, {"experiments_full": [{"spec": {}, "result": {}}]}, "t") is None

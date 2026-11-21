@@ -1,0 +1,48 @@
+{
+ "id": "owner-btc6h-ema47-76",
+ "owner": true,
+ "source": "Owner's Bybit Strategy Lab, screenshot 2026-11-21: EMA 47/76 cross on BTCUSDT 6h, 22.11.2023–21.11.2026",
+ "family": "ema_cross",
+ "timeframe": "6h",
+ "pairs": [
+  "BTC/USDT:USDT"
+ ],
+ "sides": [
+  "long",
+  "short"
+ ],
+ "params": {
+  "ema_fast": 47,
+  "ema_slow": 76,
+  "ema_trend": 0,
+  "exit_mode": 1,
+  "sl_atr": 2.0,
+  "lab_tp": 2.0,
+  "lab_trail": 0.0,
+  "max_hold": 500,
+  "conv_w": 0.0,
+  "htf_trend": 0,
+  "vol_regime": 0,
+  "session": 0,
+  "no_weekend": 0,
+  "event_guard": 0
+ },
+ "claimed": {
+  "period": "2023-11-22..2026-11-21",
+  "total_return": 1.9247,
+  "max_drawdown": 0.1417,
+  "sharpe": 2.03,
+  "sortino": 3.55,
+  "profit_factor": 2.66,
+  "trades": 39,
+  "win_rate": 0.59,
+  "buy_and_hold": 0.5333,
+  "last_3m_return": 0.058,
+  "last_3m_trades": 1,
+  "leverage": 1,
+  "position": "100% of capital",
+  "avg_trade_days": 6.1,
+  "avg_trade_return": 0.0292
+ },
+ "mapping_note": "Engine settings from the screenshot: long on fast EMA crossing above slow, short on crossing below, close on the opposite signal, stop 2×ATR(14), take profit 2R (maker limit), no trailing, no bar limit, signal executed at the next bar open, Bybit fees 0.055%/0.02% + 0.02% slippage, funding. Traded with the engine's own exits (exit_mode 1). Sizing is the system's risk-based sizing (not 100% of capital), so returns differ in scale; profit factor and win rate are comparable."
+}

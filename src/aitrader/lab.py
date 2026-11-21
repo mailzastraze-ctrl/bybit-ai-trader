@@ -174,6 +174,24 @@ def external_tests(reg: Registry) -> list[dict]:
     return out
 
 
+def record_parity(reg: Registry, data: dict, now: str) -> dict | None:
+    """Engine ↔ bot parity of this batch's autopilot replications (`pipeline.parity`). Half or
+    more of them collapsing in the bot is a defect alarm for the owner, not a market verdict."""
+    rows = [(e.get("spec") or {}, (e.get("result") or {}).get("parity")) for e in data.get("experiments_full") or []]
+    rows = [(sp, p) for sp, p in rows if isinstance(p, dict)]
+    if not rows:
+        return None
+    broken = [sp.get("screen") for sp, p in rows if not p.get("ok")]
+    out = {"ts": now, "batch": data.get("batch_id"), "checked": len(rows), "broken": len(broken),
+           "alarm": len(rows) >= 4 and len(broken) >= len(rows) / 2, "examples": broken[:5]}
+    reg.kv_set("parity", out)
+    if out["alarm"]:
+        reg.event("research", f"PARITY ALARM: {len(broken)} of {len(rows)} autopilot configurations lose in the bot "
+                  "although the owner's engine shows them profitable over the same years – the bot is not trading "
+                  "the engine's strategies (exits/fills/signals); needs a fix", data={"lab": True})
+    return out
+
+
 # ---------------------------------------------------------------------------- progress
 def record_progress(reg: Registry, p: dict) -> None:
     """Live progress of a remote experiment (started / stage / epochs / finished)."""
@@ -287,6 +305,7 @@ def apply_import(s: Settings, reg: Registry, data: dict) -> dict:
                 reg.set_stage(target, "retired", f"revalidation on fresh data: edge gone (OOS PF {pf})")
             else:
                 reg.event("research", f"{target}: revalidation {res.get('verdict')} (OOS PF {pf})")
+    record_parity(reg, data, now)
     market = data.get("market") or {}
     for pair, sc in market.items():
         reg.upsert("market", {"pair": pair, "ts": now, "data": sc}, key="pair")

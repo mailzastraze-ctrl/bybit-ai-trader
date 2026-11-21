@@ -42,6 +42,24 @@ log = logging.getLogger(__name__)
 STARTING_BALANCE = 10000.0
 
 
+
+LONG_REPLICATION_TF = ("2h", "4h", "6h", "12h")
+
+
+def parity(spec: dict, oos: dict) -> dict | None:
+    """Does the bot reproduce what the owner's engine saw? For an autopilot configuration the
+    engine's ~3-year record (A) is compared with the bot's replication. A strategy the engine
+    shows clearly profitable (PF ≥ 1.3) that the bot runs at PF < 1.0 over the same years means
+    the bot is not trading the engine's strategy (exits, fills, signals) – a defect to fix, not
+    a market verdict. (Until 2026-11-21 the bot used its own exits for these and most collapsed.)"""
+    a = ((spec.get("screen_holdout") or {}).get("A")) or None
+    if not a or a.get("pf") is None:
+        return None
+    e_pf, b_pf, n = float(a["pf"]), float(oos.get("profit_factor") or 0.0), int(oos.get("trades") or 0)
+    broken = e_pf >= 1.3 and n >= 10 and b_pf < 1.0
+    return {"engine_pf": round(e_pf, 3), "engine_trades": a.get("trades"), "bot_pf": round(b_pf, 3), "bot_trades": n,
+            "ratio": round(b_pf / e_pf, 3) if e_pf > 0 else None, "ok": not broken}
+
 class Pipeline:
     def __init__(self, settings: Settings, registry: Registry, runner: FreqtradeRunner | None = None,
                  on_progress=None):
@@ -92,8 +110,10 @@ class Pipeline:
         job = Job(self.s.jobs_dir / eid)
         job.root.mkdir(parents=True, exist_ok=True)
 
-        folds = walk_forward_folds(utcnow(), rs.train_days, rs.holdout_days, rs.wf_folds)
         tf = spec.get("timeframe") or rs.timeframe
+        long_rep = bool(spec.get("fixed_params")) and tf in LONG_REPLICATION_TF
+        folds = (walk_forward_folds(utcnow(), rs.replication_train_days, rs.replication_days, rs.replication_folds)
+                 if long_rep else walk_forward_folds(utcnow(), rs.train_days, rs.holdout_days, rs.wf_folds))
         base_cfg = self.ft.write_config(job, "config.json",
                                         research_config(self.s, pairs, timeframe=tf, sides=sides))
         space_file = None
@@ -217,6 +237,8 @@ class Pipeline:
             "epoch_sharpe_std": round(float(np.std(all_sharpes)), 4) if all_sharpes else None,
             "exit_reasons": (df["exit_reason"].value_counts().to_dict() if not df.empty else {}),
             "curve": M.equity_curve(oos_trades, STARTING_BALANCE, oos_start, oos_end),
+            "replication": {"days": (oos_end - oos_start).days, "folds": len(folds)} if long_rep else None,
+            "parity": parity(spec, oos),
         }
         self._record_strategy(eid, spec, result)
         return result
