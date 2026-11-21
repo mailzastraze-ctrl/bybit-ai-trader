@@ -55,7 +55,17 @@ def test_not_ready_without_production_evidence(reg):
     assert r["ready"] is False and r["passed"] == 0 and r["evidence"]["trades"] == 0
 
 
+def _btc(reg, days=200, seed=9):
+    """BTC daily closes, independent of the strategies (their alpha is their own edge)."""
+    import pandas as pd
+    rng = np.random.default_rng(seed)
+    idx = pd.date_range((utcnow() - timedelta(days=days)).strftime("%Y-%m-%d"), periods=days, freq="1D", tz="UTC")
+    px = 60_000 * np.exp(np.cumsum(rng.normal(0, 0.02, days)))
+    reg.kv_set("btc_daily", {d.strftime("%Y-%m-%d"): float(p) for d, p in zip(idx, px, strict=True)})
+
+
 def test_ready_only_with_enough_independent_post_promotion_evidence(reg):
+    _btc(reg)
     _strategy(reg, "a", 100)
     _strategy(reg, "b", 100)
     _trades(reg, "a", 160, 1, 95, seed=1, edge=1.0)
@@ -67,6 +77,7 @@ def test_ready_only_with_enough_independent_post_promotion_evidence(reg):
     assert r["evidence"]["trades"] >= 320 - 50
     assert chk["forward_days"]["pass"] and chk["trades"]["pass"] and chk["diversified"]["pass"]
     assert chk["profit_factor"]["pass"] and chk["t_stat"]["pass"], chk
+    assert chk["t_daily"]["pass"] and chk["alpha"]["pass"], (chk["t_daily"], chk["alpha"])
     assert r["ready"] is True
 
 
@@ -80,4 +91,4 @@ def test_slippage_can_destroy_a_thin_edge(reg, monkeypatch):
 
 def test_update_records_and_announces(reg):
     readiness.update(reg, 10_000)
-    assert reg.kv_get("readiness")["total"] == 8
+    assert reg.kv_get("readiness")["total"] == 10  # + daily Newey–West t and alpha over BTC

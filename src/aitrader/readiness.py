@@ -13,6 +13,9 @@ All checks must pass at the same time:
   trades         ≥ 250 closed trades
   diversified    ≥ 2 strategies with ≥ 50 trades each, daily PnL correlation < 0.5
   t_stat         per-trade t-statistic ≥ 2.5 (realistic returns)
+  t_daily        daily t-statistic ≥ 2.5 with a Newey–West correction: trades of one day (all
+                 shorts in one sell-off) are one bet, not many – required together with t_stat
+  alpha          alpha over BTC with t ≥ 2.0 (Newey–West): the profit is not just market beta
   profit_factor  ≥ 1.3 (realistic)
   drawdown       max drawdown ≤ 10% of equity (realistic PnL curve)
   stability      profitable in ≥ 2 of 3 equal time thirds
@@ -26,12 +29,14 @@ import math
 import numpy as np
 import pandas as pd
 
+from aitrader import evidence as EV
 from aitrader.realism import SLIPPAGE_PER_SIDE, real_pnl, real_ratio
 from aitrader.registry import Registry
 from aitrader.util import iso, parse_dt, utcnow
 
 REQ = {"forward_days": 90, "trades": 250, "strategies": 2, "per_strategy": 50, "max_corr": 0.5,
-       "t_stat": 2.5, "profit_factor": 1.3, "max_dd": 0.10, "stable_thirds": 2}
+       "t_stat": 2.5, "t_daily": 2.5, "alpha_t": 2.0, "min_days": 30,
+       "profit_factor": 1.3, "max_dd": 0.10, "stable_thirds": 2}
 
 
 def _stats(trades: list[dict], equity: float) -> dict:
@@ -93,6 +98,17 @@ def evaluate(reg: Registry, equity: float | None = None) -> dict:
     life.reg = reg
     diverging = [s["id"] for s in prod if Lifecycle.diverges(life, s)]
     n = st.get("trades", 0)
+    try:  # a failure here fails the two checks (advisory gate), never the manager loop
+        daily = EV.daily_returns(evidence, equity, real_pnl, end=utcnow())
+        t_daily = round(EV.newey_west_t(daily.to_numpy()), 2) if len(daily) else 0.0
+        btc = EV.btc_returns(reg.kv_get("btc_daily"))
+        ab = EV.alpha_beta(daily, btc, min_days=REQ["min_days"]) if len(daily) and len(btc) else {"alpha_t": None}
+    except Exception:  # noqa: BLE001
+        daily, t_daily, btc, ab = pd.Series(dtype=float), 0.0, pd.Series(dtype=float), {"alpha_t": None}
+    alpha_val = (f"t {ab['alpha_t']}, β {ab['beta']}" if ab.get("alpha_t") is not None
+                 else ("нет данных BTC" if not len(btc) else f"{len(daily)} дн."))
+    st["t_daily"], st["days"] = t_daily, len(daily)
+    st["alpha"] = {k: ab.get(k) for k in ("alpha_ann", "beta", "alpha_t", "days")}
     checks = [
         {"id": "forward_days", "title": "Post-promotion forward test", "value": round(days, 1),
          "need": f"≥ {REQ['forward_days']} days", "pass": days >= REQ["forward_days"]},
@@ -103,6 +119,12 @@ def evaluate(reg: Registry, equity: float | None = None) -> dict:
          "pass": len(big) >= REQ["strategies"] and corr is not None and corr < REQ["max_corr"]},
         {"id": "t_stat", "title": "Statistical significance (t)", "value": st.get("t_stat", 0.0),
          "need": f"≥ {REQ['t_stat']}", "pass": n >= 30 and st.get("t_stat", 0.0) >= REQ["t_stat"]},
+        {"id": "t_daily", "title": "Significance by day (Newey–West)", "value": t_daily,
+         "need": f"≥ {REQ['t_daily']} over ≥ {REQ['min_days']} days",
+         "pass": len(daily) >= REQ["min_days"] and t_daily >= REQ["t_daily"]},
+        {"id": "alpha", "title": "Alpha over BTC (not just market beta)", "value": alpha_val,
+         "need": f"alpha > 0, t ≥ {REQ['alpha_t']}",
+         "pass": ab.get("alpha_t") is not None and (ab.get("alpha") or 0) > 0 and ab["alpha_t"] >= REQ["alpha_t"]},
         {"id": "profit_factor", "title": "Profit factor after haircut", "value": st.get("profit_factor", 0.0),
          "need": f"≥ {REQ['profit_factor']}", "pass": n >= 30 and st.get("profit_factor", 0.0) >= REQ["profit_factor"]},
         {"id": "drawdown", "title": "Max drawdown (realistic)", "value": st.get("max_dd", 0.0),

@@ -69,7 +69,7 @@ function renderKpis() {
     kpi("Результат на демо", `<span class="${cls(ov.closed_pnl)}">${sgnUsd(ov.closed_pnl)}</span>`, `${ov.closed_count ?? 0} закрытых сделок${tr.length ? ` · ${Math.round(wins / tr.length * 100)}% в плюс` : ""}`),
     kpi("Сейчас в рынке", `${open.length} ${plural(open.length, "позиция", "позиции", "позиций")}`, `<span class="${cls(upnl)}">${sgnUsd(upnl)}</span> · ${nTrading} стратегий на ${coins} монетах`),
     kpi("Может ли зарабатывать?", fwLabel, `форвард-тест: ${fw.top?.trades || 0} из ${fw.rules?.final_trades ?? 200} сделок`, {works: "pos", not_working: "neg"}[fw.verdict] || ""),
-    kpi("Готовность к реалу", `${rd.passed ?? 0}/${rd.total ?? 8}`, rd.ready ? "все проверки пройдены — решать вам" : "проверок пройдено · только совет"),
+    kpi("Готовность к реалу", `${rd.passed ?? 0}/${rd.total ?? 10}`, rd.ready ? "все проверки пройдены — решать вам" : "проверок пройдено · только совет"),
   ].join("");
   const gs = G.goals || [];
   $("#mission").textContent = `Миссия: найти, доказать и масштабировать реальные торговые преимущества на Bybit Demo — без подгонки и без выдуманных результатов.${gs.length ? ` Целей достигнуто: ${gs.filter((g) => g.progress >= 1).length} из ${gs.length}.` : ""}`;
@@ -143,7 +143,7 @@ function renderPipeline() {
     ["2", "Строгая проверка", `${rs.counts?.done || 0} проверено · ${c("exploratory") + c("validated")} кандидатов`],
     ["3", "Форвард-тест", `${fw.book_size ?? 0} стратегий · ${fw.top?.trades || 0} сделок`],
     ["4", "Демо-торговля", `${(S.ov?.manifest?.sleeves || []).filter((s) => s.stage !== "closing").length} стратегий торгуют`],
-    ["5", "Реальный счёт", `${S.ready?.passed ?? 0}/${S.ready?.total ?? 8} проверок · решаете вы`],
+    ["5", "Реальный счёт", `${S.ready?.passed ?? 0}/${S.ready?.total ?? 10} проверок · решаете вы`],
   ];
   $("#pipeline").innerHTML = steps.map(([n, t, d]) => `<div class="fstep"><span>шаг ${n}</span><b style="font-size:15px">${t}</b><span>${esc(d)}</span></div>`).join("");
 }
@@ -378,8 +378,8 @@ function renderFamilies() {
 }
 function renderReadiness() {
   const r = S.ready || {};
-  $("#rdSub").textContent = `${r.passed ?? 0}/${r.total ?? 8} · только рекомендация`;
-  const RU = {forward_days: "Форвард после повышения", trades: "Закрытых сделок", diversified: "Независимых стратегий", t_stat: "Статистическая значимость", profit_factor: "PF после поправки", drawdown: "Макс. просадка", stability: "Прибыльные трети периода", consistency: "Демо совпадает с проверкой"};
+  $("#rdSub").textContent = `${r.passed ?? 0}/${r.total ?? 10} · только рекомендация`;
+  const RU = {forward_days: "Форвард после повышения", trades: "Закрытых сделок", diversified: "Независимых стратегий", t_stat: "Значимость по сделкам", t_daily: "Значимость по дням (с поправкой на связанность)", alpha: "Альфа сверх рынка (BTC)", profit_factor: "PF после поправки", drawdown: "Макс. просадка", stability: "Прибыльные трети периода", consistency: "Демо совпадает с проверкой"};
   $("#readiness").innerHTML = (r.checks || []).map((c) => `<div class="check"><span class="ic ${c.pass ? "ok" : "no"}">${c.pass ? "✓" : "·"}</span><span>${esc(RU[c.id] || c.title)}<div class="need">нужно ${esc(c.need)}</div></span><b class="num">${esc(c.value)}</b></div>`).join("")
     + `<p class="dim" style="margin:8px 0 0;font-size:11.5px">Система никогда не переключится на реальный счёт сама — только по вашему решению.</p>`;
 }
@@ -393,8 +393,9 @@ function renderForward() {
   $("#forward").innerHTML = `<div style="display:flex;gap:14px;align-items:center;margin-bottom:10px;flex-wrap:wrap">${pill(v[0], v[1])}<span>${n < 100 ? `Решение примем на ${need} сделках лучших стратегий (сейчас ${n}). Первая оценка — на 100 сделках и 7 днях.` : esc(f.text || "")}</span></div>
     <div class="bar" style="margin-bottom:12px"><i style="width:${Math.min(100, n / need * 100)}%"></i></div>
     <table><thead><tr><th>Группа (по оценке на истории)</th><th class="r">Стратегий</th><th class="r">Сделок на новых данных</th><th class="r">Доходность</th><th class="r">PF</th><th class="r">t по дням</th></tr></thead>
-    <tbody>${row("Лучшая четверть — те, что лаборатория считает лучшими", t)}${row("Все остальные (контрольная группа)", rest)}</tbody></table>
-    <p class="dim" style="margin:10px 0 0;font-size:12px">${f.book_size ?? 0} замороженных стратегий каждый прогон проверяются на свечах Bybit только после момента заморозки, с комиссиями и проскальзыванием. Правило решения записано заранее: «работает» = у лучшей четверти ≥ ${need} сделок за ≥ ${f.rules?.final_days ?? 14} дней, PF ≥ ${f.rules?.pf_works ?? 1.15}, t ≥ ${f.rules?.t_works ?? 2}. ${pers}</p>`;
+    <tbody>${row("Лучшая четверть — те, что лаборатория считает лучшими", t)}${row("Все остальные (контрольная группа)", rest)}${f.benchmark ? row("Эталон: простой тренд (TSMOM), параметры зафиксированы заранее", f.benchmark) : ""}</tbody></table>
+    ${t.alpha_t != null ? `<p class="dim" style="margin:8px 0 0;font-size:12px">Без учёта движения рынка: бета к BTC <b class="num">${t.beta}</b>, альфа <b class="num">${t.alpha_bp} bp/день</b> (t ${t.alpha_t}). Прибыль, которую объясняет рынок, — не заслуга стратегии.</p>` : ""}
+    <p class="dim" style="margin:10px 0 0;font-size:12px">${f.book_size ?? 0} замороженных стратегий каждый прогон проверяются на свечах Bybit только после момента заморозки, с комиссиями и проскальзыванием. Правило решения записано заранее: «работает» = у лучшей четверти ≥ ${need} сделок за ≥ ${f.rules?.final_days ?? 90} дней, PF ≥ ${f.rules?.pf_works ?? 1.15} и t по дням ≥ ${f.t_needed ?? f.rules?.t_works ?? 2} (порог учитывает, что результат проверяется после каждого прогона: без этого «работает» выпадало бы случайно). ${pers}</p>`;
 }
 function renderGoals() {
   if (S.tab !== "overview") return;

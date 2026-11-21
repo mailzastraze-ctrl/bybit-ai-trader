@@ -1,6 +1,6 @@
 # PROJECT_STATUS
 
-_Last updated: 2026-11-21 17:10 CET_
+_Last updated: 2026-11-21 18:30 CET_
 
 ## Summary
 The system is **deployed and running autonomously on Bybit Demo**. It never trades real money: `demo_trading` is hard-required.
@@ -22,10 +22,27 @@ Links and rules:
 | 3 | Entries, SL, TP, sizing and exits optimised together | ✅ | ATR stop, R-multiple TP, trailing, time exit and conviction-weighted risk sizing in one parameter vector |
 | 4 | Realistic validation, costs, OOS, overfitting control | ✅ | Walk-forward OOS, fees + slippage + funding, 2× cost stress, ±10% parameter perturbation, Monte Carlo and WFE gates. **Deflated Sharpe counts every trial of the last 90 days** (`research/ledger.json`), so continuous searching cannot inflate significance |
 | 5 | Execute and manage trades on Bybit Demo, controlled experiments | ✅ verified | Execution test passed: entry → **exchange stop-loss** → exit. Exploration sleeves trade at 0.1% risk |
-| 6 | Analyse, learn, promote only after independent validation | ✅ code / ⏳ trades | Learner (pair exclusion, MFE, time exits, side asymmetry, gate failures) with A/B pruning. Lifecycle: exploration → incubation → forward demo evidence → production. Revalidation every 14 days runs in the lab; a failed one retires the strategy |
+| 6 | Analyse, learn, promote only after independent validation | ✅ code / ⏳ trades | Learner (pair exclusion, MFE, time exits, side asymmetry, gate failures) with A/B pruning; every rule needs statistical evidence (see "Evidence discipline"). Lifecycle: exploration → incubation → forward demo evidence → production. Revalidation every 14 days runs in the lab; a failed one retires the strategy |
 | 7 | Web terminal | ✅ live | **Control room** (primary, desktop + phone): capital curve, positions with protection state, forward-test verdict, 4 live lab runners, results with fold squares, bandit, gates, lifecycle, goals, readiness, log, learnings, closed trades. **3D HQ v3** at `/hq`: real data on every screen (live 1h candles with entry/stop/target, live GitHub hyperopt epochs, fold results, gates, bandit, market map, goals). Company mission board, stand-up meetings built from real numbers, GitHub-lab cloud with data beam, expressive characters. Rendered headlessly on every UI change (`hq-preview` workflow, screenshots in `docs/preview/`, fails on JS errors) |
 | — | Cloud, independent of your PC | ✅ / ⚠️ | Railway **trial** credit runs out in about 15 days. Hobby is needed for indefinite operation |
 | — | GitHub + PROJECT_STATUS | ✅ | CI green with the real Freqtrade image; 113 tests |
+
+## Evidence discipline (2026-11-21 evening, owner's request: "найти прибыльную стратегию, демо — тренировка")
+Review: `claude/METHOD_REVIEW.md` and `claude/ROADMAP.md` (project docs); this is phase 0 of the roadmap.
+Principle: **fast to explore, fast to protect, slow to trust.** Exploration on demo stays as wide as before (up to 24 sleeves at 0.1 % risk, the 118-strategy shadow book); what changed is how evidence is judged before anything is declared real or gets more risk. New module `evidence.py` (pure statistics, `tests/test_evidence.py`, 18 tests).
+
+1. **Clean out-of-sample only (data leak closed).** The freqtrade walk-forward tests on the last 360 days, but the swing screener chooses its configurations on everything except the last 90 days (and the pooled screener filters on its last 40 %). For screener survivors and hand-found external configs those windows were already seen. New gate `clean_oos` (`validation.clean_oos(spec)`): for them the walk-forward is a **replication** with real fees and funding – it can reject, never validate. Their only clean evidence is the forward test. This also removes the effect of the Deflated Sharpe trial count ignoring the screener's 10⁶ combinations (they can no longer reach `validated`; the screener's multiplicity is controlled by the decoys).
+2. **Forward verdict v2** (amended while the book had 1 completed forward trade; stricter only): decision after **≥ 90 days** (was 14), and "works" needs the daily t to reach an **anytime-valid threshold** (normal-mixture boundary: 3.26 at 90 daily observations, 2.79 at a year) because the verdict is recomputed after every lab run. Simulated on pure noise checked daily for a year: v1 declared "works" in >12 % of paths, v2 in ≤ 5 %. Before 90 days results are an early read only.
+3. **Objective comparison.**
+   - **Benchmark** `research/external/benchmark-tsmom-4h-30d.json`: plain TSMOM (30-day lookback on 4h, vol-scaled, exit when momentum turns, 4×ATR catastrophic stop, nothing optimised, pre-registered rationale in the file), 15 liquid coins. It stays in the forward book permanently, is reported apart from the research ranking, and is the bar research must beat. Its own walk-forward replication run is kept out of the research ranking.
+   - **Alpha vs BTC.** BTC daily candles (`btc_daily`, Bybit kline, refreshed with the market context). The forward top quartile, every deployed sleeve and the readiness evidence get beta to BTC and the alpha left after it (Newey–West t). A short book in a falling market is no longer mistaken for skill.
+   - **Leaderboard with shrinkage.** Forward results per strategy are shrunk towards the book mean (empirical Bayes) and ranked by posterior mean − 1 sd, so 6 lucky trades do not outrank 150 steady ones. Per-family pooled forward stats are reported too.
+4. **Production needs alpha.** Incubation → eligible additionally needs a positive alpha estimate over BTC. Profitable-but-pure-beta sleeves stay in incubation and, at the time limit, retire with the reason "the market explains it: no alpha". If BTC data is missing the sleeve **waits** (a data outage never retires a profitable sleeve).
+5. **Readiness: 10 checks** (was 8): + daily t ≥ 2.5 with Newey–West (trades of one day are one bet; the per-trade t stays required too) and + alpha over BTC with t ≥ 2.0. Advisory, as before.
+6. **Learner acts on evidence, not streaks** (still autonomous, still A/B-tested): pair exclusion needs ≥ 15 trades, PF < 0.7 and t ≤ −2 (was: 6 trades, PF < 0.5); family exit/holding patterns ≥ 30 trades (≥ 12 losers with MFE); long/short asymmetry ≥ 20 trades per side and Welch t ≥ 2; A/B pruning ≥ 8 experiments per arm (was 3) and reports the Welch t.
+7. **UI:** the forward panel shows the benchmark row, beta/alpha of the top quartile and the current t threshold; readiness shows the two new checks.
+
+Not touched: demo-only, 1x, risk limits (8 % total, 4 % per side), exchange stops, kill-switch, the exploration lane, the decoy control. Deferred to phase 1 (needs the whole universe incl. delisted contracts): **survivorship bias** – coins are chosen by today's volume and tested on 3 years of history.
 
 ## Engine ↔ bot parity (2026-11-21, owner's request: "полностью и чётко")
 **Problem found:** of the first 32 autopilot strategies tested in freqtrade, 24 collapsed (PF 0.15–0.86) on the coins where the engine showed PF ≥ 1.4. The signals were fine; the exits were not the engine's.
@@ -170,13 +187,13 @@ Server footprint:
 - The owner paid for Hobby on 2026-11-20. Set a usage limit (e.g. $20).
 
 ## Forward test — "can this system make money?" (2026-11-20, 21:00)
-The direct answer to the owner's question, in days to weeks instead of months.
+The direct answer to the owner's question. **Superseded in part by "Evidence discipline" (v2 verdict: ≥ 90 days, anytime-valid t, benchmark, alpha, leaderboard).** A real edge of Sharpe 1–2 cannot be confirmed in days to weeks by any method; v1's 14-day rule was close to a coin flip.
 - **Shadow book** (`forward.py`, `research/shadow.py`): every finished walk-forward experiment is **frozen** when it finishes (parameters and pairs never change afterwards). Each lab run backtests every frozen strategy (up to 120, last 60 days) on real Bybit candles **after its freeze time only**, with fees and the 5 bp/side slippage haircut. Open trades at the data end are excluded.
 - It includes the weak candidates on purpose: the test is whether the research's own ranking predicts unseen performance.
 - **Pre-registered verdict** (fixed before any forward data existed): the top quartile by backtest score at freeze vs the rest.
   - too early: < 100 forward trades or < 7 days;
   - early read: direction only;
-  - **works**: ≥ 200 trades, ≥ 14 days, PF ≥ 1.15 after costs, daily-pooled t ≥ 2.0;
+  - **works** (v1): ≥ 200 trades, ≥ 14 days, PF ≥ 1.15 after costs, daily-pooled t ≥ 2.0 → **v2**: ≥ 90 days and the anytime-valid t threshold;
   - **not working**: PF < 1.0 or return ≤ 0 at that point. That would mean the search finds noise and needs new data sources (OI, liquidations, cross-sectional), not more of the same.
 - **Immediate history indicator:** does a profitable first half of the walk-forward holdout predict a profitable second half?
 - **Forward-proven strategies** (≥ 20 forward trades, PF ≥ 1.3 after costs, positive) become `exploratory` (`fw-…`) and can get demo capital.
@@ -194,7 +211,7 @@ The direct answer to the owner's question, in days to weeks instead of months.
 - Capital = the bot's USDT trading capital (≈ 49.8k). The self-test also shows the whole demo account value including other coins (≈ 168k).
 
 ## Success-critical upgrades (2026-11-20, evening)
-- **Real-money readiness gate** (`readiness.py`, `/api/readiness`, HQ mission panel). It is advisory and never switches by itself. All 8 checks are evaluated on post-promotion production trades:
+- **Real-money readiness gate** (`readiness.py`, `/api/readiness`, HQ mission panel). It is advisory and never switches by itself. All 10 checks (8 originally, + daily Newey–West t and alpha over BTC on 2026-11-21) are evaluated on post-promotion production trades:
   - ≥ 90 days of forward trading;
   - ≥ 250 trades;
   - ≥ 2 strategies with daily correlation < 0.5;

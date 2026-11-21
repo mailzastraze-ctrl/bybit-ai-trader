@@ -23,7 +23,7 @@ from aitrader.registry import Registry
 from aitrader.research import metrics as M
 from aitrader.research.generator import Generator
 from aitrader.research.pipeline import Pipeline
-from aitrader.research.validation import evaluate_gates, score
+from aitrader.research.validation import clean_oos, evaluate_gates, score
 from aitrader.settings import get_settings
 from aitrader.util import iso, setup_logging, utcnow, write_json_atomic
 
@@ -71,7 +71,7 @@ def cmd_run(out: Path, job: int, n: int, universe_file: Path) -> None:
 
 LEDGER_WINDOW_DAYS = 90
 RESULT_KEYS = ("oos", "stress", "mc", "wfe", "robust_frac", "fold_pos", "perturb_pf_median", "params", "pairs", "timeframe", "curve",
-               "variant", "pair_stats", "exit_reasons", "epoch_sharpe_std")
+               "variant", "pair_stats", "exit_reasons", "epoch_sharpe_std", "clean_oos")
 
 
 def ledger_trials(ledger: dict | None, now=None) -> list[float]:
@@ -123,7 +123,7 @@ def merge(dirs: list[Path], batch_id: str, ledger: dict | None = None) -> dict:
                                 oos.get("skew", 0.0), oos.get("kurtosis", 3.0))
         verdict, gates = evaluate_gates(s.gates, {"oos": oos, "stress": r["stress"], "wfe": r["wfe"],
                                                   "robust_frac": r["robust_frac"], "mc": r["mc"], "dsr": dsr,
-                                                  "fold_pos": r.get("fold_pos")})
+                                                  "fold_pos": r.get("fold_pos"), "clean_oos": clean_oos(e["spec"])})
         e["batch_verdict"], e["batch_dsr"], e["batch_gates"] = verdict, round(dsr, 4), gates
         if verdict != "rejected" and r.get("pairs"):
             candidates.append({
@@ -136,7 +136,7 @@ def merge(dirs: list[Path], batch_id: str, ledger: dict | None = None) -> dict:
                         "timeframe": e["spec"].get("timeframe") or "1h",
                         # found by the Strategy Lab autopilot (seven checks + decoy control)
                         "autopilot": (e["spec"].get("screen_holdout") or {}).get("mode") == "swing",
-                        "screen": e["spec"].get("screen")},
+                        "screen": e["spec"].get("screen"), "clean_oos": clean_oos(e["spec"])},
                 "gates": gates, "experiment": e["id"],
             })
     candidates.sort(key=lambda c: -c["score"])
@@ -172,7 +172,9 @@ def report_md(m: dict) -> str:
              f"({sum(c['stage'] == 'validated' for c in m['candidates'])} validated, "
              f"{sum(c['stage'] == 'exploratory' for c in m['candidates'])} exploratory)", "",
              "All metrics are walk-forward out-of-sample, after fees+slippage; stress = doubled costs. "
-             "Imported strategies must still pass forward testing on Bybit Demo before production.", "",
+             "Exception: screener survivors and external configurations were chosen on data that overlaps the "
+             "test windows, so for them the walk-forward is a replication (gate `clean_oos` fails): it can reject "
+             "but never validate. Imported strategies must still pass forward testing on Bybit Demo before production.", "",
              "| Experiment | Family | TF | Verdict | OOS trades | PF | Sharpe | Max DD | DSR | Failed gates |",
              "|---|---|---|---|---:|---:|---:|---:|---:|---|"]
     for e in m["experiments"]:

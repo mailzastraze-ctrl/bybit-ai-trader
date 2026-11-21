@@ -7,9 +7,11 @@ from __future__ import annotations
 import logging
 from datetime import timedelta
 
+from aitrader import evidence as EV
 from aitrader.families import FAMILIES
 from aitrader.learner import live_metrics
 from aitrader.manifest import STAGE_PRIORITY, Manifest, Sleeve, write_pairlist
+from aitrader.realism import real_pnl
 from aitrader.registry import Registry
 from aitrader.settings import Settings
 from aitrader.util import iso, parse_dt, utcnow
@@ -97,6 +99,7 @@ class Lifecycle:
                 "id": d["id"], "experiment_id": "", "family": fam.name, "params": fam.normalize(d.get("params")),
                 "pairs": d.get("pairs") or [], "sides": d.get("sides") or ["long", "short"], "stage": "exploratory",
                 "score": 0.0, "oos": {"timeframe": d.get("timeframe") or "1h", "external": True,
+                                      "benchmark": bool(d.get("benchmark")),
                                       "claimed": d.get("claimed") or {}, "source": d.get("source"),
                                       "variant": f"{fam.name} (external, {', '.join(p.split('/')[0] for p in d.get('pairs') or [])} "
                                                  f"{d.get('timeframe') or '1h'})"},
@@ -140,10 +143,39 @@ class Lifecycle:
 
     # ------------------------------------------------------------------ evaluation
     def update_live(self, equity: float) -> None:
+        btc = EV.btc_returns(self.reg.kv_get("btc_daily"))
         for st in self.reg.strategies(DEPLOYED + ("retired",)):
             trades = self.reg.q("SELECT * FROM live_trades WHERE sleeve_id=? AND close_date >= ? "
                                 "ORDER BY close_date", (st["id"], (st.get("created") or "")[:10]))
-            self.reg.update("strategies", st["id"], {"live": live_metrics(trades, equity)})
+            live = live_metrics(trades, equity)
+            live["alpha"] = (self.market_split(trades, equity, btc) if st["stage"] in DEPLOYED
+                             else (st.get("live") or {}).get("alpha"))  # retired: frozen, saves CPU
+            self.reg.update("strategies", st["id"], {"live": live})
+
+    @staticmethod
+    def market_split(trades: list[dict], equity: float, btc) -> dict:
+        """Beta to BTC and the alpha left after it, on calendar-day realistic returns.
+        A short sleeve in a falling market earns money without any skill; alpha says how much
+        of the result the market does not explain."""
+        empty = {"days": 0, "alpha": None, "beta": None, "alpha_t": None, "alpha_ann": None}
+        if not trades or btc is None or not len(btc):
+            return empty | {"note": "нет данных BTC" if trades else "нет сделок"}
+        try:  # analytics must never break the manager loop; unmeasurable alpha only makes promotion wait
+            daily = EV.daily_returns(trades, equity, real_pnl, end=utcnow())
+            return EV.alpha_beta(daily, btc)
+        except Exception as e:  # noqa: BLE001
+            log.warning("alpha for %d trades failed: %s", len(trades), e)
+            return empty | {"note": "ошибка расчёта"}
+
+    @staticmethod
+    def alpha_state(live: dict) -> str:
+        """'ok' – positive alpha estimate; 'none' – alpha not measurable (no BTC data yet, too
+        few days); 'beta' – the market explains the result. Promotion to production needs 'ok'
+        (slow to trust): profit fully explained by the market move is beta, which costs nothing."""
+        a = (live or {}).get("alpha") or {}
+        if a.get("alpha") is None:
+            return "none"
+        return "ok" if a["alpha"] > 0 else "beta"
 
     def evaluate(self, equity: float) -> None:
         lc = self.lc
@@ -164,14 +196,21 @@ class Lifecycle:
                 elif age > lc.exploration_max_days:
                     self.reg.set_stage(s["id"], "retired", f"exploration inconclusive after {age:.0f}d ({n} trades)")
             elif s["stage"] in ("incubation", "eligible"):
-                if s["stage"] == "incubation" and n >= lc.incubation_min_trades \
-                        and age >= lc.incubation_min_days and pf >= lc.promote_min_pf and pnl > 0 \
-                        and live.get("max_drawdown", 1) <= lc.sleeve_max_dd:
-                    self.reg.set_stage(s["id"], "eligible", f"forward test passed: {n} trades, PF {pf}")
+                passed = s["stage"] == "incubation" and n >= lc.incubation_min_trades \
+                    and age >= lc.incubation_min_days and pf >= lc.promote_min_pf and pnl > 0 \
+                    and live.get("max_drawdown", 1) <= lc.sleeve_max_dd
+                alpha = self.alpha_state(live)
+                if passed and alpha == "ok":
+                    a = live["alpha"]
+                    self.reg.set_stage(s["id"], "eligible", f"forward test passed: {n} trades, PF {pf}, "
+                                       f"alpha over BTC {a.get('alpha_ann')}/yr (β {a.get('beta')})")
                 elif n >= lc.incubation_min_trades and pf < lc.retire_max_pf:
                     self.reg.set_stage(s["id"], "retired", f"forward test failed: {n} trades, PF {pf}")
+                elif passed and alpha == "none":
+                    pass  # profitable and alpha not measurable yet (BTC data outage): wait, never retire for it
                 elif s["stage"] == "incubation" and age > lc.incubation_max_days:
-                    self.reg.set_stage(s["id"], "retired", f"incubation timed out ({n} trades, PF {pf})")
+                    why = " – profitable, but the market (BTC beta) explains it: no alpha" if passed else ""
+                    self.reg.set_stage(s["id"], "retired", f"incubation timed out ({n} trades, PF {pf}){why}")
             if s["stage"] in ("incubation", "eligible", "production") and self.diverges(s):
                 self.reg.set_stage(s["id"], "retired", "live results diverge from out-of-sample expectation")
                 continue

@@ -188,6 +188,20 @@ def fetch_long_short(get=_get, symbols=("BTCUSDT", "ETHUSDT", "SOLUSDT")) -> dic
     return out
 
 
+def fetch_btc_daily(get=_get, limit: int = 400) -> dict | None:
+    """BTCUSDT perpetual daily closes {'YYYY-MM-DD': close} (UTC candles, the running day
+    excluded). The market factor for beta/alpha: is a strategy skilled, or just in the market?"""
+    d = get(f"https://api.bybit.com/v5/market/kline?category=linear&symbol=BTCUSDT&interval=D&limit={limit}")
+    rows = (d.get("result") or {}).get("list") or []
+    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    out = {}
+    for r in rows:  # [startTime ms, open, high, low, close, volume, turnover], newest first
+        day = datetime.fromtimestamp(int(r[0]) / 1000, tz=timezone.utc).strftime("%Y-%m-%d")
+        if day != today:
+            out[day] = float(r[4])
+    return dict(sorted(out.items())) or None
+
+
 _SYM = re.compile(r"\b([A-Z0-9]{2,20})USDT\b")
 
 
@@ -229,6 +243,13 @@ def refresh(reg, get=_get) -> dict:
                 snap.setdefault("ok", {})[key] = datetime.now(timezone.utc).isoformat()
         except Exception as e:  # noqa: BLE001 – context is optional
             log.info("context source %s unavailable: %s", key, e)
+    try:  # market factor for beta/alpha (kept apart from the UI snapshot: ~400 numbers)
+        btc = fetch_btc_daily(get)
+        if btc:
+            reg.kv_set("btc_daily", btc)
+            snap.setdefault("ok", {})["btc_daily"] = datetime.now(timezone.utc).isoformat()
+    except Exception as e:  # noqa: BLE001 – optional; promotions that need it simply wait
+        log.info("context source btc_daily unavailable: %s", e)
     snap["ts"] = datetime.now(timezone.utc).isoformat()
     reg.kv_set("context", snap)
     # hourly history of the numbers (kept 90 days) – evidence for later research

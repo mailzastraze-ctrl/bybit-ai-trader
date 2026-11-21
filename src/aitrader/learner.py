@@ -11,6 +11,15 @@ From **live** demo trades:
 From **research** results:
   * which validation gates a family keeps failing → search-space/universe adjustments.
 Every adjustment is A/B-tested by the generator and deactivated if it doesn't help.
+
+Evidence rule (2026-11-21): the learner stays autonomous, but a pattern must be statistically
+distinguishable from noise before it becomes a learning – a pair excluded after 6 trades or
+a side dropped after 10 is mostly reacting to luck. Thresholds:
+  * pair exclusion: ≥ 15 trades, PF < 0.7 and a one-sided t ≤ −2 on realistic returns;
+  * family exit/holding patterns: ≥ 30 trades (≥ 12 losing trades with an MFE);
+  * long/short asymmetry: ≥ 20 trades per side and a Welch t ≥ 2 for the difference;
+  * A/B pruning: ≥ 8 experiments with and without the learning.
+Learnings remain hypotheses: live exclusions expire, search-space changes are A/B-tested.
 """
 
 from __future__ import annotations
@@ -28,6 +37,24 @@ from aitrader.settings import Settings
 from aitrader.util import iso, utcnow
 
 log = logging.getLogger(__name__)
+EVIDENCE = {"pair_trades": 15, "pair_pf": 0.7, "pair_t": -2.0, "family_trades": 30, "family_mfe": 12,
+            "side_trades": 20, "side_t": 2.0, "ab_min": 8}
+
+
+def _t1(x: np.ndarray) -> float:
+    """One-sample t of the mean (0 if undefined)."""
+    if len(x) < 3:
+        return 0.0
+    sd = float(x.std(ddof=1))
+    return float(x.mean() / sd * np.sqrt(len(x))) if sd > 0 else 0.0
+
+
+def _welch_t(a: np.ndarray, b: np.ndarray) -> float:
+    """Welch t for mean(a) − mean(b)."""
+    if len(a) < 3 or len(b) < 3:
+        return 0.0
+    se = float(np.sqrt(a.var(ddof=1) / len(a) + b.var(ddof=1) / len(b)))
+    return float((a.mean() - b.mean()) / se) if se > 0 else 0.0
 
 
 def _lid(*parts: str) -> str:
@@ -112,18 +139,25 @@ class Learner:
         self.reg.event("learner", f"new learning [{scope}:{key}] {insight}")
 
     def analyze_live(self) -> None:
-        rows = self.reg.q("SELECT raw, sleeve_id, pair, profit_abs, exit_reason, is_short FROM live_trades")
+        rows = self.reg.q("SELECT raw, sleeve_id, pair, profit_abs, profit_ratio, stake_amount, leverage, "
+                          "exit_reason, is_short FROM live_trades")
         if not rows:
             return
         fam_of = {r["id"]: r["family"] for r in self.reg.q("SELECT id, family FROM strategies")}
-        # 1) persistently losing pairs
-        by_pair: dict[str, list[float]] = {}
+        E = EVIDENCE
+        # 1) persistently losing pairs (statistically, not by a short losing streak)
+        by_pair: dict[str, list[dict]] = {}
         for r in rows:
-            by_pair.setdefault(r["pair"], []).append(float(r["profit_abs"] or 0))
-        for pair, pnl in by_pair.items():
-            if len(pnl) >= 6 and profit_factor(np.array(pnl)) < 0.5:
-                self._add("pair", pair, f"{pair}: {len(pnl)} demo trades, PF < 0.5 → excluded for 21 days",
-                          {"exclude_pair": pair}, days=21)
+            by_pair.setdefault(r["pair"], []).append(r)
+        for pair, rs in by_pair.items():
+            if len(rs) < E["pair_trades"]:
+                continue
+            pnl = np.array([real_pnl(r) for r in rs])
+            t = _t1(np.array([real_ratio(r) for r in rs]))
+            pf = profit_factor(pnl)
+            if pf < E["pair_pf"] and t <= E["pair_t"]:
+                self._add("pair", pair, f"{pair}: {len(rs)} demo trades, PF {pf:.2f}, t {t:.1f} "
+                          "(losing beyond chance) → excluded for 21 days", {"exclude_pair": pair}, days=21)
         # 2) per-family exit analysis
         by_fam: dict[str, list[dict]] = {}
         for r in rows:
@@ -131,11 +165,11 @@ class Learner:
             if fam:
                 by_fam.setdefault(fam, []).append(r)
         for fam, rs in by_fam.items():
-            if len(rs) < 15:
+            if len(rs) < E["family_trades"]:
                 continue
             losers = [r for r in rs if float(r["profit_abs"] or 0) < 0]
             mfes = [m for m in (mfe_r(r["raw"]) for r in losers if isinstance(r.get("raw"), dict)) if m is not None]
-            if len(mfes) >= 6 and np.mean(np.array(mfes) >= 1.0) >= 0.4:
+            if len(mfes) >= E["family_mfe"] and np.mean(np.array(mfes) >= 1.0) >= 0.4:
                 self._add("family", fam, f"{fam}: {np.mean(np.array(mfes) >= 1.0):.0%} of losing trades were "
                           "≥1R in profit first → test earlier trailing / closer targets",
                           {"space": {"trail_rr": [0.5, 1.5], "tp_rr": [1.0, 3.0]}})
@@ -146,7 +180,8 @@ class Learner:
                           {"space": {"max_hold": [12, 72]}})
             shorts = np.array([float(r["profit_abs"] or 0) for r in rs if r["is_short"]])
             longs = np.array([float(r["profit_abs"] or 0) for r in rs if not r["is_short"]])
-            if len(shorts) >= 10 and len(longs) >= 10:
+            if len(shorts) >= E["side_trades"] and len(longs) >= E["side_trades"] \
+                    and abs(_welch_t(longs, shorts)) >= E["side_t"]:
                 if profit_factor(shorts) < 0.7 and profit_factor(longs) > 1.1:
                     self._add("family", fam, f"{fam}: shorts PF {profit_factor(shorts):.2f} vs longs "
                               f"{profit_factor(longs):.2f} → test long-only variant", {"sides": ["long"]})
@@ -193,11 +228,12 @@ class Learner:
                     continue
                 sc = float(r["result"].get("score", 0.0)) if isinstance(r.get("result"), dict) else 0.0
                 (with_ if lr["id"] in r["spec"].get("used_learnings", []) else without).append(sc)
-            if len(with_) >= 3 and len(without) >= 3:
+            if len(with_) >= EVIDENCE["ab_min"] and len(without) >= EVIDENCE["ab_min"]:
                 gain = float(np.mean(with_) - np.mean(without))
                 adj = dict(lr.get("adjustment") or {})
                 adj["ab"] = {"with": round(float(np.mean(with_)), 4), "without": round(float(np.mean(without)), 4),
-                             "n": [len(with_), len(without)]}
+                             "n": [len(with_), len(without)],
+                             "t": round(_welch_t(np.array(with_), np.array(without)), 2)}
                 fields = {"adjustment": adj}
                 if gain <= 0:
                     fields["active"] = 0

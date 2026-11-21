@@ -29,6 +29,7 @@ from aitrader.research.results import (
     strategy_stats,
 )
 from aitrader.research.validation import (
+    clean_oos,
     evaluate_gates,
     score,
     walk_forward_efficiency,
@@ -189,9 +190,10 @@ class Pipeline:
 
         fold_pos = (sum(1 for f in fold_reports if (f.get("oos") or {}).get("total_return", 0) > 0)
                     / max(len(folds), 1))
+        clean = clean_oos(spec)
         verdict, gates = evaluate_gates(self.s.gates, {
             "oos": oos, "stress": stress, "wfe": wfe, "robust_frac": robust_frac, "mc": mc,
-            "dsr": dsr, "fold_pos": fold_pos})
+            "dsr": dsr, "fold_pos": fold_pos, "clean_oos": clean})
 
         # 5) per-pair attribution → which pairs this strategy should own --------
         df = M.trades_frame(oos_trades)
@@ -205,7 +207,7 @@ class Pipeline:
 
         result = {
             "verdict": verdict, "gates": gates, "oos": oos, "stress": stress, "mc": mc,
-            "dsr": round(dsr, 4), "n_trials": n_trials, "wfe": round(wfe, 4),
+            "dsr": round(dsr, 4), "n_trials": n_trials, "wfe": round(wfe, 4), "clean_oos": clean,
             "robust_frac": round(robust_frac, 3), "fold_pos": round(fold_pos, 3),
             "perturb_pf_median": round(float(np.median(pert_pfs)), 3) if pert_pfs else 0.0,
             "folds": fold_reports, "params": params, "pairs": good_pairs, "variant": fam.variant(params),
