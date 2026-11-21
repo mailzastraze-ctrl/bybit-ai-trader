@@ -1,6 +1,6 @@
 # PROJECT_STATUS
 
-_Last updated: 2026-11-21 19:30 CET_
+_Last updated: 2026-11-21 20:00 CET_
 
 ## Summary
 The system is **deployed and running autonomously on Bybit Demo**. It never trades real money: `demo_trading` is hard-required.
@@ -26,6 +26,14 @@ Links and rules:
 | 7 | Web terminal | ✅ live | **Control room** (primary, desktop + phone): capital curve, positions with protection state, forward-test verdict, 4 live lab runners, results with fold squares, bandit, gates, lifecycle, goals, readiness, log, learnings, closed trades. **3D HQ v3** at `/hq`: real data on every screen (live 1h candles with entry/stop/target, live GitHub hyperopt epochs, fold results, gates, bandit, market map, goals). Company mission board, stand-up meetings built from real numbers, GitHub-lab cloud with data beam, expressive characters. Rendered headlessly on every UI change (`hq-preview` workflow, screenshots in `docs/preview/`, fails on JS errors) |
 | — | Cloud, independent of your PC | ✅ / ⚠️ | Railway **trial** credit runs out in about 15 days. Hobby is needed for indefinite operation |
 | — | GitHub + PROJECT_STATUS | ✅ | CI green with the real Freqtrade image; 113 tests |
+
+## Railway cost: egress (2026-11-21, 20:00; owner: "Railway eats my usage")
+Usage so far: egress $0.33 > memory $0.18 > CPU $0.04 > volume ~0. HTTP logs show three egress sources: open control-room/3D-office tabs polling large JSON every 10–15 s, the lab's freqtrade subprocesses each re-fetching Bybit `instruments-info` (~0.5 MB) through the relay, and none of it compressed.
+- **gzip** for `/api/*` and `/relay/*` (JSON shrinks ~5–10×); static assets and `/api/lab/backup` untouched (`web/app.py::_ApiGZip`).
+- **Relay metadata cache** in the lab hook (`relayhook/sitecustomize.py`): `instruments-info` / `risk-limit` once per runner for 6 h, shared by its subprocesses; candles never cached; error answers never cached.
+- **Control room** stops polling while its tab is hidden and refreshes at once when shown again. The 3D office (owner-maintained) still polls every 12–15 s while open: close its tab when not watching.
+- Candle data was already cached across lab runs (prep restores the previous run's cache).
+- Memory (freqtrade ≈ 450 MB + web ≈ 185 MB) is the next cost; trimming it would mean fewer pairs/timeframes for the bot, which costs learning – not done.
 
 ## Learning loop + unattended running (2026-11-21, 19:30; owner: "observe 3–5 days / 2–3 weeks without changes")
 Assessment before the changes: lab chain healthy (a successful run every 2.5–3 h since 11-20 22:27; cron runs cancel themselves while a chain runs, by design), service healthy (≈0.6 of 8 GB RAM, CPU idle, self-test ok), the old `daily_sharpe` failures already fixed (last run 62/62). Weak spots for weeks without changes, now closed:

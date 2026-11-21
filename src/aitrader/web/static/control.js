@@ -488,7 +488,10 @@ async function slow() {
   Object.assign(S, Object.fromEntries(Object.entries({goals, ready, strats, trades, ln, fw, ev, scr, cards, ctx}).filter(([, v]) => v)));
   renderAll();
 }
-async function tick() { await fast(); await slow(); window.__ready = true; }
+// a hidden tab (another tab in front, minimised window, phone screen off) does not poll:
+// Railway bills every byte sent, and nobody is looking. Back in front → refresh at once.
+async function tick() { if (document.hidden && window.__ready) return; await fast(); await slow(); window.__ready = true; }
+document.addEventListener("visibilitychange", () => { if (!document.hidden) tick(); });
 const startTab = (location.hash || "").slice(1);
 if (["overview", "strategies", "lab", "trades", "office"].includes(startTab)) setTab(startTab);
 tick(); setInterval(tick, 10000);

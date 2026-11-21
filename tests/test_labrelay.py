@@ -64,3 +64,48 @@ def test_relay_hook_rewrites_ccxt_bybit_requests(monkeypatch, tmp_path):
     ccxt.bybit().fetch("https://example.com/x", "GET", {}, None)
     assert seen["url"] == "https://example.com/x"  # other hosts untouched
     sys.modules.pop("sitecustomize", None)
+
+
+def test_relay_hook_caches_market_metadata_per_runner(tmp_path, monkeypatch):
+    """instruments-info / risk-limit are fetched once per runner (shared by its freqtrade
+    subprocesses) instead of by every subprocess – the live server's egress is billed."""
+    import importlib
+    import sys
+
+    from aitrader.research.ftrunner import RELAY_HOOK_DIR
+    monkeypatch.delenv("AITRADER_RELAY", raising=False)  # import without patching ccxt
+    monkeypatch.setenv("AITRADER_RELAY_CACHE", str(tmp_path / "cache"))
+    monkeypatch.syspath_prepend(str(RELAY_HOOK_DIR))
+    sys.modules.pop("sitecustomize", None)
+    hook = importlib.import_module("sitecustomize")
+    monkeypatch.setattr(hook, "RELAY", "https://srv/relay/")
+    monkeypatch.setattr(hook, "TOKEN", "tok")
+    calls = []
+
+    def upstream(self, url, method="GET", headers=None, body=None):
+        calls.append((url, headers))
+        return {"retCode": 0, "result": {"list": [1, 2, 3]}} if "instruments" in url else {"retCode": 10001}
+    fetch = hook.cached_fetch(upstream)
+    url = "https://api.bybit.com/v5/market/instruments-info?category=linear&limit=1000"
+    a = fetch(None, url, "GET", {}, None)
+    b = fetch(None, url, "GET", {}, None)
+    assert a == b == {"retCode": 0, "result": {"list": [1, 2, 3]}}
+    assert len(calls) == 1 and calls[0][0] == "https://srv/relay/" + url and calls[0][1]["X-Lab-Token"] == "tok"
+    k = "https://api.bybit.com/v5/market/kline?symbol=BTCUSDT"
+    fetch(None, k, "GET", {}, None)
+    fetch(None, k, "GET", {}, None)
+    assert len(calls) == 3  # candles are never cached
+    bad = "https://api.bybit.com/v5/market/risk-limit?category=linear"
+    fetch(None, bad, "GET", {}, None)
+    fetch(None, bad, "GET", {}, None)
+    assert len(calls) == 5  # error answers are not cached
+    import asyncio
+
+    async def aup(self, url, method="GET", headers=None, body=None):
+        calls.append((url, headers))
+        return {"retCode": 0, "result": {}}
+    afetch = hook.cached_afetch(aup)
+    asyncio.run(afetch(None, url, "GET", {}, None))
+    assert len(calls) == 5  # the async path shares the same cache
+    sys.modules.pop("sitecustomize", None)
+
