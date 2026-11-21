@@ -98,7 +98,9 @@ def summarize(trades: Iterable[dict] | pd.DataFrame, starting_balance: float,
     if n == 0:
         return {"trades": 0, "profit_factor": 0.0, "sharpe": 0.0, "sortino": 0.0,
                 "max_drawdown": 0.0, "total_return": 0.0, "annual_return": 0.0,
-                "win_rate": 0.0, "expectancy": 0.0, "days": 0.0}
+                "win_rate": 0.0, "expectancy": 0.0, "avg_profit_abs": 0.0, "days": 0.0, "long_trades": 0,
+                "short_trades": 0, "skew": 0.0, "kurtosis": 3.0, "n_days": 0, "daily_sharpe": 0.0,
+                "curve_r2": 0.0, "pos_months": 0.0, "last90_return": 0.0}
     pnl = df["profit_abs"].to_numpy(dtype=float)
     r = daily_returns(df, starting_balance, start, end)
     days = max((pd.Timestamp(end) - pd.Timestamp(start)).days if start and end else len(r), 1)

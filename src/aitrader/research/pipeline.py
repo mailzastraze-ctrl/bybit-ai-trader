@@ -74,7 +74,8 @@ class Pipeline:
 
     def _n_trials_and_var(self) -> tuple[int, float]:
         rows = self.reg.q("SELECT result FROM experiments WHERE status='done'")
-        srs = [r["result"]["oos"]["daily_sharpe"] for r in rows
+        # a zero-trade experiment has no daily Sharpe – it is still a trial (Sharpe 0)
+        srs = [float((r["result"].get("oos") or {}).get("daily_sharpe", 0.0)) for r in rows
                if isinstance(r.get("result"), dict) and "oos" in r["result"]]
         n = len(srs) + 1
         var = statistics.pvariance(srs) if len(srs) >= 5 else 1.0 / 365.0

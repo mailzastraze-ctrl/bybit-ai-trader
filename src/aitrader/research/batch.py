@@ -25,7 +25,7 @@ from aitrader.research.generator import Generator
 from aitrader.research.pipeline import Pipeline
 from aitrader.research.validation import evaluate_gates, score
 from aitrader.settings import get_settings
-from aitrader.util import iso, setup_logging, write_json_atomic
+from aitrader.util import iso, setup_logging, utcnow, write_json_atomic
 
 log = setup_logging("batch")
 
@@ -455,7 +455,14 @@ def cmd_lab_candles(out: Path, run_id: str, server: str | None) -> int:
         log.error("screener: Bybit relay unavailable – skipping")
         return 0
     s.research.exchange = plan_doc["exchange"]
-    return screen.export_candles(s, plan_doc["universe"]["pairs"], out / "candles")
+    n = screen.export_candles(s, plan_doc["universe"]["pairs"], out / "candles")
+    if s.research.relay:  # open interest for the whole universe once per run (incremental, cached
+        from datetime import timedelta  # with the market data) – runners then need no OI downloads
+
+        from aitrader import oi as oimod
+        oimod.download(s.market_data_dir, plan_doc["universe"]["pairs"], "1h",
+                       utcnow() - timedelta(days=s.research.min_history_days), s.research.relay, s.research.relay_token)
+    return n
 
 
 def cmd_lab_shadow(out: Path, run_id: str, server: str | None, workers: int = 4) -> list[dict]:

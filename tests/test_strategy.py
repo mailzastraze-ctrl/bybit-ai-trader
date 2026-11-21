@@ -258,3 +258,25 @@ def test_market_relative_sleeve_gets_btc_merged_without_look_ahead(tmp_path):
     df = _populate(st, coin, pair)
     assert (df["mkt_close"].to_numpy() == btc["close"].to_numpy()).all()  # same candle, same moment
     assert df["enter_long"].fillna(0).sum() + df.get("enter_short", pd.Series(0)).fillna(0).sum() > 0
+
+
+def test_crossing_falls_back_when_quotes_fail(portfolio):
+    """Regression (live 2026-11-21): the order-book websocket failed ('already subscribed'),
+    the maker entry could never cross and sat 12 minutes until it timed out."""
+    from datetime import datetime, timezone
+
+    def boom(*a, **k):
+        raise RuntimeError("bybit error:already subscribed")
+    portfolio.config["runmode"] = "live"
+    t0 = datetime(2026, 1, 1, tzinfo=timezone.utc)
+    order = SimpleNamespace(order_date_utc=t0)
+    portfolio.dp = SimpleNamespace(orderbook=boom, ticker=lambda pair: {"bid": 0.05274, "ask": 0.05276})
+    tr = SimpleNamespace(is_short=True)
+    px = portfolio.adjust_entry_price(tr, order, "DOGE/USDT:USDT", t0 + timedelta(seconds=200), 0.0529, 0.0529, "s1", "short")
+    assert px == pytest.approx(0.05274 * 0.9995)          # ticker bid → crosses for a short entry
+    portfolio.dp = SimpleNamespace(orderbook=boom, ticker=boom)
+    px = portfolio.adjust_entry_price(tr, order, "DOGE/USDT:USDT", t0 + timedelta(seconds=200), 0.0529, 0.0529, "s1", "short")
+    assert px == pytest.approx(0.0529 * 0.998)            # no quotes at all: protected 0.2% cross
+    long_tr = SimpleNamespace(is_short=False)
+    assert portfolio.adjust_exit_price(long_tr, order, "X", t0 + timedelta(seconds=120), 100.0, 100.0, "s1", "long") \
+        == pytest.approx(100.0 * 0.998)

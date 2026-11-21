@@ -48,7 +48,9 @@ def test_one(s: Settings, ft: FreqtradeRunner, root, e: dict) -> dict:
         overlay = ft.write_config(job, "overlay.json", {"aitrader": {"manifest_path": str(mpath)}})
         out = ft.backtest(job, [cfg, overlay], "AIPortfolio", f"{freeze:%Y%m%d}-", s.research.base_fee, "fw")
         trades = strategy_stats(load_backtest(out), "AIPortfolio").get("trades", [])
-        return base | {"ok": True, "trades": _trades_after(trades, freeze)}
+        fwd = _trades_after(trades, freeze)
+        n_open = sum(1 for t in trades if t.get("exit_reason") == "force_exit")
+        return base | {"ok": True, "trades": fwd, "diag": {"backtest_trades": len(trades), "still_open": n_open}}
     except Exception as ex:  # noqa: BLE001 – one broken strategy must not stop the book
         log.warning("forward test %s failed: %s", e["id"], ex)
         return base | {"ok": False, "error": str(ex)[:300], "trades": []}
@@ -81,6 +83,8 @@ def run(s: Settings, entries: list[dict], out, workers: int = 4, ft: FreqtradeRu
             if on_progress:
                 on_progress(done, len(entries))
     write_json_atomic(out / "shadow-results.json", {"results": results})
-    log.info("forward test: %d strategies, %d forward trades, %d errors", len(results),
-             sum(len(r["trades"]) for r in results), sum(not r["ok"] for r in results))
+    log.info("forward test: %d strategies, %d forward trades, %d errors (still open at the data end: %d; "
+             "backtest trades since the freeze day: %d)", len(results), sum(len(r["trades"]) for r in results),
+             sum(not r["ok"] for r in results), sum((r.get("diag") or {}).get("still_open", 0) for r in results),
+             sum((r.get("diag") or {}).get("backtest_trades", 0) for r in results))
     return results

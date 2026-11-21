@@ -370,11 +370,9 @@ class AIBase(IStrategy):
             if proposed_rate and current_order_rate and abs(proposed_rate / current_order_rate - 1) > 0.0005:
                 return proposed_rate  # follow the touch, stay passive
             return current_order_rate
-        try:
-            ob = self.dp.orderbook(pair, 1)
-            px = float(ob["asks"][0][0]) * 1.0005 if long else float(ob["bids"][0][0]) * 0.9995
-        except Exception:  # noqa: BLE001
-            return current_order_rate
+        px = self._cross_price(pair, closing_long=not long)  # opening a long crosses like closing a short
+        if px is None:  # no quote at all: cross by a fixed 0.2% (a protected marketable limit)
+            px = (proposed_rate or current_order_rate) * (1.002 if long else 0.998)
         crossing = current_order_rate >= px / 1.0005 if long else current_order_rate <= px / 0.9995
         return current_order_rate if crossing else px
 
@@ -382,11 +380,19 @@ class AIBase(IStrategy):
     URGENT_EXITS = ("managed_stop", "stop_loss", "stoploss", "emergency_exit", "liquidation", "force_exit")
 
     def _cross_price(self, pair: str, closing_long: bool) -> float | None:
-        try:
-            ob = self.dp.orderbook(pair, 1)
-            return float(ob["bids"][0][0]) * 0.9995 if closing_long else float(ob["asks"][0][0]) * 1.0005
-        except Exception:  # noqa: BLE001
-            return None
+        """A price that crosses the spread: just below the bid (selling) / above the ask
+        (buying). The ticker's best bid/ask is used (the order-book websocket on Bybit demo
+        can fail with 'already subscribed'); the order book is only a fallback."""
+        for get in (lambda: self.dp.ticker(pair), lambda: self.dp.orderbook(pair, 1)):
+            try:
+                q = get()
+                bid = q.get("bid") if "bid" in q else q["bids"][0][0]
+                ask = q.get("ask") if "ask" in q else q["asks"][0][0]
+                if bid and ask:
+                    return float(bid) * 0.9995 if closing_long else float(ask) * 1.0005
+            except Exception:  # noqa: BLE001
+                continue
+        return None
 
     def custom_exit_price(self, pair: str, trade: Trade, current_time: datetime, proposed_rate: float,
                           current_profit: float, exit_tag: str | None, **kwargs) -> float:
@@ -410,7 +416,9 @@ class AIBase(IStrategy):
                 return proposed_rate  # follow the touch, stay passive
             return current_order_rate
         px = self._cross_price(pair, not trade.is_short)
-        return px or current_order_rate
+        if px is None:
+            px = (proposed_rate or current_order_rate) * (0.998 if not trade.is_short else 1.002)
+        return px
 
     # ------------------------------------------------------------------ portfolio limits
     def confirm_trade_entry(self, pair: str, order_type: str, amount: float, rate: float,

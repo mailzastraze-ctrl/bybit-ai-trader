@@ -138,3 +138,16 @@ def test_stability_prefers_a_steady_curve():
     assert steady["curve_r2"] > 0.9 and steady["pos_months"] == 1.0 and steady["last90_return"] > 0
     assert jagged["curve_r2"] < steady["curve_r2"] and jagged["last90_return"] < 0
     assert falling["curve_r2"] < -0.9
+
+
+def test_zero_trade_summary_has_every_key_of_a_normal_one():
+    """Regression: a silent experiment (e.g. no open-interest data → 0 trades) once broke
+    the Deflated-Sharpe trial count of every later experiment in the runner ('daily_sharpe')."""
+    from datetime import datetime, timezone
+
+    from aitrader.research.metrics import summarize
+    empty = summarize([], 10_000)
+    full = summarize([{"pair": "X", "open_date": "2026-01-01T00:00:00+00:00", "close_date": "2026-01-02T00:00:00+00:00",
+                       "profit_abs": 5.0, "profit_ratio": 0.01}], 10_000,
+                     datetime(2026, 1, 1, tzinfo=timezone.utc), datetime(2026, 2, 1, tzinfo=timezone.utc))
+    assert set(full) <= set(empty)
