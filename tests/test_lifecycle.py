@@ -446,3 +446,14 @@ def test_owner_configs_queue_like_autopilot_and_corrected_imports_supersede(env,
     assert st["owner-a"]["stage"] == "retired" and st["owner-a2"]["stage"] == "exploratory"
     assert life.evidence_rank(st["owner-a2"])[0] == 2  # queued like an autopilot find
     assert life.import_external(d) == 0  # idempotent
+
+
+def test_crowded_coin_goes_to_the_strongest_evidence_first(env):
+    s, reg = env
+    s.lifecycle.max_sleeves_per_pair = 1
+    life = Lifecycle(s, reg)
+    _strategy(reg, "plain", "exploration", ["BTC/USDT:USDT"], score=1.2, family="macd_cross")
+    _strategy(reg, "owner-x", "exploration", ["BTC/USDT:USDT"], score=0.0, family="ema_cross")
+    reg.update("strategies", "owner-x", {"oos": {"owner": True, "external": True, "timeframe": "6h"}})
+    man = life.build_manifest([], set(), False)
+    assert [sl.id for sl in man.sleeves] == ["owner-x"]  # the owner's system is not crowded out by score
