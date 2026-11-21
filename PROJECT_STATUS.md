@@ -10,7 +10,7 @@ Architecture, split by load:
 - **GitHub Actions research lab** (`research-lab` workflow, public repo, 4 vCPU runners, free minutes): all hyperopt, walk-forward, stress, robustness and Monte Carlo. It sends only compact results to the server.
 
 Links and rules:
-- Web: https://aitrader-production-cf456409.up.railway.app (basic auth, user `admin`, password in the Railway variable `WEB_PASSWORD`). `/` = **control room** (primary screen), `/hq` = 3D office, `/terminal` = classic terminal.
+- Web: https://aitrader-production-cf456409.up.railway.app (basic auth: user and password in the Railway variables `WEB_USER` / `WEB_PASSWORD`, set by the owner on 2026-11-21). `/` = **control room** (primary screen), `/hq` = 3D office, `/terminal` = classic terminal.
 - Repo: `mailzastraze-ctrl/bybit-ai-trader` (**public** since 2026-11-20; no secrets in the repo or its history). Railway deploys on code changes only (`src`, `ft`, `config`, `Dockerfile`, `pyproject.toml`); research commits do not redeploy.
 - No profitability is claimed. Every number comes from real demo fills or from walk-forward out-of-sample backtests.
 
