@@ -91,6 +91,9 @@ class Lifecycle:
                 fam = FAMILIES[d["family"]]
             except (OSError, json.JSONDecodeError, KeyError):
                 continue
+            old = d.get("supersedes")  # a corrected version of an earlier import (e.g. exact exits)
+            if old and self.reg.one("SELECT id FROM strategies WHERE id=? AND stage != 'retired'", (old,)):
+                self.reg.set_stage(old, "retired", f"superseded by {d['id']} ({d.get('supersede_reason', 'corrected import')})")
             if self.reg.one("SELECT id FROM strategies WHERE id=?", (d["id"],)):
                 continue
             now = iso()
@@ -99,7 +102,7 @@ class Lifecycle:
                 "id": d["id"], "experiment_id": "", "family": fam.name, "params": fam.normalize(d.get("params")),
                 "pairs": d.get("pairs") or [], "sides": d.get("sides") or ["long", "short"], "stage": "exploratory",
                 "score": 0.0, "oos": {"timeframe": d.get("timeframe") or "1h", "external": True,
-                                      "benchmark": bool(d.get("benchmark")),
+                                      "benchmark": bool(d.get("benchmark")), "owner": bool(d.get("owner")),
                                       "claimed": d.get("claimed") or {}, "source": d.get("source"),
                                       "variant": f"{fam.name} (external, {', '.join(p.split('/')[0] for p in d.get('pairs') or [])} "
                                                  f"{d.get('timeframe') or '1h'})"},
@@ -332,12 +335,13 @@ class Lifecycle:
 
     def evidence_rank(self, st: dict) -> tuple:
         """How much a strategy has shown, best first: 3 forward-proven on unseen data, 2 found by
-        the autopilot (seven checks + decoys), 1 research candidate, 0 near-miss/placeholder."""
+        the autopilot (seven checks + decoys) or brought by the owner from his Strategy Lab,
+        1 research candidate, 0 near-miss/placeholder."""
         o = st.get("oos") or {}
         fw = o.get("forward") or {}
         if str(st["id"]).startswith("fw-") or ((fw.get("trades") or 0) >= 20 and (fw.get("pf") or 0) >= 1.3):
             cls = 3
-        elif self.autopilot(st):
+        elif self.autopilot(st) or o.get("owner"):
             cls = 2
         elif str(st["id"]).startswith(("boot-", "rnd-")) or self._near_miss(st):
             cls = 0
@@ -361,16 +365,18 @@ class Lifecycle:
             placeholder = str(r["id"]).startswith(("boot-", "rnd-"))
             age = _days_since(r.get("stage_since"))
             idle = age >= self.lc.rotate_idle_days and n < 3
-            autopilot_rule = self.autopilot(cand) and not self.autopilot(r) and n < 10
-            if not (placeholder or idle or autopilot_rule):
+            theirs = self.evidence_rank(r)
+            autopilot_rule = mine[0] >= 2 and theirs[0] < 2 and n < 10
+            outclassed = self.outclasses(mine, theirs) and n < 10  # best first: a clearly better candidate
+            if not (placeholder or idle or autopilot_rule or outclassed):
                 continue
-            if not placeholder and self.evidence_rank(r) >= mine:
+            if not placeholder and theirs >= mine:
                 continue  # only a stronger candidate may take the slot
-            victims.append((0 if placeholder else 1, n, -age, r))
+            victims.append((0 if placeholder else 1 if idle else 2, theirs, n, -age, r))
         if not victims:
             return False
-        victims.sort(key=lambda v: v[:3])
-        r = victims[0][3]
+        victims.sort(key=lambda v: v[:4])  # placeholders, then sleeves that had their week and did not trade, then the weakest
+        r = victims[0][4]
         n = int((r.get("live") or {}).get("trades", 0) or 0)
         why = f"rotated out: {n} trades in {_days_since(r.get('stage_since')):.0f} days, slot given to {cand['id']}"
         if str(r["id"]).startswith(("boot-", "rnd-")) or self._near_miss(r):
@@ -378,6 +384,14 @@ class Lifecycle:
         else:
             self.reg.set_stage(r["id"], "exploratory", why + " – back in the queue")
         return True
+
+    @staticmethod
+    def outclasses(mine: tuple, theirs: tuple) -> bool:
+        """'Clearly better' with a margin, so slots do not flip back and forth on noise: a higher
+        evidence class, or the same class with a research score ≥ 1.5× and ≥ 0.2 higher."""
+        if mine[0] != theirs[0]:
+            return mine[0] > theirs[0]
+        return mine[1] >= max(1.5 * theirs[1], theirs[1] + 0.2)
 
     @staticmethod
     def autopilot(st: dict) -> bool:

@@ -399,3 +399,50 @@ def test_autopilot_strategies_take_the_demo_lane_first(env):
     assert st["auto"] == "exploration" and st["near"] == "retired" and st["proven"] == "exploration"
     assert st["plain"] == "exploratory"  # an ordinary candidate does not push out others
     assert Lifecycle.tradable_tf({"oos": {"timeframe": "12h"}}) and not Lifecycle.tradable_tf({"oos": {"timeframe": "1d"}})
+
+
+def test_best_first_a_clearly_better_candidate_takes_a_weak_slot(env):
+    """Best first: within the same evidence class a candidate with a clearly higher research score
+    (≥ 1.5× and ≥ +0.2) takes the slot of the weakest sleeve that has not earned it live; small
+    differences never flip a slot, and a sleeve with a live edge is never moved."""
+    s, reg = env
+    s.lifecycle.max_exploration = 2
+    life = Lifecycle(s, reg)
+    _strategy(reg, "weak", "exploration", ["SOL/USDT:USDT"], score=0.3, family="macd_cross")
+    _strategy(reg, "ok", "exploration", ["XRP/USDT:USDT"], score=0.8, family="adx_di")
+    reg.update("strategies", "weak", {"live": {"trades": 4, "profit_factor": 2.0}, "stage_since": iso()})
+    reg.update("strategies", "ok", {"live": {"trades": 3, "profit_factor": 0.9}, "stage_since": iso()})
+    _strategy(reg, "close", "exploratory", ["DOT/USDT:USDT"], score=0.4, family="supertrend")   # not clearly better
+    _strategy(reg, "best", "exploratory", ["ADA/USDT:USDT"], score=1.6, family="ema_cross")
+    life._fill_slots()
+    st = {r["id"]: r["stage"] for r in reg.strategies()}
+    assert st["best"] == "exploration" and st["weak"] == "exploratory"  # back in the queue, it did not fail
+    assert st["ok"] == "exploration" and st["close"] == "exploratory"
+    life._fill_slots()  # stable: nothing flips back
+    assert {r["id"]: r["stage"] for r in reg.strategies()} == st
+    # a sleeve that earned its place live keeps it against any candidate; the weaker one gives way
+    reg.update("strategies", "ok", {"live": {"trades": 12, "profit_factor": 1.3}})
+    _strategy(reg, "star", "exploratory", ["BNB/USDT:USDT"], score=3.0, family="rsi_revert")
+    life._fill_slots()
+    st = {r["id"]: r["stage"] for r in reg.strategies()}
+    assert st["ok"] == "exploration" and st["star"] == "exploration" and st["best"] == "exploratory"
+    assert Lifecycle.outclasses((1, 0.9), (1, 0.3)) and not Lifecycle.outclasses((1, 0.35), (1, 0.3))
+    assert Lifecycle.outclasses((2, 0.1), (1, 2.0))
+
+
+def test_owner_configs_queue_like_autopilot_and_corrected_imports_supersede(env, tmp_path):
+    import json
+    s, reg = env
+    life = Lifecycle(s, reg)
+    d = tmp_path / "ext"
+    d.mkdir()
+    (d / "a.json").write_text(json.dumps({"id": "owner-a", "family": "ema_cross", "timeframe": "6h", "pairs": ["BTC/USDT:USDT"],
+                                          "params": {"ema_fast": 47, "ema_slow": 76, "exit_mode": 1}}))
+    assert life.import_external(d) == 1
+    (d / "b.json").write_text(json.dumps({"id": "owner-a2", "owner": True, "supersedes": "owner-a", "family": "ema_cross",
+                                          "timeframe": "6h", "pairs": ["BTC/USDT:USDT"], "params": {"ema_fast": 47, "ema_slow": 76}}))
+    assert life.import_external(d) == 1
+    st = {r["id"]: r for r in reg.strategies()}
+    assert st["owner-a"]["stage"] == "retired" and st["owner-a2"]["stage"] == "exploratory"
+    assert life.evidence_rank(st["owner-a2"])[0] == 2  # queued like an autopilot find
+    assert life.import_external(d) == 0  # idempotent

@@ -101,7 +101,7 @@ def detail(reg: Registry, sid: str) -> dict | None:
     return {"row": _row(st, fwd_all, _board(reg)), "card": card, "gates": gate_rows,
             "history": (st.get("history") or [])[-12:],
             "research": {k: (res or {}).get(k) for k in ("oos", "stress", "mc", "market", "wfe", "robust_frac", "fold_pos",
-                                                         "dsr", "clean_oos", "verdict")} if res else {"oos": st.get("oos")},
+                                                         "dsr", "clean_oos", "verdict", "replication", "parity")} if res else {"oos": st.get("oos")},
             "forward_trades": f.get("trades", []), "forward_freeze": f.get("freeze"),
             "trades": trades, "params": st.get("params") or {}}
 

@@ -88,6 +88,12 @@ class Research:
     train_days: int = 365   # each fold re-optimises on the previous year
     holdout_days: int = 360  # one full year of out-of-sample data …
     wf_folds: int = 4        # … tested as four unseen 90-day slices
+    # A fixed configuration (owner's, autopilot's) has nothing to train, so on 2h–12h candles it
+    # is replicated over ~3 years in 12 quarterly slices: 3× the trades of a slow strategy and
+    # its stability over a long distance (owner's criterion), not just the last year.
+    replication_days: int = 1080
+    replication_folds: int = 12
+    replication_train_days: int = 90  # only for the in-sample side of the WFE ratio
     epochs: int = 120
     hyperopt_jobs: int = 2
     universe_size: int = 24

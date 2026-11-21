@@ -236,10 +236,12 @@ function renderDetail(pairs) {
       ${r.why ? `<div style="margin-top:8px"><b>Почему здесь:</b> ${esc(r.why)}</div>` : ""}
     </div>
     <div class="grid3">
-      ${box("Исследование (история, вне выборки)", [["сделок", oos.trades ?? "—"], ["profit factor", pf(oos.profit_factor)], ["Шарп", oos.sharpe == null ? "—" : nf(oos.sharpe, 2)],
+      ${box(rs.replication ? "Исследование (повтор на истории)" : "Исследование (история, вне выборки)", [["сделок", oos.trades ?? "—"], ["profit factor", pf(oos.profit_factor)], ["Шарп", oos.sharpe == null ? "—" : nf(oos.sharpe, 2)],
         ["доходность", oos.total_return == null ? "—" : sg(oos.total_return * 100, 1, "%")], ["макс. просадка", oos.max_drawdown == null ? "—" : nf(oos.max_drawdown * 100, 1) + "%"],
         ["альфа к BTC", mk.alpha_ann == null ? "—" : `${sg(mk.alpha_ann * 100, 1, "%/год")} (t ${nf(mk.alpha_t, 1)})`],
-        ["чистая проверка", rs.clean_oos === false ? "нет — нужна проверка форвардом" : "да"]])}
+        ["чистая проверка", rs.clean_oos === false ? "нет — нужна проверка форвардом" : "да"],
+        ...(rs.replication ? [["период проверки", `${Math.round(rs.replication.days / 365 * 10) / 10} года, ${rs.replication.folds} кварталов`]] : []),
+        ...(rs.parity ? [["движок → бот", `PF ${nf(rs.parity.engine_pf, 2)} → ${nf(rs.parity.bot_pf, 2)} ${rs.parity.ok ? "✅" : "❌ не совпадает"}`]] : [])])}
       ${box("Форвард-тест (данные после заморозки)", [["сделок", r.forward.trades || 0], ["profit factor", pf(r.forward.pf)], ["итог", r.forward.pnl_pct == null ? "—" : sg(r.forward.pnl_pct, 2, "%")],
         ["доля прибыльных", r.forward.win_rate == null ? "—" : nf(r.forward.win_rate * 100, 0) + "%"], ["вероятность, что в плюсе", r.forward.p_pos == null ? "—" : nf(r.forward.p_pos * 100, 0) + "%"]])}
       ${box("Демо-счёт (настоящие сделки)", [["сделок", r.demo.trades || 0], ["profit factor", pf(r.demo.pf)], ["прибыль с поправкой", r.demo.trades ? sg(r.demo.pnl, 2, " $") : "—"],
