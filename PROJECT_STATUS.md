@@ -27,6 +27,12 @@ Links and rules:
 | — | Cloud, independent of your PC | ✅ / ⚠️ | Railway **trial** credit runs out in about 15 days. Hobby is needed for indefinite operation |
 | — | GitHub + PROJECT_STATUS | ✅ | CI green with the real Freqtrade image; 113 tests |
 
+## Strategy explorer `/explorer` (2026-11-21, 21:30; owner: "сделай удобный интерфейс, все стратегии, все сделки на свечах")
+One simple page (link "Все стратегии подробно ↗" in the control room), read-only, works on a phone:
+- list of every strategy with **research / forward / demo** numbers side by side; filters Торгуют · Ждут очереди · Все · Снятые, search by coin/family, sorting;
+- one strategy in full: idea and exits in plain words, why it is in its stage, three KPI blocks (history OOS incl. alpha to BTC and "clean OOS", forward after freeze, demo), **demo trades drawn on candles of the strategy's own timeframe** (built from the bot's 15m candles; ▲/▼ entries, ● exits, yellow = still open; tap a marker for details), every trade in a table (open positions with their current result), research equity curve with fold windows, cumulative forward result, every research check with value and threshold, parameters, status history;
+- API: `/api/explorer`, `/api/explorer/{id}`, `/api/explorer/candles`; dates normalised to ISO-Z (Safari-safe); polls once a minute only while visible.
+
 ## Final week: proven strategies trade together, rotation, honesty gaps (2026-11-21, 21:00; owner's request)
 **Rotation by evidence** (`lifecycle._displace_for`, `evidence_rank`): the waiting queue is ranked by evidence – forward-proven (`fw-…` or ≥ 20 forward trades with PF ≥ 1.3) › autopilot › research candidate › near-miss/placeholder, then score. A full exploration lane makes room for a stronger candidate by moving out a placeholder, a sleeve with < 3 trades after 7 days, or (for an autopilot candidate) an ordinary sleeve with < 10 trades. Sleeves that earned their place live (≥ 10 trades, PF ≥ 1.1) are never moved; a rotated research candidate goes back to the queue (it did not fail), a rotated near-miss retires.
 **All proven strategies trade at the same time, each on its own coins:**

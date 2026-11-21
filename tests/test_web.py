@@ -64,3 +64,15 @@ def test_api_json_is_gzipped_static_is_not(client):
     r = client.get("/static/control.js", headers={"Accept-Encoding": "gzip"})
     assert r.status_code == 200 and r.headers.get("content-encoding") is None
     assert iso()  # registry + app share the test data dir
+
+
+def test_explorer_page_and_api(client):
+    a = ("admin", "pw")
+    assert client.get("/explorer").status_code == 401
+    r = client.get("/explorer", auth=a)
+    assert r.status_code == 200 and "Стратегии — подробно" in r.text
+    out = client.get("/api/explorer", auth=a).json()
+    assert "strategies" in out and "groups" in out
+    assert client.get("/api/explorer/no-such-id", auth=a).status_code == 404
+    c = client.get("/api/explorer/candles?pair=BTC/USDT:USDT&tf=4h", auth=a).json()
+    assert c["candles"] == []  # bot down in tests → empty, not an error
