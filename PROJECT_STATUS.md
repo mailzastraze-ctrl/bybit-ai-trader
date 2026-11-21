@@ -1,6 +1,6 @@
 # PROJECT_STATUS
 
-_Last updated: 2026-11-20 22:50 CET_
+_Last updated: 2026-11-21 09:50 CET_
 
 ## Summary
 The system is **deployed and running autonomously on Bybit Demo**. It never trades real money: `demo_trading` is hard-required.
@@ -26,6 +26,26 @@ Links and rules:
 | 7 | Web terminal | ✅ live | **Control room** (primary, desktop + phone): capital curve, positions with protection state, forward-test verdict, 4 live lab runners, results with fold squares, bandit, gates, lifecycle, goals, readiness, log, learnings, closed trades. **3D HQ v3** at `/hq`: real data on every screen (live 1h candles with entry/stop/target, live GitHub hyperopt epochs, fold results, gates, bandit, market map, goals). Company mission board, stand-up meetings built from real numbers, GitHub-lab cloud with data beam, expressive characters. Rendered headlessly on every UI change (`hq-preview` workflow, screenshots in `docs/preview/`, fails on JS errors) |
 | — | Cloud, independent of your PC | ✅ / ⚠️ | Railway **trial** credit runs out in about 15 days. Hobby is needed for indefinite operation |
 | — | GitHub + PROJECT_STATUS | ✅ | CI green with the real Freqtrade image; 113 tests |
+
+## Overnight review and fixes (2026-11-21 morning)
+**Research lab:** 4 runs completed overnight, ~113 walk-forward experiments.
+- Candidates: 7 exploratory, 0 validated.
+- The edge that keeps appearing is **time-series momentum (`tsmom`, 1h, long lookback)**: 5 candidates with PF 1.13–1.72 out-of-sample.
+- Most other families lose out-of-sample after costs (PF 0.5–0.95).
+
+**Screener:** 3 runs × ~250 000 combinations. 47–73 per-coin configurations looked profitable on the unseen 40%, but **0 survived the false-discovery correction**. They are indistinguishable from luck, which explains why single-coin analyzers find "many profitable configurations". The screener now runs in **pooled mode**: one configuration across all coins of a timeframe, which gives hundreds of holdout trades per test.
+
+**Forward test:** the book has 118 frozen strategies, but only 1 completed forward trade so far. Most strategies were frozen within the last hours and their trades are still open; a diagnostics line was added.
+
+**Live:** 16 exploration strategies trading on demo; 2 closed strategy trades so far.
+
+**Bugs fixed:**
+1. Bybit demo's order-book websocket failed with "already subscribed" every 5 s, so maker entries could not cross and timed out after 12 min. Pricing now uses the ticker, with fallbacks; no errors after redeploy.
+2. A zero-trade experiment broke the Deflated Sharpe trial count for every later experiment of its runner (10 of 30 failed in one run).
+3. Open interest was re-downloaded for 760 days in every oi_flow experiment; it is now downloaded once per run and cached.
+4. Timeframe is now shown in lab logs and reports.
+
+**3D office:** maintained by the owner via ChatGPT since 2026-11-20 (`hq*.js`, `hq.html`, assets); not changed here.
 
 ## Weak spots fixed (2026-11-20, 22:50)
 - **Screener false-discovery control:** every holdout test gets a p-value. Survivors must pass Benjamini–Hochberg (q = 0.2) across all holdout tests of the run, and the run reports the expected number of lucky survivors.
