@@ -73,6 +73,11 @@ def test_anytime_threshold_holds_false_works_rate_under_repeated_looks():
     assert v1 > 0.12 and v2 <= 0.05, (v1, v2)
 
 
+def test_pure_beta_leaves_no_alpha_evidence():
+    x = pd.Series(np.random.default_rng(1).normal(0, 0.03, 100), index=pd.date_range("2025-01-01", periods=100, tz="UTC"))
+    assert EV.alpha_beta(-1.0 * x, x)["alpha_t"] == 0.0  # float residue is not "significant alpha"
+
+
 def test_alpha_beta_separates_market_from_skill():
     btc = EV.btc_returns(btc_closes(days=300))
     rng = np.random.default_rng(5)
@@ -522,7 +527,9 @@ def test_oos_market_split_reads_btc_candles(env):
     pd.DataFrame({"date": idx, "open": px, "high": px, "low": px, "close": px, "volume": 1.0}).to_feather(fn)
     daily = pd.Series(px, index=idx).resample("1D").last()
     rets = np.log(daily).diff().dropna()
-    shorts = [{"close_date": (d + pd.Timedelta(hours=12)).isoformat(), "profit_abs": float(-r * 10_000)} for d, r in rets.items()]
+    noise = np.random.default_rng(5).normal(0, 0.002, len(rets))  # execution noise, no skill
+    shorts = [{"close_date": (d + pd.Timedelta(hours=12)).isoformat(), "profit_abs": float((-r + e) * 10_000)}
+              for (d, r), e in zip(rets.items(), noise, strict=True)]
     pipe = Pipeline(s, reg, runner=object())
     m = pipe._oos_market_split(shorts, idx[0], idx[-1])
     assert m["beta"] == pytest.approx(-1.0, abs=0.05) and abs(m["alpha_t"]) < 1.0  # all of it is beta

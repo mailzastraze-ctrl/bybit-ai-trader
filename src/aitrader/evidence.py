@@ -33,8 +33,8 @@ def newey_west_t(x: Iterable[float], lags: int | None = None) -> float:
     """t-statistic of the mean with a Newey–West (Bartlett) long-run variance."""
     a = np.asarray(list(x), dtype=float)
     n = len(a)
-    if n < 3:
-        return 0.0
+    if n < 3 or float(np.max(np.abs(a))) < 1e-12:
+        return 0.0  # nothing left (e.g. a result fully explained by the market): no evidence either way
     if lags is None:
         lags = int(math.floor(4 * (n / 100.0) ** (2.0 / 9.0)))
     lags = max(0, min(lags, n - 1))
