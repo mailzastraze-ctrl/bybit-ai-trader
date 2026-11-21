@@ -124,6 +124,17 @@ const M = {
 loadSurface(M.floor, "terrazzo", 9, 6, 0x888992, 0.15);
 loadSurface(M.deskWood, "oak", 1, 1, 0xcbbba5, 0.23);
 const [planterAsset, sofaAsset] = await Promise.all([officeModels.planter, officeModels.sofa]);
+// The sofa asset faces its own +z already. Centre its footprint so seat offsets measure
+// from the middle: front edge at +depth/2, backrest at -depth/2.
+function sofaProp(asset) {
+  const model = fittedProp(asset, 2.34, 0.93, 1.08);
+  if (!model) return null;
+  const wrap = new THREE.Group(); wrap.add(model); wrap.updateWorldMatrix(true, true);
+  const box = new THREE.Box3().setFromObject(model), c = box.getCenter(new THREE.Vector3());
+  model.position.x -= c.x; model.position.z -= c.z;
+  wrap.userData.depth = box.max.z - box.min.z;
+  return wrap;
+}
 function at(o, x, y, z) { o.position.set(x, y, z); return o; }
 function mesh(geo, mat, cast = true, recv = true) { const m = new THREE.Mesh(geo, mat); m.castShadow = cast; m.receiveShadow = recv; return m; }
 function boxM(w, h, d, mat, x = 0, y = 0, z = 0) {
@@ -703,9 +714,8 @@ function paintBooks(count) {
 }
 const learnSeat = desk("learn", 14.5, 7.4, Math.PI / 2, {dark: true});
 const sofa = new THREE.Group();
-const sofaModel = fittedProp(sofaAsset, 2.34, 0.93, 1.08);
+const sofaModel = sofaProp(sofaAsset);
 if (sofaModel) {
-  sofaModel.rotation.y = Math.PI;
   sofa.add(sofaModel);
 } else {
   const seat = rbox(2.2, 0.45, 0.9, 0.12, M.sofa); seat.position.y = 0.3;
@@ -766,6 +776,196 @@ const coffee = new THREE.Group(); coffee.add(boxM(0.45, 0.55, 0.4, M.black, 0, 1
 const coffeeLed = mesh(new THREE.SphereGeometry(0.025, 8, 6), new THREE.MeshBasicMaterial({color: 0xff6b3d})); coffeeLed.position.set(0.15, 1.35, 0.205); coffee.add(coffeeLed);
 coffee.position.x = -0.9; kitchen.add(coffee);
 kitchen.position.set(18.8, 0, 0); kitchen.rotation.y = -Math.PI / 2; scene.add(kitchen); blockObj(kitchen.children[0], 0.1);
+
+// --- Lounge (west alcove between the lab and the radar room). Off the walking routes, so
+// sofas and the foosball table never block a path between departments.
+dept("lounge", "Lounge", -18, 0.2, 0xf0c27a);
+departments.lounge.anchor.set(-18.2, 3.3, 0.2);
+rug(-18.15, -0.35, 6.4, 5.9, "#3f3934", 0xf0c27a);
+lightPool(0xffb36a, -18.5, 0.03, -0.9, 6.4, 5.4, 0.17);
+lightPool(0xffc98a, -19.6, 0.03, 2.3, 3.0, 2.4, 0.10);
+const loungeSeats = [];
+const SOFA_ROOT_Z = 0.48, SOFA_LIFT = -0.07;           // seated pelvis over the cushion (Sit_Stand: pelvis 0.36 m behind the feet)
+const loungeFabric = new THREE.MeshStandardMaterial({color: 0x8a6a52, roughness: 0.9});
+const loungeLeather = new THREE.MeshStandardMaterial({color: 0x6b4330, roughness: 0.58, metalness: 0.05});
+function loungeSeat(g, localX, rootZ, lift, look, from = [0, 0.72]) {
+  const mark = (lx, lz) => new THREE.Vector3(lx, 0, lz).applyAxisAngle(UP_AXIS, g.rotation.y).add(g.position);
+  const pos = mark(localX, rootZ);
+  const seat = {pos, dock: pos.clone(), approach: mark(localX + from[0], rootZ + from[1]), face: g.rotation.y,
+    desk: {position: look}, screen: null, chair: g.userData.token, taken: null, lounge: true, lift};
+  loungeSeats.push(seat); return seat;
+}
+function tagBlock(obj, token, pad = 0.05) {
+  obj.updateWorldMatrix(true, true);
+  const box = new THREE.Box3().setFromObject(obj);
+  block(box.min.x - pad, box.min.z - pad, box.max.x + pad, box.max.z + pad, token);
+}
+function loungeSofa(x, z, rot) {
+  const g = new THREE.Group(); g.userData.token = new THREE.Object3D();
+  const model = sofaProp(sofaAsset);
+  if (model) {
+    model.traverse(o => { if (o.isMesh) { o.material = o.material.clone(); o.material.color.multiply(new THREE.Color(0xe9c9a8)); } });
+    g.add(model);
+  } else {
+    const seat = rbox(2.2, 0.45, 0.9, 0.12, loungeFabric); seat.position.y = 0.3;
+    const back = rbox(2.2, 0.6, 0.25, 0.1, loungeFabric); back.position.set(0, 0.7, -0.35);
+    g.add(seat, back);
+  }
+  // two cushions and a folded throw make it read as lived-in
+  for (const [cx, tint] of [[-0.66, 0xd9a25f], [0.7, 0x5f7d8c]]) {
+    const pillow = rbox(0.36, 0.32, 0.11, 0.05, new THREE.MeshStandardMaterial({color: tint, roughness: 0.92}));
+    pillow.position.set(cx, 0.6, -0.08); pillow.rotation.set(-0.3, cx > 0 ? -0.22 : 0.24, cx > 0 ? 0.12 : -0.1); g.add(pillow);
+  }
+  g.position.set(x, 0, z); g.rotation.y = rot; scene.add(g);
+  tagBlock(g, g.userData.token);
+  return g;
+}
+function armchair(x, z, rot) {
+  const g = new THREE.Group(); g.userData.token = new THREE.Object3D();
+  const seat = rbox(0.74, 0.16, 0.66, 0.06, loungeLeather); seat.position.set(0, 0.42, 0.02); g.add(seat);
+  const back = rbox(0.74, 0.52, 0.15, 0.06, loungeLeather); back.position.set(0, 0.72, -0.31); back.rotation.x = -0.16; g.add(back);
+  for (const sx of [-0.42, 0.42]) {
+    const arm = rbox(0.12, 0.22, 0.66, 0.05, loungeLeather); arm.position.set(sx, 0.56, 0.0); g.add(arm);
+  }
+  for (const [lx, lz] of [[-0.36, -0.28], [0.36, -0.28], [-0.36, 0.28], [0.36, 0.28]]) {
+    const leg = mesh(new THREE.CylinderGeometry(0.02, 0.014, 0.34, 8), M.brass); leg.position.set(lx, 0.17, lz); g.add(leg);
+  }
+  g.position.set(x, 0, z); g.rotation.y = rot; scene.add(g);
+  tagBlock(seat, g.userData.token, 0.08);
+  return g;
+}
+const sofaW = loungeSofa(-20.72, -0.40, Math.PI / 2);
+const sofaN = loungeSofa(-17.95, -2.86, 0);
+const club = armchair(-16.5, -0.25, -Math.PI / 2);
+const loungeLook = new THREE.Vector3(-18.45, 0, -0.78);
+loungeSeat(sofaW, -0.44, SOFA_ROOT_Z, SOFA_LIFT, loungeLook.clone().setX(-15));
+loungeSeat(sofaW, 0.44, SOFA_ROOT_Z, SOFA_LIFT, loungeLook.clone().setX(-15));
+loungeSeat(sofaN, -0.44, SOFA_ROOT_Z, SOFA_LIFT, loungeLook.clone().setZ(2));
+loungeSeat(sofaN, 0.44, SOFA_ROOT_Z, SOFA_LIFT, loungeLook.clone().setZ(2));
+loungeSeat(club, 0, 0.36, -0.06, loungeLook, [0.85, 0.19]);
+{ // coffee table: walnut top, brass frame, a tray with cups, magazines and a small succulent
+  const t = new THREE.Group();
+  const top = rbox(1.08, 0.05, 0.6, 0.025, M.deskWood); top.position.y = 0.40; t.add(top);
+  t.add(boxM(1.0, 0.02, 0.52, M.black, 0, 0.16, 0));
+  for (const [lx, lz] of [[-0.5, -0.26], [0.5, -0.26], [-0.5, 0.26], [0.5, 0.26]]) t.add(boxM(0.025, 0.38, 0.025, M.brass, lx, 0.19, lz));
+  t.add(boxM(0.36, 0.012, 0.24, M.brass, 0.22, 0.432, 0.02));
+  for (const [cx, cz] of [[0.14, -0.03], [0.29, 0.06]]) { const c = mesh(new THREE.CylinderGeometry(0.035, 0.028, 0.075, 12), M.paper); c.position.set(cx, 0.475, cz); t.add(c); }
+  const mag = boxM(0.26, 0.012, 0.2, new THREE.MeshStandardMaterial({color: 0x2e5a6b, roughness: 0.8}), -0.25, 0.432, -0.04); mag.rotation.y = 0.25; t.add(mag);
+  const mag2 = boxM(0.24, 0.01, 0.19, M.paper, -0.27, 0.443, -0.02); mag2.rotation.y = -0.1; t.add(mag2);
+  const pot = mesh(new THREE.CylinderGeometry(0.06, 0.05, 0.08, 14), M.plantPot); pot.position.set(-0.02, 0.465, 0.17); t.add(pot);
+  for (let i = 0; i < 7; i++) { const a = i / 7 * Math.PI * 2, leaf = mesh(new THREE.SphereGeometry(0.035, 8, 6), M.leaf2); leaf.scale.set(0.6, 1.4, 0.6); leaf.position.set(-0.02 + Math.cos(a) * 0.03, 0.53, 0.17 + Math.sin(a) * 0.03); leaf.rotation.set(Math.sin(a) * 0.6, 0, -Math.cos(a) * 0.6); t.add(leaf); }
+  t.position.set(-18.45, 0, -0.78); scene.add(t); blockObj(top, 0.04);
+}
+{ // arc floor lamp over the sofas, side table with a reading light
+  const lamp = new THREE.Group();
+  lamp.add(mesh(new THREE.CylinderGeometry(0.17, 0.19, 0.04, 20), M.black));
+  const curve = new THREE.QuadraticBezierCurve3(new THREE.Vector3(0, 0.02, 0), new THREE.Vector3(0.05, 2.4, 0), new THREE.Vector3(1.15, 1.92, 0));
+  lamp.add(mesh(new THREE.TubeGeometry(curve, 28, 0.016, 8, false), M.brass));
+  const shade = mesh(new THREE.SphereGeometry(0.2, 20, 12, 0, Math.PI * 2, 0, Math.PI / 2), M.black); shade.position.set(1.15, 1.92, 0); lamp.add(shade);
+  const bulb = mesh(new THREE.CircleGeometry(0.17, 20), M.warmLight, false, false); bulb.rotation.x = Math.PI / 2; bulb.position.set(1.15, 1.9, 0); lamp.add(bulb);
+  lamp.position.set(-21.2, 0, -2.95); lamp.rotation.y = -Math.PI / 4; scene.add(lamp);
+  block(-21.4, -3.15, -21.0, -2.75);
+  const warm = new THREE.PointLight(0xffc07a, 2.2, 5.2, 1.8); warm.position.set(-20.4, 1.75, -2.15); scene.add(warm);
+  const side = new THREE.Group();
+  side.add(mesh(new THREE.CylinderGeometry(0.24, 0.24, 0.03, 24), M.deskWood)); side.children[0].position.y = 0.55;
+  side.add(mesh(new THREE.CylinderGeometry(0.03, 0.03, 0.54, 10), M.brass)); side.children[1].position.y = 0.27;
+  side.add(mesh(new THREE.CylinderGeometry(0.17, 0.19, 0.02, 20), M.brass)); side.children[2].position.y = 0.01;
+  const book = boxM(0.2, 0.035, 0.15, new THREE.MeshStandardMaterial({color: 0x7b3b36, roughness: 0.8}), 0.03, 0.585, 0); book.rotation.y = 0.4; side.add(book);
+  side.position.set(-20.72, 0, 1.25); scene.add(side); block(-20.98, 1.0, -20.46, 1.5);
+}
+// foosball: rods spin and slide while two people play, otherwise it rests
+const foos = new THREE.Group();
+{
+  const red = new THREE.MeshStandardMaterial({color: 0xc8463d, roughness: 0.5}), blue = new THREE.MeshStandardMaterial({color: 0x2f6fbf, roughness: 0.5});
+  const field = new THREE.MeshStandardMaterial({map: canvasTex(128, 256, (g, s) => {
+    g.fillStyle = "#2f7d4a"; g.fillRect(0, 0, 128, 256); g.strokeStyle = "#e8f3ea"; g.lineWidth = 2;
+    g.strokeRect(6, 6, 116, 244); g.beginPath(); g.moveTo(6, 128); g.lineTo(122, 128); g.stroke();
+    g.beginPath(); g.arc(64, 128, 18, 0, Math.PI * 2); g.stroke(); g.strokeRect(38, 6, 52, 22); g.strokeRect(38, 228, 52, 22);
+  }), roughness: 0.8});
+  foos.add(boxM(0.76, 0.24, 1.42, M.deskWood, 0, 0.82, 0));
+  const pitch = mesh(new THREE.PlaneGeometry(0.66, 1.3), field, false, true); pitch.rotation.x = -Math.PI / 2; pitch.position.y = 0.94; foos.add(pitch);
+  for (const sx of [-1, 1]) foos.add(boxM(0.04, 0.08, 1.42, M.deskWood, sx * 0.36, 0.98, 0));
+  for (const sz of [-1, 1]) { foos.add(boxM(0.76, 0.08, 0.04, M.deskWood, 0, 0.98, sz * 0.69)); foos.add(boxM(0.2, 0.06, 0.02, M.black, 0, 0.97, sz * 0.672)); }
+  for (const [lx, lz] of [[-0.32, -0.62], [0.32, -0.62], [-0.32, 0.62], [0.32, 0.62]]) foos.add(boxM(0.07, 0.72, 0.07, M.black, lx, 0.36, lz));
+  foos.userData.rods = [];
+  const layout = [[-0.56, 1, blue], [-0.4, 2, red], [-0.16, 5, blue], [0.08, 3, red], [-0.08, 3, blue], [0.16, 5, red], [0.4, 2, blue], [0.56, 1, red]];
+  layout.forEach(([z, n, team], i) => {
+    const rod = new THREE.Group(); rod.position.set(0, 1.0, z);
+    const bar = mesh(new THREE.CylinderGeometry(0.008, 0.008, 1.05, 8), M.metal, false); bar.rotation.z = Math.PI / 2; rod.add(bar);
+    const handle = mesh(new THREE.CylinderGeometry(0.018, 0.018, 0.11, 10), M.black, false); handle.rotation.z = Math.PI / 2;
+    handle.position.x = team === red ? 0.56 : -0.56; rod.add(handle);
+    for (let k = 0; k < n; k++) {
+      const man = boxM(0.03, 0.09, 0.02, team, (k - (n - 1) / 2) * (0.56 / Math.max(n, 2)), -0.03, 0); man.castShadow = false; rod.add(man);
+    }
+    rod.userData = {base: z, phase: i * 1.7, team: team === red ? 1 : -1}; foos.add(rod); foos.userData.rods.push(rod);
+  });
+  const ball = mesh(new THREE.SphereGeometry(0.017, 10, 8), M.paper, false); ball.position.set(0, 0.957, 0); foos.add(ball); foos.userData.ball = ball;
+}
+foos.position.set(-19.55, 0, 2.25); scene.add(foos); blockObj(foos.children[0], 0.05);
+const foosSpots = [{pos: new THREE.Vector3(-20.36, 0, 2.25), face: new THREE.Vector3(-19.55, 0, 2.25), player: null},
+  {pos: new THREE.Vector3(-18.74, 0, 2.25), face: new THREE.Vector3(-19.55, 0, 2.25), player: null}];
+// coffee coffeeBar along the radar-room glass: espresso machine, grinder, cups, a glowing drinks fridge
+const coffeeBar = new THREE.Group();
+{
+  coffeeBar.add(boxM(2.1, 0.9, 0.58, M.deskWood, 0, 0.45, 0));
+  coffeeBar.add(boxM(2.18, 0.045, 0.64, M.deskTop, 0, 0.92, 0));
+  coffeeBar.add(boxM(2.0, 0.02, 0.01, M.brass, 0, 0.6, 0.296));
+  const machine = new THREE.Group();
+  machine.add(rbox(0.5, 0.42, 0.4, 0.04, M.metal)); machine.children[0].position.y = 1.16;
+  machine.add(boxM(0.46, 0.04, 0.36, M.black, 0, 1.39, 0));
+  for (const gx of [-0.11, 0.11]) { const head = mesh(new THREE.CylinderGeometry(0.035, 0.03, 0.06, 12), M.black); head.position.set(gx, 1.0, 0.16); machine.add(head); }
+  const gauge = mesh(new THREE.CircleGeometry(0.035, 16), M.paper, false); gauge.position.set(0, 1.27, 0.202); machine.add(gauge);
+  machine.position.set(-0.55, 0, -0.04); coffeeBar.add(machine);
+  const grinder = new THREE.Group();
+  grinder.add(boxM(0.16, 0.26, 0.18, M.black, 0, 1.07, 0));
+  const hopper = mesh(new THREE.CylinderGeometry(0.07, 0.045, 0.16, 14), new THREE.MeshStandardMaterial({color: 0x5a3b22, transparent: true, opacity: 0.7, roughness: 0.2})); hopper.position.y = 1.28; grinder.add(hopper);
+  grinder.position.set(-0.08, 0, -0.08); coffeeBar.add(grinder);
+  for (let i = 0; i < 4; i++) { const c = mesh(new THREE.CylinderGeometry(0.035, 0.028, 0.075, 12), M.paper); c.position.set(0.25 + i * 0.09, 0.98, 0.12); coffeeBar.add(c); }
+  const jar = mesh(new THREE.CylinderGeometry(0.08, 0.08, 0.2, 16), new THREE.MeshStandardMaterial({color: 0xcfe7ef, transparent: true, opacity: 0.45, roughness: 0.1})); jar.position.set(0.72, 1.04, -0.06); coffeeBar.add(jar);
+  for (let i = 0; i < 6; i++) { const fruit = mesh(new THREE.SphereGeometry(0.035, 10, 8), new THREE.MeshStandardMaterial({color: [0xd94b3b, 0xe9b43c, 0x8fb53d][i % 3], roughness: 0.6})); fruit.position.set(0.72 + Math.cos(i) * 0.04, 0.98 + (i > 3 ? 0.05 : 0), -0.06 + Math.sin(i) * 0.04); coffeeBar.add(fruit); }
+  // open shelf above with jars and mugs
+  coffeeBar.add(boxM(1.6, 0.035, 0.26, M.deskWood, 0.15, 1.78, -0.16));
+  for (let i = 0; i < 7; i++) { const m = mesh(new THREE.CylinderGeometry(0.04, 0.036, 0.09, 12), new THREE.MeshStandardMaterial({color: [0xe9e2d4, 0x2f4a5c, 0xc9704e][i % 3], roughness: 0.6})); m.position.set(-0.45 + i * 0.19, 1.84, -0.16); coffeeBar.add(m); }
+  // drinks fridge
+  const fridge = new THREE.Group();
+  fridge.add(boxM(0.62, 1.8, 0.62, M.black, 0, 0.9, 0));
+  const door = mesh(new THREE.PlaneGeometry(0.5, 1.5), new THREE.MeshBasicMaterial({color: 0xbfe6ff, transparent: true, opacity: 0.32, toneMapped: false}), false, false); door.position.set(0, 0.98, 0.312); fridge.add(door);
+  for (let r = 0; r < 4; r++) for (let k = 0; k < 5; k++) {
+    const can = mesh(new THREE.CylinderGeometry(0.03, 0.03, 0.11, 10), new THREE.MeshStandardMaterial({color: [0xe24b3b, 0x3aa0d8, 0xf0c33c, 0x63b46b][(r + k) % 4], roughness: 0.35, metalness: 0.5}), false);
+    can.position.set(-0.18 + k * 0.09, 0.42 + r * 0.36, 0.18); fridge.add(can);
+  }
+  fridge.position.set(1.46, 0, 0.02); coffeeBar.add(fridge);
+}
+coffeeBar.position.set(-16.45, 0, 3.12); coffeeBar.rotation.y = Math.PI; scene.add(coffeeBar); blockObj(coffeeBar.children[0], 0.06); blockObj(coffeeBar.children[coffeeBar.children.length - 1].children[0], 0.04);
+const loungeCoffee = new THREE.Vector3(-16.95, 0, 2.28);
+// a tall pedestal table between the bar and the sofas for standing chats
+{
+  const t = new THREE.Group();
+  t.add(mesh(new THREE.CylinderGeometry(0.34, 0.34, 0.035, 28), M.deskWood)); t.children[0].position.y = 1.06;
+  t.add(mesh(new THREE.CylinderGeometry(0.035, 0.035, 1.04, 10), M.black)); t.children[1].position.y = 0.53;
+  t.add(mesh(new THREE.CylinderGeometry(0.22, 0.25, 0.03, 24), M.black)); t.children[2].position.y = 0.015;
+  const c = mesh(new THREE.CylinderGeometry(0.035, 0.028, 0.075, 12), M.paper); c.position.set(0.1, 1.115, -0.05); t.add(c);
+  t.position.set(-15.0, 0, 1.2); scene.add(t); block(-15.2, 1.0, -14.8, 1.4);
+}
+const loungeTable = new THREE.Vector3(-15.0, 0, 1.2);
+// greenery and a bookshelf with board games along the lab glass
+[[-14.75, -3.05, 1.15], [-21.35, 3.05, 1.05], [-16.2, -3.05, 0.8]].forEach(([x, z, s]) => plant(x, z, s));
+{
+  const shelf = new THREE.Group();
+  shelf.add(boxM(0.36, 1.42, 1.3, M.black, 0, 0.71, 0)); shelf.children[0].visible = false; // nav footprint only
+  shelf.add(boxM(0.03, 1.42, 1.3, M.deskWood, -0.165, 0.71, 0));
+  for (const sz of [-0.635, 0.635]) shelf.add(boxM(0.36, 1.42, 0.03, M.deskWood, 0, 0.71, sz));
+  for (let k = 0; k < 4; k++) shelf.add(boxM(0.36, 0.03, 1.27, M.deskWood, 0, 0.02 + k * 0.46, 0));
+  const games = [0xc8463d, 0x2f6fbf, 0xe9b43c, 0x49645d, 0x7b4f9a, 0xd98a3d];
+  for (let k = 0; k < 3; k++) for (let i = 0; i < 4; i++) {
+    const h = 0.05 + (i % 2) * 0.03;
+    for (let j = 0; j < 1 + ((i + k) % 3); j++) {
+      const g = boxM(0.27, h, 0.24, new THREE.MeshStandardMaterial({color: games[(i + k * 2 + j) % 6], roughness: 0.7}), 0.02, 0.035 + k * 0.46 + h / 2 + j * h, -0.44 + i * 0.29);
+      g.rotation.y = (j - 0.5) * 0.06; g.castShadow = false; shelf.add(g);
+    }
+  }
+  shelf.position.set(-21.6, 0, -1.9 + 3.35); scene.add(shelf); blockObj(shelf.children[0], 0.04);
+}
 
 // lifecycle manager (CEO) desk in the middle
 dept("ceo", "Lifecycle Office", 6.5, 0.5, 0xe1a0ac);
@@ -861,6 +1061,10 @@ let flowSpeed = 0.02;
 // Door openings and furniture in the route planner use the same world bounds
 // as movement. The final step to a chair uses its own side entrance.
 nav.finish();
+for (const p of [...loungeSeats.map(s => s.approach), ...foosSpots.map(s => s.pos), loungeCoffee,
+  loungeTable.clone().add(new THREE.Vector3(-0.64,0,-0.18)), loungeTable.clone().add(new THREE.Vector3(0.64,0,0.18))])
+  if (!nav.clear(p.x, p.z)) console.warn("lounge spot blocked", p.x.toFixed(2), p.z.toFixed(2));
+for (const s of loungeSeats) if (!nav.segment(s.approach, s.dock, 0.245, s.chair)) console.warn("lounge seat unreachable", s.pos.x.toFixed(2), s.pos.z.toFixed(2));
 for (const seat of Object.values(seats)) {
   const dockZ = deskLayout.feetZ - deskLayout.pullback;
   for (const [side,width,z] of [[1,1.30,dockZ],[-1,1.30,dockZ],[1,1.42,dockZ],[-1,1.42,dockZ],
@@ -958,6 +1162,7 @@ function rotWorld(bone, axis, angle) {
   bone.updateWorldMatrix(false, false);
 }
 
+const WALK_CLIP_SPEED = 1.30, ARM_TUCK = 0.24, LEG_TUCK = 0.05;
 class Person {
   constructor(name, role, home, opts = {}) {
     this.name = name; this.role = role; this.homeSeat = home; this.state = "idle"; this.queue = [];
@@ -1100,7 +1305,8 @@ class Person {
     for (const n of ["agree", "headShake", "sad_pose"]) { const c = clip(n); if (!c) continue; const a = this.mixer.clipAction(c); a.blendMode = THREE.AdditiveAnimationBlending; a.play(); a.setEffectiveWeight(0); this.act[n] = a; }
     if (this.act.dock) this.act.dock.paused = true;
     if (this.act.sit) this.act.sit.time = this.phase % this.act.sit.getClip().duration;
-    this.act.idle.time = rand(0, 3); this.act.walk.time = rand(0, 1);
+    this.act.idle.time = rand(0, 6); this.act.walk.time = rand(0, 1);
+    this.act.idle.timeScale = rand(0.82, 1.08); // nobody breathes in step with the whole floor
     this.w = {walk: 0, agree: 0, headShake: 0, sad_pose: 0};
     m.updateMatrixWorld(true);
     this.hipH = this.bones.Hips ? this.bones.Hips.getWorldPosition(new THREE.Vector3()).y - this.root.position.y : 1.0;
@@ -1126,8 +1332,14 @@ class Person {
     R.position.set(this.pos.x, 0, this.pos.z); R.rotation.y = this.yaw;
     const pose = walking ? "walk" : t < this.reactionUntil ? this.reaction : this.pose, sb = this.sitBlend;
     // clip weights: walk vs idle; additive nod / head-shake / slump layered on top
-    const motionWeight = this.footsteps ? 0 : 1;
-    this.w.walk = damp(this.w.walk, !seated && walking ? motionWeight * clamp(this.pace / this.speed,0,1) : 0, 9, dt);
+    // The motion-captured gait carries every stride (heel strike, hip sway, counter-swinging
+    // arms). The procedural footstep solver only places feet while standing: settling steps,
+    // turning on the spot and shuffling at a chair.
+    // Turning on the spot borrows a few slow walk steps instead of pivoting on frozen feet.
+    const turnRate = dt > 0 ? Math.abs(angDiff(this.prevYaw ?? this.yaw, this.yaw)) / dt : 0; this.prevYaw = this.yaw;
+    const turning = !seated && !walking && sb < 0.05 ? THREE.MathUtils.smoothstep(turnRate, 0.5, 2.0) * 0.55 : 0;
+    const gait = Math.max(!seated && walking ? THREE.MathUtils.smoothstep(this.pace, 0.05, 0.42) : 0, turning);
+    this.w.walk = damp(this.w.walk, gait, gait > this.w.walk ? 7 : 6, dt);
     const dockWeight = this.act.dock ? THREE.MathUtils.smoothstep(sb, 0, 0.2) * (1 - this.w.walk) : 0;
     const sitWeight = this.act.sit ? dockWeight * this.workReach : 0;
     this.act.walk.setEffectiveWeight(this.w.walk);
@@ -1138,7 +1350,10 @@ class Person {
       this.act.dock.time = 0.68 + 1.65 * sb;
       this.act.sit.timeScale = this.typingFast ? 1.14 : 0.98;
     }
-    this.act.walk.timeScale = this.pace / 1.25;
+    // Walk_Relaxed travels 1.30 m/s at timeScale 1 (0.78 m stance in 0.6 s): match the
+    // playback to ground speed so the planted foot never skates.
+    if (this.w.walk > 0.001) this.act.walk.timeScale = this.detailedModel
+      ? (walking ? clamp(this.pace / WALK_CLIP_SPEED, 0.3, 1.3) : 0.7) : this.pace / 1.25;
     const listening = pose === "talk" && !this.speaking;
     const tgt = {agree: listening && Math.sin(t * 0.7 + this.phase) > 0.2 ? 1 : 0, headShake: pose === "facepalm" ? 1 : 0, sad_pose: this.mood < -0.4 && !walking ? 0.7 : 0};
     for (const k of ["agree", "headShake", "sad_pose"]) if (this.act[k]) { this.w[k] = damp(this.w[k], tgt[k], 4, dt); this.act[k].setEffectiveWeight(this.w[k]); }
@@ -1149,11 +1364,13 @@ class Person {
     this.mixer.update(dt);
     this.footsteps?.saveMixerOutput();
     this.layerBones.forEach((bone, i) => this.baseQ[i].copy(bone.quaternion));
-    this.model.position.y = this.detailedModel ? (this.seat ? deskLayout.floorY : groundAt(this.pos.x,this.pos.z)) : -sb * (this.hipH - 0.56);
+    this.model.position.y = this.detailedModel ? (this.seat ? deskLayout.floorY + (this.seat.lift || 0) * sb : groundAt(this.pos.x,this.pos.z)) : -sb * (this.hipH - 0.56);
     this.model.position.x = 0;
     this.model.position.z = this.detailedModel ? 0 : (deskLayout.seatZ - deskLayout.feetZ) * sb;
     R.updateWorldMatrix(true, false);
-    if (this.seat) this.footsteps?.reset();
+    // Standing feet come from the idle clip (straight knees, natural weight shift). The
+    // procedural solver bent the knees into a crouch whenever it re-planted after a walk.
+    if (this.seat || this.w.walk > 0.035 || this.detailedModel) this.footsteps?.reset();
     else if (this.footsteps) {
       const people = nearbyCentres(this,1.65);
       this.footsteps.update(dt,this.pos,this.yaw,this.pace,groundAt,
@@ -1199,12 +1416,27 @@ class Person {
     } else if (this.carryTablet) {
       want.uarm = 0.32; want.farm = 1.12; want.inR = 0.18;
       if (!walking) { want.uarmL = 0.25; want.farmL = 0.86; want.inL = -0.18; }
+    } else if (this.holdCup && pose !== "coffee") { want.uarm = 0.22; want.farm = 1.3; want.inR = 0.24; }
+    if (pose === "foos") {
+      const jab = Math.sin(t * 7.3 + this.phase), jab2 = Math.sin(t * 6.1 + this.phase * 2.1);
+      want.uarm = 0.42 + jab * 0.08; want.farm = 1.0 + jab * 0.22; want.inR = 0.32;
+      want.uarmL = 0.42 + jab2 * 0.08; want.farmL = 1.0 + jab2 * 0.22; want.inL = -0.32;
+      want.spine = 0.2; want.headX = 0.22;
     }
+    if (seated && this.seat?.lounge && pose !== "coffee" && pose !== "phone") want.spine = -0.08; // lean back into the cushions
     if (this.lookTarget) { const lt = this.lookTarget.pos || this.lookTarget; want.headY = clamp(angDiff(this.yaw, Math.atan2(lt.x - this.pos.x, lt.z - this.pos.z)), -1.0, 1.0); }
     else if (seated) want.headY = Math.sin(t * 0.52 + this.phase) * 0.13 + Math.sin(t * 0.19 + this.phase * 1.3) * 0.16;
     else if (!walking && !seated && pose === "stand") want.headY = Math.sin(t * 0.5 + this.phase) * 0.4;
     if (seated && !this.act.sit) want.headX += 0.09;
     for (const k in want) P[k] = (P[k] ?? 0) + (want[k] - (P[k] ?? 0)) * ks;
+    if (this.detailedModel) {
+      // The source clips carry the upper arms well away from the ribs and the feet wide.
+      // Bring the arms down along the body and the stride under the hips. Off while seated.
+      const stand = 1 - sb, tuck = ARM_TUCK * stand, legs = LEG_TUCK * this.w.walk * stand;
+      rotWorld(b.LeftArm, f, -tuck); rotWorld(b.RightArm, f, tuck);
+      rotWorld(b.LeftForeArm, f, tuck * 0.45); rotWorld(b.RightForeArm, f, -tuck * 0.45); // hands beside the thighs, not in front
+      rotWorld(b.LeftUpLeg, f, -legs); rotWorld(b.RightUpLeg, f, legs);
+    }
     // legs (sitting): thighs forward, shins down
     rotWorld(b.LeftUpLeg, right, P.thigh); rotWorld(b.RightUpLeg, right, P.thigh);
     rotWorld(b.LeftLeg, right, P.knee); rotWorld(b.RightLeg, right, P.knee);
@@ -1216,7 +1448,7 @@ class Person {
     rotWorld(b.LeftForeArm, right, P.farmL);
     rotWorld(b.Neck, UP, P.headY * 0.5); rotWorld(b.Head, UP, P.headY * 0.5); rotWorld(b.Head, right, -P.headX);
     if (this.speaking && !walking) rotWorld(b.Head, f, Math.sin(t * 2.6 + this.phase) * 0.05);
-    this.props.cup.visible = pose === "coffee"; this.props.phone.visible = pose === "phone"; this.props.tablet.visible = !!this.carryTablet && !this.interaction?.pass && this.sitBlend < 0.18;
+    this.props.cup.visible = pose === "coffee" || !!this.holdCup; this.props.phone.visible = pose === "phone"; this.props.tablet.visible = !!this.carryTablet && !this.interaction?.pass && this.sitBlend < 0.18;
 
   }
   // ---- task queue
@@ -1265,6 +1497,8 @@ class Person {
     const radius = k.access ? 0.245 : PERSON_CLEARANCE;
     const hallClear = (x,z) => nav.clear(x,z,radius,k.access?.chair) && doorClear(x,z,radius);
     if (!k.path) k.path = k.access ? [k.to.clone()] : findPath(this.pos,k.to);
+    if (!k.access && !k.detour && k.path.length > 1 && this.pos.distanceTo(k.path[0]) < 0.85
+      && nav.segment(this.pos,k.path[1]) && doorClear(k.path[1].x,k.path[1].z,radius)) k.path.shift();
     const waitingBay = !k.access && k.path.length ? doorDetour(this,k) : null;
     const target = waitingBay || k.detour || k.path[0];
     if (!target) {
@@ -1283,7 +1517,7 @@ class Person {
 
     const dx = target.x-this.pos.x, dz = target.z-this.pos.z, ux = dx/Math.max(dist,0.001), uz = dz/Math.max(dist,0.001);
     const desired = Math.atan2(dx,dz), turn = Math.abs(angDiff(this.yaw,desired));
-    this.turnTo(desired,dt,7);
+    this.turnTo(desired,dt,6,this.gaitSpeed > 0.3 ? 3.1 : 2.3);
     const corner = !waitingBay && (k.path.length > 1 || k.detour);
     const stoppingSpeed = Math.sqrt(2*2.2*Math.max(0,dist-(corner ? 0 : 0.035)));
     const course = clamp(Math.cos(turn),0,1);
@@ -1332,13 +1566,13 @@ class Person {
     const x = lerp(seat.dock.x,seat.pos.x,tucked), z = lerp(seat.dock.z,seat.pos.z,tucked);
     if (!isClearOfPeople(this,x,z,blend)) return;
     k.elapsed = elapsed; this.sitBlend = blend;
-    this.workReach = THREE.MathUtils.smoothstep(sequence, 2.02, 2.75);
+    this.workReach = seat.lounge ? 0 : THREE.MathUtils.smoothstep(sequence, 2.02, 2.75);
     seat.chair.position.z = deskLayout.seatZ - deskLayout.pullback * (1 - tucked);
     this.pos.lerpVectors(seat.dock, seat.pos, tucked);
     this.yaw = seat.face;
     this.chairAccess = seat;
     if (k.elapsed >= 2.75) {
-      this.task = null; this.pose = entering ? "work" : "stand";
+      this.task = null; this.pose = entering ? (seat.lounge ? "relax" : "work") : "stand";
       if (!entering) { this.seat = null; seat.taken = null; }
     }
   }
@@ -1359,7 +1593,10 @@ class Person {
     let walking = false;
     if (k?.type === "walk") walking = this.stepAlong(k, dt);
     else if (k?.type === "leave" || k?.type === "sit") this.chairMotion(k, dt);
-    else if (k?.type === "wait") { k.left -= dt * 1000; if (k.left <= 0) this.task = null; }
+    else if (k?.type === "wait") {
+      if (!k.until || k.until() || (k.patience = (k.patience || 0) + dt) > 20) k.left -= dt * 1000;
+      if (k.left <= 0) this.task = null;
+    }
     else if (k?.type === "face") {
       const p = k.target.pos || k.target, angle = Math.atan2(p.x-this.pos.x, p.z-this.pos.z);
       this.turnTo(angle,dt,8);
@@ -1369,7 +1606,7 @@ class Person {
     this.pace = dt > 0 && walking ? Math.min(this.speed,Math.hypot(this.pos.x-x,this.pos.z-z)/dt) : 0;
     this.animate(dt,t,walking);
   }
-  turnTo(a, dt, rate) { this.yaw += clamp(angDiff(this.yaw,a)*(1-Math.exp(-rate*dt)),-2.08*dt,2.08*dt); }
+  turnTo(a, dt, rate, max = 2.08) { this.yaw += clamp(angDiff(this.yaw,a)*(1-Math.exp(-rate*dt)),-max*dt,max*dt); }
   animate(dt, t, walking) {
     if (this.model) return this.animateModel(dt, t, walking);
     const R = this.root, seated = !!this.seat && !walking;
@@ -1430,7 +1667,7 @@ class Person {
     L.sh.rotation.x += (lSh - L.sh.rotation.x) * ks; L.el.rotation.x += (lEl - L.el.rotation.x) * ks; L.sh.rotation.z += (lZ - L.sh.rotation.z) * ks;
     Rr.sh.rotation.x += (rSh - Rr.sh.rotation.x) * ks; Rr.el.rotation.x += (rEl - Rr.el.rotation.x) * ks; Rr.sh.rotation.z += (rZ - Rr.sh.rotation.z) * ks;
     // props
-    this.props.cup.visible = pose === "coffee"; this.props.phone.visible = pose === "phone"; this.props.tablet.visible = !!this.carryTablet && !this.interaction?.pass && this.sitBlend < 0.18;
+    this.props.cup.visible = pose === "coffee" || !!this.holdCup; this.props.phone.visible = pose === "phone"; this.props.tablet.visible = !!this.carryTablet && !this.interaction?.pass && this.sitBlend < 0.18;
     // head: look at partner / screen, nod while listening, head shake when upset, glance around when idle
     let hy = 0, hx = seated ? 0.14 : 0;
     if (this.lookTarget) { const lt = this.lookTarget.pos || this.lookTarget; const a = Math.atan2(lt.x - this.pos.x, lt.z - this.pos.z); hy = clamp(angDiff(this.yaw, a), -1.1, 1.1); hx = -0.05; }
@@ -1613,7 +1850,68 @@ function coffeeBreak() {
   if (idle.length < 2) return false;
   const a = idle[0], b = idle.find(c => c !== a && c.pos.distanceTo(a.pos) < 18) || idle[1];
   return conversation(a,b,[[a,"Coffee while we compare notes?"],[b,"Sure. Let's look at the same chart when we're back at our desks."]],
-    point(16.85,0.80), {coffee:true,ambient:true});
+    Math.random() < 0.5 ? point(16.85,0.80) : loungeTable.clone(), {coffee:true,ambient:true});
+}
+// ---- lounge life: a sofa break (often with a coffee from the bar first), or a quick foosball game
+const LOUNGE_TALK = [
+  ["Five minutes away from the screens helps.", "Agreed. Fresh eyes catch more."],
+  ["Long queue in the lab today.", "Good. More tests, fewer guesses."],
+  ["The radar dish never stops, does it?", "Markets never close. Neither does it."],
+  ["Did the coffee machine get an upgrade?", "Same machine. Better beans."],
+  ["Remind me — demo account only, right?", "Always. Evidence first."],
+];
+function seatBooked(seat) {
+  return !!seat.taken || chars.some(c => c.task?.seat === seat || c.task?.access === seat
+    || c.queue.some(k => k.seat === seat || k.access === seat));
+}
+function inLounge() { return chars.filter(c => c.seat?.lounge || c.queue.some(k => k.seat?.lounge) || foosSpots.some(s => s.player === c)).length; }
+function loungeBreak() {
+  const c = eligibleStaff().find(p => p.role !== "ceo");
+  const free = loungeSeats.filter(s => !seatBooked(s));
+  if (!c || !free.length || inLounge() >= 4) return false;
+  const seat = pick(free), mood = pick(["coffee", "coffee", "phone", "relax"]);
+  const company = chars.find(p => p !== c && p.seat?.lounge && p.task?.type === "wait");
+  c.lastOut = officeTime;
+  if (mood === "coffee") c.goTo(loungeCoffee).face(loungeCoffee.clone().setZ(3.2)).wait(rand(2600, 3600), "stand")
+    .do({type: "call", fn: () => { c.holdCup = true; }});
+  c.sitAt(seat);
+  if (company) {
+    const [line, reply] = pick(LOUNGE_TALK);
+    c.do({type: "call", fn: () => { c.lookTarget = company; c.say(line, 3800); }}).wait(4200, mood)
+      .do({type: "call", fn: () => { company.lookTarget = c; company.say(reply, 3800); }}).wait(3000, mood)
+      .do({type: "call", fn: () => { c.lookTarget = null; setTimeout(() => { company.lookTarget = null; }, 2500); }});
+  }
+  c.wait(rand(15000, 26000), mood).sitAt(c.homeSeat).do({type: "call", fn: () => { c.holdCup = false; }});
+  return true;
+}
+function foosballMatch() {
+  if (foosSpots.some(s => s.player) || inLounge() >= 3) return false;
+  const staff = eligibleStaff().filter(p => p.role !== "ceo");
+  if (staff.length < 2) return false;
+  const players = [staff[0], staff.find(p => p !== staff[0] && p.pos.distanceTo(staff[0].pos) < 26) || staff[1]];
+  const ms = rand(15000, 21000), ready = () => foosSpots.every(s => s.ready);
+  players.forEach((p, i) => {
+    const spot = foosSpots[i]; spot.player = p; spot.ready = false; p.lastOut = officeTime;
+    p.goTo(spot.pos).face(spot.face).do({type: "call", fn: () => { spot.ready = true; }})
+      .do({type: "wait", ms, pose: "foos", until: ready})
+      .do({type: "call", fn: () => { if (i === 0) { p.react("cheer", 1.8); p.emote(Math.random() < 0.5 ? "⚽" : "🏆"); } }})
+      .wait(1600, i === 0 ? "cheer" : "stand")
+      .do({type: "call", fn: () => { spot.player = null; spot.ready = false; }}).sitAt(p.homeSeat);
+  });
+  players[1].say(pick(["Rematch?", "Best of three!", "One quick game.", "Loser makes the coffee."]), 3200);
+  return true;
+}
+function loungeTick(dt, t) {
+  const playing = foosSpots.every(s => s.ready && s.player?.task?.pose === "foos");
+  const ball = foos.userData.ball;
+  foos.userData.rods.forEach(rod => {
+    const d = rod.userData, live = playing ? 1 : 0;
+    rod.position.x = damp(rod.position.x, live * Math.sin(t * (2.3 + d.phase * 0.21) + d.phase) * 0.075, 8, dt);
+    rod.rotation.x = damp(rod.rotation.x, live * Math.max(0, Math.sin(t * 3.1 + d.phase)) ** 6 * 1.6 * d.team, 12, dt);
+  });
+  if (playing) { ball.position.set(Math.sin(t * 2.7) * 0.24, 0.957, Math.sin(t * 1.35 + Math.sin(t * 0.9)) * 0.58); }
+  const n = chars.filter(c => c.seat?.lounge && c.sitBlend > 0.5).length + foosSpots.filter(s => s.ready).length;
+  if (n !== loungeTick.shown) { loungeTick.shown = n; setTag("lounge", n ? `${n} on a break` : "sofas · coffee · foosball", "good"); }
 }
 function availableForRoutine(c) {
   return c.root.visible && !c.busy() && !pendingEncounters.some(e => e.people.includes(c));
@@ -1640,6 +1938,7 @@ function wanderSomeone(preferred) {
   }}).wait(rand(3700,5500),job[2]).sitAt(c.homeSeat);
   return true;
 }
+let nextLounge = 14, loungeTurn = 0;
 let nextVisit = 0.55, nextWalk = 4.4, nextStandup = 76, standupPending = false, visitTurn = 0, walkTurn = 0;
 function directOffice(dt) {
   officeTime += dt;
@@ -1675,6 +1974,11 @@ function directOffice(dt) {
       wanderSomeone(order[walkTurn++ % order.length]);
     }
     nextWalk = officeTime + 9;
+  }
+  if (officeTime >= nextLounge && !meetingOn) {
+    const movers = chars.filter(c => c.root.visible && c.busy()).length;
+    const started = movers < 5 && (loungeTurn % 3 === 2 ? foosballMatch() : loungeBreak());
+    loungeTurn++; nextLounge = officeTime + (started ? rand(16, 26) : 5);
   }
 }
 function boardNotes() {
@@ -2181,6 +2485,10 @@ function openPanel(key) {
   } else if (key === "ops") {
     h += `<table><tr><th>Service</th><th>Status</th><th>Heartbeat</th></tr>${(hl.heartbeats || []).map(x => `<tr><td>${esc(x.service)}</td><td>${esc(x.status)}</td><td>${x.age_s}s ago</td></tr>`).join("")}</table>`;
     h += `<div class="kv"><span>self-test</span><span>${hl.selftest?.ok ? "passed" : "–"}</span><span>order execution test</span><span>${hl.exec_test?.ok ? "passed" : "–"}</span><span>disk free</span><span>${hl.disk ? num(hl.disk.free / 1e9, 1) + " GB" : "–"}</span></div>`;
+  } else if (key === "lounge") {
+    const resting = chars.filter(c => c.seat?.lounge || foosSpots.some(s => s.player === c));
+    h += `<p>Short breaks keep the desks sharp: sofas, a coffee bar and a foosball table. Trading never pauses — the bot runs on the server, not on anyone's desk.</p>`;
+    h += `<div class="sub">${resting.length ? "On a break: " + resting.map(c => esc(c.name)).join(", ") : "Nobody on a break right now."}</div>`;
   } else if (key === "cloud") {
     const lab = rs.lab || {};
     h += `<p>All heavy research — hyperopt, walk-forward backtests, cost stress, robustness, Monte Carlo — runs on GitHub Actions runners. The trading server only receives the compact, gate-checked results.</p>`;
@@ -2229,6 +2537,7 @@ const tourViews = [
   {room:"risk", eye:[-3.62,2.27,6.17], focus:[-0.19,1.31,11.21]},
   {room:"learning", eye:[12.0,2.28,11.26], focus:[17.05,1.27,8.64]},
   {room:"ops", eye:[19.58,2.27,-7.45], focus:[15.51,1.45,-11.08]},
+  {room:"lounge", eye:[-13.4,2.6,3.4], focus:[-18.6,0.9,-0.9]},
 ];
 function flyTo(pos, tgt, ms = 1550, rise = 0) {
   if (reducedMotion.matches) {
@@ -2366,6 +2675,7 @@ function tick() {
   });
   leds.forEach((l, i) => { l.material.opacity = 0.64 + 0.3 * Math.sin(ambientTime * (1.6 + i % 4) + i * 1.7); });
   coffeeLed.material.color.setHSL(0.09, 0.7, 0.57 + 0.08 * Math.sin(ambientTime * 1.4));
+  loungeTick(moving, ambientTime);
   pipeOffset = (pipeOffset + moving * flowSpeed) % 1;
   drawStream(parts, pipeline, pipeOffset);
   cloud.position.y = CLOUD_Y + Math.sin(ambientTime * 0.75) * 0.16;
@@ -2442,5 +2752,15 @@ setTimeout(() => ceo.say("Morning, team. Demo account only — we earn trust wit
 
 tick();
 window.__hq = {chars, follow: (i, instant) => { follow = chars[i]; setTour(false); camTween = null;
-  if (instant) { const tp = follow.root.position.clone().setY(1.2); controls.target.copy(tp); camera.position.copy(tp.clone().add(new THREE.Vector3(2.6, 1.9, 3.3))); } }};
+  if (instant) { const tp = follow.root.position.clone().setY(1.2); controls.target.copy(tp); camera.position.copy(tp.clone().add(new THREE.Vector3(2.6, 1.9, 3.3))); } },
+  // fixed camera for previews and screenshots: view(cx, cy, cz, tx, ty, tz)
+  view: (cx, cy, cz, tx, ty, tz) => { follow = null; setTour(false); camTween = null;
+    camera.position.set(cx, cy, cz); controls.target.set(tx, ty, tz); controls.update(); },
+  names: () => chars.map(c => c.name + ":" + c.role),
+  go: (i, x, z) => { chars[i].goTo(point(x, z)); },
+  lounge: () => loungeBreak(), foosball: () => foosballMatch(),
+  state: () => chars.map(c => `${c.name} ${c.task?.type || "-"}/${c.task?.pose || c.pose} q${c.queue.length} @${c.pos.x.toFixed(1)},${c.pos.z.toFixed(1)}${c.seat?.lounge ? " LOUNGE" : ""}`).join("\n"),
+  // advance the office at a fixed 60 Hz without rendering (previews on slow software GL)
+  sim: (seconds) => { for (let k = 0; k < seconds * 60; k++) { directOffice(1/60); moveDoors(1/60);
+    for (const c of chars) if (c.root.visible) c.update(1/60, officeTime); } }};
 window.__hqReady = true;
