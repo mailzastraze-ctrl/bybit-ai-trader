@@ -191,9 +191,11 @@ class Pipeline:
         fold_pos = (sum(1 for f in fold_reports if (f.get("oos") or {}).get("total_return", 0) > 0)
                     / max(len(folds), 1))
         clean = clean_oos(spec)
+        market = self._oos_market_split(oos_trades, oos_start, oos_end)
         verdict, gates = evaluate_gates(self.s.gates, {
             "oos": oos, "stress": stress, "wfe": wfe, "robust_frac": robust_frac, "mc": mc,
-            "dsr": dsr, "fold_pos": fold_pos, "clean_oos": clean})
+            "dsr": dsr, "fold_pos": fold_pos, "clean_oos": clean,
+            "alpha": (market or {}).get("alpha"), "alpha_t": (market or {}).get("alpha_t")})
 
         # 5) per-pair attribution → which pairs this strategy should own --------
         df = M.trades_frame(oos_trades)
@@ -207,7 +209,7 @@ class Pipeline:
 
         result = {
             "verdict": verdict, "gates": gates, "oos": oos, "stress": stress, "mc": mc,
-            "dsr": round(dsr, 4), "n_trials": n_trials, "wfe": round(wfe, 4), "clean_oos": clean,
+            "dsr": round(dsr, 4), "n_trials": n_trials, "wfe": round(wfe, 4), "clean_oos": clean, "market": market,
             "robust_frac": round(robust_frac, 3), "fold_pos": round(fold_pos, 3),
             "perturb_pf_median": round(float(np.median(pert_pfs)), 3) if pert_pfs else 0.0,
             "folds": fold_reports, "params": params, "pairs": good_pairs, "variant": fam.variant(params),
@@ -218,6 +220,28 @@ class Pipeline:
         }
         self._record_strategy(eid, spec, result)
         return result
+
+    def _oos_market_split(self, trades: list[dict], start, end) -> dict | None:
+        """Beta to BTC and the alpha left after it, on the walk-forward OOS daily P&L. None
+        when BTC candles are not in the local data (the gate is then simply not applied)."""
+        from aitrader import evidence as EV
+        try:
+            fn = pair_file(self.s, MARKET_PAIR)
+            if not trades or not fn.exists():
+                return None
+            d = pd.read_feather(fn, columns=["date", "close"])
+            d = d[(d["date"] >= pd.Timestamp(start)) & (d["date"] <= pd.Timestamp(end))]
+            closes = d.set_index("date")["close"].resample("1D").last().dropna()
+            btc = np.log(closes).diff().dropna()
+            y = EV.daily_returns(trades, STARTING_BALANCE, lambda t: float(t.get("profit_abs") or 0.0), end=end)
+            ab = EV.alpha_beta(y, btc, min_days=30)
+            if ab.get("alpha") is None:
+                return None
+            return {"alpha": ab["alpha"], "alpha_ann": ab["alpha_ann"], "beta": ab["beta"], "alpha_t": ab["alpha_t"],
+                    "days": ab["days"]}
+        except Exception as e:  # noqa: BLE001 – a missing/odd file must not fail the experiment
+            log.info("OOS market split unavailable: %s", e)
+            return None
 
     def _record_strategy(self, eid: str, spec: dict, result: dict) -> None:
         stage = {"validated": "validated", "exploratory": "exploratory"}.get(

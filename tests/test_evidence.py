@@ -73,6 +73,11 @@ def test_anytime_threshold_holds_false_works_rate_under_repeated_looks():
     assert v1 > 0.12 and v2 <= 0.05, (v1, v2)
 
 
+def test_pure_beta_leaves_no_alpha_evidence():
+    x = pd.Series(np.random.default_rng(1).normal(0, 0.03, 100), index=pd.date_range("2025-01-01", periods=100, tz="UTC"))
+    assert EV.alpha_beta(-1.0 * x, x)["alpha_t"] == 0.0  # float residue is not "significant alpha"
+
+
 def test_alpha_beta_separates_market_from_skill():
     btc = EV.btc_returns(btc_closes(days=300))
     rng = np.random.default_rng(5)
@@ -443,3 +448,104 @@ def test_learner_needs_eight_recent_experiments_for_a_research_pattern(env):
         exp(i)
     Learner(s, reg).learn_from_research()
     assert reg.q("SELECT * FROM learnings WHERE scope='research'")
+
+
+# ------------------------------------------------------------------ 10. rotation by evidence + all proven at once
+def _st(reg, sid, stage, pairs, score=1.0, family="tsmom", days=1.0, live=None, oos=None):
+    since = iso(utcnow() - timedelta(days=days))
+    reg.upsert("strategies", {"id": sid, "experiment_id": "", "family": family, "params": {}, "pairs": pairs,
+                              "sides": ["long", "short"], "stage": stage, "score": score, "oos": oos or {}, "gates": {},
+                              "live": live or {}, "created": since, "updated": since, "stage_since": since, "history": []})
+
+
+def test_rotation_by_evidence_moves_idle_sleeves_out_for_stronger_candidates(env):
+    s, reg = env
+    s.lifecycle.max_exploration = 3
+    life = Lifecycle(s, reg)
+    _st(reg, "idle", "exploration", ["SOL/USDT:USDT"], score=0.9, days=10, live={"trades": 1})  # a week+, 1 trade
+    _st(reg, "young", "exploration", ["ETH/USDT:USDT"], score=0.1, days=2, live={"trades": 0})  # too new to judge
+    _st(reg, "earned", "exploration", ["XRP/USDT:USDT"], score=0.1, days=15, live={"trades": 12, "profit_factor": 1.5})
+    _st(reg, "fw-strong", "exploratory", ["DOGE/USDT:USDT"], score=0.5, family="macd_cross",
+        oos={"forward": {"trades": 25, "pf": 1.6}})
+    _st(reg, "weak", "exploratory", ["ADA/USDT:USDT"], score=0.05, family="ema_cross")
+    life._fill_slots()
+    st = {r["id"]: r for r in reg.strategies()}
+    assert st["fw-strong"]["stage"] == "exploration"  # forward-proven took the idle slot
+    assert st["idle"]["stage"] == "exploratory" and "rotated out" in st["idle"]["history"][-1]["reason"]  # back in queue
+    assert st["young"]["stage"] == "exploration" and st["earned"]["stage"] == "exploration"
+    assert st["weak"]["stage"] == "exploratory"  # a weaker candidate does not push anyone out
+    assert life.evidence_rank(st["fw-strong"])[0] == 3 and life.evidence_rank(st["weak"])[0] == 1
+
+
+def test_many_proven_strategies_trade_at_once_on_their_own_coins(env):
+    s, reg = env
+    life = Lifecycle(s, reg)
+    coins = [f"C{i}/USDT:USDT" for i in range(18)]
+    for i, c in enumerate(coins):  # 18 proven TSMOM variants, each on its own coin
+        _st(reg, f"p{i:02d}", "validated", [c], score=1.0 + i / 100, family="tsmom")
+    life._fill_slots()
+    inc = reg.strategies(("incubation",))
+    assert len(inc) == 18  # no 8-slot or 6-per-family ceiling: one family on different coins is fine
+    man = life.build_manifest([], set(), False)
+    assert {p for sl in man.sleeves for p in sl.pairs} == set(coins)
+    assert all(abs(sl.risk - s.lifecycle.risk_incubation) < 1e-9 for sl in man.sleeves)  # budget not exceeded → full size
+    for i in range(18):
+        reg.update("strategies", f"p{i:02d}", {"stage": "production"})
+    man = life.build_manifest([], set(), False)
+    k = reg.kv_get("proven_scale")["scale"]
+    assert k < 1 and all(sl.risk == pytest.approx(s.lifecycle.risk_production * k, rel=2e-3) for sl in man.sleeves)
+    # with half of the coins in a trade the open risk stays within the proven budget
+    assert 0.5 * sum(sl.risk * len(sl.pairs) for sl in man.sleeves) <= s.lifecycle.proven_risk_budget + 1e-4  # 6-digit rounding
+    # but two of one family on the same coin is the limit
+    _st(reg, "dup1", "validated", [coins[0]], family="tsmom")
+    _st(reg, "dup2", "validated", [coins[0]], family="tsmom")
+    life._fill_slots()
+    stages = {r["id"]: r["stage"] for r in reg.strategies()}
+    assert sorted((stages["dup1"], stages["dup2"])) == ["incubation", "validated"]
+
+
+# ------------------------------------------------------------------ 11. research alpha gate, daily loss limit
+def test_validation_needs_oos_alpha_over_btc_but_exploration_does_not():
+    g = Gates()
+    assert evaluate_gates(g, _m(alpha=0.002, alpha_t=2.5))[0] == "validated"
+    v, gates = evaluate_gates(g, _m(alpha=0.0001, alpha_t=0.3))  # profitable, but the market explains it
+    assert v == "exploratory" and not gates["market_alpha"]["pass"]
+    assert "market_alpha" not in evaluate_gates(g, _m())[1]  # no BTC data → gate not applied
+    assert evaluate_gates(g, _m(alpha=-0.001, alpha_t=1.5))[0] == "exploratory"
+
+
+def test_oos_market_split_reads_btc_candles(env):
+    pytest.importorskip("pyarrow")  # feather files (present in the Freqtrade image)
+    from aitrader.families import MARKET_PAIR
+    from aitrader.research.pipeline import Pipeline, pair_file
+    s, reg = env
+    fn = pair_file(s, MARKET_PAIR)
+    fn.parent.mkdir(parents=True, exist_ok=True)
+    idx = pd.date_range("2025-01-01", periods=24 * 200, freq="1h", tz="UTC")
+    rng = np.random.default_rng(4)
+    px = 50_000 * np.exp(np.cumsum(rng.normal(-0.0004, 0.006, len(idx))))  # a falling market
+    pd.DataFrame({"date": idx, "open": px, "high": px, "low": px, "close": px, "volume": 1.0}).to_feather(fn)
+    daily = pd.Series(px, index=idx).resample("1D").last()
+    rets = np.log(daily).diff().dropna()
+    noise = np.random.default_rng(5).normal(0, 0.002, len(rets))  # execution noise, no skill
+    shorts = [{"close_date": (d + pd.Timedelta(hours=12)).isoformat(), "profit_abs": float((-r + e) * 10_000)}
+              for (d, r), e in zip(rets.items(), noise, strict=True)]
+    pipe = Pipeline(s, reg, runner=object())
+    m = pipe._oos_market_split(shorts, idx[0], idx[-1])
+    assert m["beta"] == pytest.approx(-1.0, abs=0.05) and abs(m["alpha_t"]) < 1.0  # all of it is beta
+    assert pipe._oos_market_split([], idx[0], idx[-1]) is None
+
+
+def test_daily_loss_limit_pauses_entries_until_the_next_utc_day(env):
+    from aitrader.manager import daily_stop
+    _, reg = env
+    assert daily_stop(reg, 10_000, 0.03) is False  # day's first reading
+    assert daily_stop(reg, 9_800, 0.03) is False   # −2 %
+    assert daily_stop(reg, 9_690, 0.03) is False   # −3.1 % once: could be a glitchy balance read
+    assert daily_stop(reg, 9_980, 0.03) is False   # it was: back to normal, counter reset
+    assert daily_stop(reg, 9_690, 0.03) is False
+    assert daily_stop(reg, 9_680, 0.03) is True    # −3 % twice in a row → paused
+    assert daily_stop(reg, 9_950, 0.03) is True    # stays paused for the rest of the day
+    assert any("DAILY LOSS LIMIT" in e["message"] for e in reg.q("SELECT message FROM events"))
+    reg.kv_set("day_open", {"day": "2000-01-01", "equity": 10_000, "hit": True})
+    assert daily_stop(reg, 9_000, 0.03) is False   # a new day starts from its own first reading

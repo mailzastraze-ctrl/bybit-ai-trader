@@ -1,0 +1,304 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Стратегии — подробно · AI Trader</title>
+<link rel="icon" href="data:,">
+<style>
+  :root { --bg:#0f1216; --panel:#171b21; --panel2:#1e232b; --line:#2a313b; --text:#e7ebf0; --dim:#8c97a6;
+          --pos:#2fbf71; --neg:#ef5350; --warn:#f0b429; --blue:#4f8cff; --r:10px; }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--bg); color:var(--text); font:14px/1.45 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Arial,sans-serif; }
+  a { color:var(--blue); text-decoration:none; }
+  header { position:sticky; top:0; z-index:5; background:rgba(15,18,22,.96); border-bottom:1px solid var(--line); padding:12px 18px;
+           display:flex; gap:14px; align-items:center; flex-wrap:wrap; }
+  h1 { font-size:18px; margin:0 12px 0 0; }
+  .seg { display:flex; background:var(--panel); border:1px solid var(--line); border-radius:8px; overflow:hidden; }
+  .seg button { background:none; border:0; color:var(--dim); padding:7px 12px; cursor:pointer; font:inherit; }
+  .seg button.on { background:var(--panel2); color:var(--text); }
+  input, select { background:var(--panel); color:var(--text); border:1px solid var(--line); border-radius:8px; padding:7px 10px; font:inherit; }
+  main { padding:14px 18px 40px; }
+  .hint { color:var(--dim); font-size:12.5px; margin:0 0 10px; }
+  table { width:100%; border-collapse:collapse; }
+  th, td { padding:8px 9px; border-bottom:1px solid var(--line); text-align:left; vertical-align:top; white-space:nowrap; }
+  th { color:var(--dim); font-weight:500; font-size:12px; background:var(--bg); }
+  th.grp { text-align:center; border-bottom:0; }
+  td.r, th.r { text-align:right; }
+  tbody tr { cursor:pointer; }
+  tbody tr:hover { background:var(--panel); }
+  .name b { display:block; } .name small { color:var(--dim); }
+  .pill { display:inline-block; padding:2px 8px; border-radius:20px; font-size:12px; background:var(--panel2); color:var(--dim); }
+  .pill.live { background:rgba(47,191,113,.15); color:var(--pos); } .pill.wait { background:rgba(79,140,255,.15); color:var(--blue); }
+  .pill.off { background:rgba(140,151,166,.12); }
+  .pos { color:var(--pos); } .neg { color:var(--neg); } .dim { color:var(--dim); }
+  .num { font-variant-numeric:tabular-nums; }
+  .tag { font-size:11px; padding:1px 6px; border-radius:5px; background:var(--panel2); color:var(--dim); margin-left:4px; }
+  .wrap { overflow-x:auto; border:1px solid var(--line); border-radius:var(--r); }
+  /* detail drawer */
+  #shade { position:fixed; inset:0; background:rgba(0,0,0,.45); display:none; z-index:9; }
+  #drawer { position:fixed; top:0; right:0; bottom:0; width:min(1100px, 100%); background:var(--bg); border-left:1px solid var(--line);
+            overflow-y:auto; transform:translateX(100%); transition:transform .18s; z-index:10; }
+  body.open #shade { display:block; } body.open #drawer { transform:none; }
+  .dh { position:sticky; top:0; background:var(--bg); border-bottom:1px solid var(--line); padding:14px 18px; display:flex; gap:12px; align-items:center; z-index:2; }
+  .dh h2 { margin:0; font-size:18px; flex:1; }
+  .close { background:var(--panel); border:1px solid var(--line); color:var(--text); border-radius:8px; padding:6px 12px; cursor:pointer; font:inherit; }
+  .db { padding:16px 18px 40px; display:grid; grid-template-columns:minmax(0, 1fr); gap:14px; }
+  .db > *, .grid2 > *, .grid21 > *, .grid3 > * { min-width:0; }  /* wide tables scroll inside their card, not the page */
+  .card { background:var(--panel); border:1px solid var(--line); border-radius:var(--r); padding:14px; }
+  .card h3 { margin:0 0 10px; font-size:14px; color:var(--dim); font-weight:500; }
+  .grid3 { display:grid; grid-template-columns:repeat(3, 1fr); gap:12px; }
+  .grid2 { display:grid; grid-template-columns:1fr 1fr; gap:12px; } .grid21 { display:grid; grid-template-columns:2fr 1fr; gap:12px; }
+  .kv { display:grid; grid-template-columns:auto 1fr; gap:4px 12px; font-size:13px; }
+  .kv span:nth-child(odd) { color:var(--dim); }
+  .chips { display:flex; flex-wrap:wrap; gap:6px; }
+  .chips button { background:var(--panel2); border:1px solid var(--line); color:var(--text); border-radius:20px; padding:4px 10px; cursor:pointer; font:inherit; font-size:12.5px; }
+  .chips button.on { border-color:var(--blue); color:var(--blue); }
+  svg { display:block; width:100%; }
+  .checks div { display:flex; gap:8px; padding:4px 0; border-bottom:1px dashed var(--line); font-size:13px; }
+  .checks i { font-style:normal; width:18px; } .checks .v { margin-left:auto; color:var(--dim); }
+  .empty { color:var(--dim); padding:10px 0; }
+  #cards { display:none; gap:10px; }
+  .sc { background:var(--panel); border:1px solid var(--line); border-radius:var(--r); padding:12px; cursor:pointer; }
+  .sc .top { display:flex; justify-content:space-between; gap:8px; align-items:flex-start; }
+  .sc .three { display:grid; grid-template-columns:repeat(3,1fr); gap:6px; margin-top:10px; font-size:12.5px; }
+  .sc .three div { background:var(--panel2); border-radius:8px; padding:6px 8px; } .sc .three b { display:block; font-size:11px; color:var(--dim); font-weight:500; }
+  @media (max-width: 800px) {
+    .grid3, .grid2, .grid21 { grid-template-columns:minmax(0, 1fr); } .hide-m { display:none; }
+    header { position:static; padding:10px 12px; gap:8px; } h1 { font-size:16px; width:100%; }
+    .seg { width:100%; } .seg button { flex:1; padding:7px 4px; font-size:12.5px; } #q, #sort { flex:1; min-width:0; }
+    main { padding:10px 12px 30px; } #tableWrap { display:none; } #cards { display:grid; }
+    .dh { padding:10px 12px; } .db { padding:12px 12px 30px; } .card { padding:12px; }
+  }
+</style>
+</head>
+<body>
+<header>
+  <h1>Стратегии — подробно</h1>
+  <div class="seg" id="seg">
+    <button data-v="live" class="on">Торгуют</button><button data-v="waiting">Ждут очереди</button>
+    <button data-v="active">Все</button><button data-v="retired">Снятые</button>
+  </div>
+  <input id="q" placeholder="Поиск: монета, семейство…" size="22">
+  <select id="sort">
+    <option value="stage">По статусу</option><option value="demo_pnl">По прибыли на демо</option>
+    <option value="fw_trades">По сделкам форвард-теста</option><option value="fw_pnl">По доходности форвард-теста</option>
+    <option value="res_pf">По PF исследования</option>
+  </select>
+  <a href="/" style="margin-left:auto">← Пульт</a>
+</header>
+<main>
+  <p class="hint" id="hint">Загрузка…</p>
+  <div id="cards"></div>
+  <div class="wrap" id="tableWrap"><table>
+    <thead>
+      <tr><th></th><th></th><th class="hide-m"></th><th class="grp" colspan="3">Исследование (на истории)</th>
+          <th class="grp" colspan="3">Форвард-тест (новые данные)</th><th class="grp" colspan="3">Демо-счёт (реальные сделки)</th></tr>
+      <tr><th>Стратегия</th><th>Статус</th><th class="hide-m">Монеты</th>
+          <th class="r">сделок</th><th class="r">PF</th><th class="r">Шарп</th>
+          <th class="r">сделок</th><th class="r">PF</th><th class="r">итог</th>
+          <th class="r">сделок</th><th class="r">PF</th><th class="r">прибыль</th></tr>
+    </thead>
+    <tbody id="rows"></tbody>
+  </table></div>
+</main>
+<div id="shade"></div>
+<aside id="drawer"><div class="dh"><h2 id="dTitle">—</h2><button class="close" id="dClose">Закрыть ✕</button></div><div class="db" id="dBody"></div></aside>
+
+<script>
+const $ = (s) => document.querySelector(s);
+const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({"&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"}[c]));
+const nf = (v, d = 2) => v == null || isNaN(+v) ? "—" : (+v).toLocaleString("ru-RU", {minimumFractionDigits: d, maximumFractionDigits: d});
+const sg = (v, d = 2, suf = "") => v == null ? "—" : `<span class="${+v > 0 ? "pos" : +v < 0 ? "neg" : ""}">${+v > 0 ? "+" : ""}${nf(v, d)}${suf}</span>`;
+const pf = (v) => v == null ? "—" : v >= 99 ? "∞" : `<span class="${v >= 1.1 ? "pos" : v < 1 ? "neg" : ""}">${nf(v, 2)}</span>`;
+const coin = (p) => String(p || "").split("/")[0];
+const dt = (s) => s ? new Date(s).toLocaleString("ru-RU", {day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit"}) : "—";
+const api = (u) => fetch(u, {credentials: "same-origin"}).then((r) => { if (!r.ok) throw new Error(r.status); return r.json(); });
+const LIVE = ["production", "eligible", "incubation", "exploration", "closing"], WAIT = ["validated", "exploratory"];
+const RS = {stop_loss: "стоп", stoploss_on_exchange: "стоп на бирже", managed_stop: "защитный стоп", take_profit: "тейк-профит",
+            exit_signal: "сигнал выхода", time_exit: "по времени", custom_exit: "фиксация прибыли", force_exit: "вручную"};
+let VIEW = "live", ALL = {strategies: [], groups: {}}, SEL = null, DET = null, PAIR = null;
+
+// ------------------------------------------------------------------ list
+async function loadList() {
+  const show = VIEW === "retired" ? "retired" : "active";
+  try { ALL = await api(`/api/explorer?show=${show}`); } catch (e) { $("#hint").textContent = `Нет данных с сервера (${e.message}).`; return; }
+  renderList();
+}
+function renderList() {
+  const q = $("#q").value.trim().toLowerCase();
+  let rows = ALL.strategies.filter((r) => VIEW === "live" ? LIVE.includes(r.stage) : VIEW === "waiting" ? WAIT.includes(r.stage) : true);
+  if (q) rows = rows.filter((r) => `${r.title} ${r.family} ${r.variant} ${r.id} ${r.pairs.join(" ")}`.toLowerCase().includes(q));
+  const key = {demo_pnl: (r) => -(r.demo.pnl ?? -1e9), fw_trades: (r) => -(r.forward.trades || 0), fw_pnl: (r) => -(r.forward.pnl_pct ?? -1e9),
+               res_pf: (r) => -(r.research.pf ?? -1e9)}[$("#sort").value];
+  if (key) rows = rows.slice().sort((a, b) => key(a) - key(b));
+  const g = ALL.groups || {};
+  $("#hint").innerHTML = `Торгуют сейчас: <b>${g.live ?? 0}</b> · ждут очереди: <b>${g.waiting ?? 0}</b> · снятые: <b>${g.retired ?? 0}</b>. ` +
+    `Нажмите на строку, чтобы открыть стратегию целиком: идея, все проверки, кривая капитала и сделки на графике.`;
+  $("#rows").innerHTML = rows.length ? rows.map((r) => {
+    const cls = LIVE.includes(r.stage) ? "live" : WAIT.includes(r.stage) ? "wait" : "off";
+    const tags = (r.benchmark ? `<span class="tag">эталон</span>` : "") + (r.autopilot ? `<span class="tag">автопоиск</span>` : "") +
+                 (r.id.startsWith("fw-") ? `<span class="tag">доказана форвардом</span>` : "");
+    return `<tr data-id="${esc(r.id)}"><td class="name"><b>${esc(r.title)}${tags}</b><small>${esc(r.timeframe)} · ${esc(r.id)}</small></td>
+      <td><span class="pill ${cls}">${esc(r.status)}</span></td>
+      <td class="hide-m">${esc(r.pairs.slice(0, 5).map(coin).join(", "))}${r.pairs.length > 5 ? ` +${r.pairs.length - 5}` : ""}</td>
+      <td class="r num">${r.research.trades ?? "—"}</td><td class="r num">${pf(r.research.pf)}</td><td class="r num">${r.research.sharpe == null ? "—" : nf(r.research.sharpe, 2)}</td>
+      <td class="r num">${r.forward.trades || "—"}</td><td class="r num">${pf(r.forward.pf)}</td><td class="r num">${r.forward.pnl_pct == null ? "—" : sg(r.forward.pnl_pct, 2, "%")}</td>
+      <td class="r num">${r.demo.trades || "—"}</td><td class="r num">${r.demo.trades ? pf(r.demo.pf) : "—"}</td><td class="r num">${r.demo.trades ? sg(r.demo.pnl, 2, " $") : "—"}</td></tr>`;
+  }).join("") : `<tr><td colspan="12" class="empty">Здесь пока пусто.</td></tr>`;
+  $("#cards").innerHTML = rows.length ? rows.map((r) => {
+    const cls = LIVE.includes(r.stage) ? "live" : WAIT.includes(r.stage) ? "wait" : "off";
+    return `<div class="sc" data-id="${esc(r.id)}"><div class="top"><div class="name"><b>${esc(r.title)}${r.benchmark ? `<span class="tag">эталон</span>` : ""}</b>
+        <small>${esc(r.timeframe)} · ${esc(r.pairs.slice(0, 4).map(coin).join(", "))}${r.pairs.length > 4 ? ` +${r.pairs.length - 4}` : ""}</small></div>
+        <span class="pill ${cls}">${esc(r.status)}</span></div>
+      <div class="three"><div><b>История</b>${r.research.trades ?? "—"} сд. · PF ${pf(r.research.pf)}</div>
+        <div><b>Форвард</b>${r.forward.trades ? `${r.forward.trades} сд. · ${sg(r.forward.pnl_pct, 1, "%")}` : "—"}</div>
+        <div><b>Демо</b>${r.demo.trades ? `${r.demo.trades} сд. · ${sg(r.demo.pnl, 1, "$")}` : "—"}</div></div></div>`;
+  }).join("") : `<div class="empty">Здесь пока пусто.</div>`;
+}
+
+// ------------------------------------------------------------------ charts (plain SVG)
+function lineChart(points, h = 160, zero = null) {
+  if (!points || points.length < 2) return `<div class="empty">Недостаточно данных для графика.</div>`;
+  const w = 1000, xs = points.map((p) => p[0]), ys = points.map((p) => p[1]);
+  const x0 = Math.min(...xs), x1 = Math.max(...xs), y0 = Math.min(...ys, zero ?? Infinity), y1 = Math.max(...ys, zero ?? -Infinity);
+  const X = (x) => ((x - x0) / (x1 - x0 || 1)) * (w - 20) + 10, Y = (y) => h - 10 - ((y - y0) / (y1 - y0 || 1)) * (h - 20);
+  const d = points.map((p, i) => `${i ? "L" : "M"}${X(p[0]).toFixed(1)},${Y(p[1]).toFixed(1)}`).join("");
+  const up = ys[ys.length - 1] >= ys[0];
+  return `<svg viewBox="0 0 ${w} ${h}" preserveAspectRatio="none" style="height:${h}px">
+    ${zero != null ? `<line x1="0" x2="${w}" y1="${Y(zero)}" y2="${Y(zero)}" stroke="#2a313b" stroke-dasharray="4 4"/>` : ""}
+    <path d="${d}" fill="none" stroke="${up ? "#2fbf71" : "#ef5350"}" stroke-width="2" vector-effect="non-scaling-stroke"/></svg>`;
+}
+function candleChart(candles, trades, width) {
+  if (!candles.length) return `<div class="empty">Бот сейчас не следит за свечами этой монеты (она не в его списке) — сделки показаны в таблице ниже.</div>`;
+  const w = Math.max(320, Math.round(width || 1000)), h = w < 600 ? 280 : 360, pad = 8, n = candles.length, cw = (w - 2 * pad) / n;
+  const t = candles.map((c) => new Date(c[0]).getTime());
+  let lo = Math.min(...candles.map((c) => +c[3])), hi = Math.max(...candles.map((c) => +c[2]));
+  const vis = trades.filter((x) => new Date(x.close_date || x.open_date).getTime() >= t[0]);
+  for (const x of vis) { const e = +x.close_rate || +x.current_rate || +x.open_rate; lo = Math.min(lo, +x.open_rate, e); hi = Math.max(hi, +x.open_rate, e); }
+  const Y = (v) => pad + (1 - (v - lo) / (hi - lo || 1)) * (h - 2 * pad);
+  const X = (ms) => { let i = t.findIndex((v) => v >= ms); if (i < 0) i = n - 1; return pad + (i + 0.5) * cw; };
+  let s = "";
+  candles.forEach((c, i) => {
+    const [o, hh, l, cl] = [+c[1], +c[2], +c[3], +c[4]], x = pad + (i + 0.5) * cw, col = cl >= o ? "#2fbf71" : "#ef5350";
+    s += `<line x1="${x}" x2="${x}" y1="${Y(hh)}" y2="${Y(l)}" stroke="${col}" stroke-width="1" vector-effect="non-scaling-stroke"/>`;
+    s += `<rect x="${x - cw * 0.35}" width="${Math.max(cw * 0.7, 0.6)}" y="${Math.min(Y(o), Y(cl))}" height="${Math.max(Math.abs(Y(o) - Y(cl)), 0.8)}" fill="${col}"/>`;
+  });
+  for (const x of vis) {
+    const xa = X(new Date(x.open_date).getTime()), ya = Y(+x.open_rate), win = +x.profit_abs >= 0;
+    const tip = `${x.is_short ? "Шорт" : "Лонг"} ${coin(x.pair)}: вход ${dt(x.open_date)} по ${x.open_rate}` +
+                (x.close_date ? `, выход ${dt(x.close_date)} по ${x.close_rate} (${RS[x.exit_reason] || x.exit_reason || ""}), результат ${nf(x.profit_abs, 2)} $`
+                              : `, позиция открыта, сейчас ${nf(x.profit_abs, 2)} $`);
+    if (!x.close_date && x.current_rate) {
+      const xb = pad + (n - 0.5) * cw, yb = Y(+x.current_rate);
+      s += `<line x1="${xa}" y1="${ya}" x2="${xb}" y2="${yb}" stroke="#f0b429" stroke-width="2" stroke-dasharray="2 3" vector-effect="non-scaling-stroke" data-tip="${esc(tip)}" style="cursor:pointer"><title>${esc(tip)}</title></line>`;
+    }
+    if (x.close_date) {
+      const xb = X(new Date(x.close_date).getTime()), yb = Y(+x.close_rate);
+      s += `<line x1="${xa}" y1="${ya}" x2="${xb}" y2="${yb}" stroke="${win ? "#2fbf71" : "#ef5350"}" stroke-width="2" stroke-dasharray="5 3" vector-effect="non-scaling-stroke" data-tip="${esc(tip)}" style="cursor:pointer"><title>${esc(tip)}</title></line>`;
+      s += `<circle cx="${xb}" cy="${yb}" r="5" fill="${win ? "#2fbf71" : "#ef5350"}" stroke="#0f1216" stroke-width="1.5" data-tip="${esc(tip)}" style="cursor:pointer"><title>${esc(tip)}</title></circle>`;
+    }
+    const tri = x.is_short ? `${xa - 7},${ya - 9} ${xa + 7},${ya - 9} ${xa},${ya}` : `${xa - 7},${ya + 9} ${xa + 7},${ya + 9} ${xa},${ya}`;
+    s += `<polygon points="${tri}" fill="${x.is_short ? "#ef5350" : "#2fbf71"}" stroke="#fff" stroke-width="1" data-tip="${esc(tip)}" style="cursor:pointer"><title>${esc(tip)}</title></polygon>`;
+  }
+  return `<svg viewBox="0 0 ${w} ${h}" style="height:${h}px;background:#13171c;border-radius:8px">${s}</svg>
+    <div class="dim" style="font-size:12px;margin-top:6px">▲ вход в лонг · ▼ вход в шорт · ● выход (зелёный — прибыль, красный — убыток) · жёлтый пунктир — позиция ещё открыта. Нажмите на отметку — подробности. Свечи: ${esc(candles.length)} шт., с ${dt(candles[0][0])}.</div>
+    <div id="tip" style="margin-top:6px;font-size:13px;min-height:1.2em"></div>`;
+}
+
+// ------------------------------------------------------------------ detail
+async function openStrategy(id) {
+  SEL = id; document.body.classList.add("open"); $("#dTitle").textContent = "Загрузка…"; $("#dBody").innerHTML = "";
+  try { DET = await api(`/api/explorer/${encodeURIComponent(id)}`); } catch (e) { $("#dBody").innerHTML = `<div class="empty">Не удалось загрузить (${esc(e.message)}).</div>`; return; }
+  const pairs = [...new Set([...(DET.trades || []).map((t) => t.pair), ...(DET.row.pairs || [])])];
+  PAIR = pairs[0] || null;
+  renderDetail(pairs);
+  if (PAIR) loadCandles();
+}
+function box(title, rows) {
+  return `<div class="card"><h3>${title}</h3><div class="kv">${rows.map(([k, v]) => `<span>${k}</span><span class="num">${v}</span>`).join("")}</div></div>`;
+}
+function renderDetail(pairs) {
+  const d = DET, r = d.row, c = d.card || {}, rs = d.research || {}, oos = rs.oos || {}, mk = rs.market || {};
+  $("#dTitle").innerHTML = `${esc(r.title)} <span class="pill ${LIVE.includes(r.stage) ? "live" : WAIT.includes(r.stage) ? "wait" : "off"}">${esc(r.status)}</span>`;
+  const tr = d.trades || [], closed = tr.filter((t) => t.close_date);
+  const fw = d.forward_trades || [];
+  let cum = 0; const fwLine = fw.slice().sort((a, b) => (a[0] > b[0] ? 1 : -1)).map((t, i) => [i, (cum += +t[1]) * 100]);
+  const curve = (c.curve || []).map((p) => [typeof p[0] === "string" ? new Date(p[0]).getTime() : +p[0], +p[1]]);
+  const gv = (v) => v == null ? "" : Number.isInteger(+v) ? String(v) : nf(v, Math.abs(+v) >= 10 ? 1 : 2);
+  const checks = (d.gates || []).map((g) => `<div><i>${g.pass ? "✅" : "❌"}</i><span>${esc(g.name)}</span><span class="v">${g.value == null ? (g.pass ? "да" : "нет") : `${gv(g.value)} (нужно ${esc(g.cmp || "≥")} ${gv(g.need)})`}</span></div>`).join("");
+  const params = Object.entries(c.params || d.params || {}).map(([k, v]) => `<span>${esc(k)}</span><span>${esc(typeof v === "number" ? +v.toFixed(4) : v)}</span>`).join("");
+  $("#dBody").innerHTML = `
+    <div class="card">
+      <div style="font-size:15px;margin-bottom:6px">${esc(c.idea || r.variant)}</div>
+      ${c.exits ? `<div class="dim" style="margin-bottom:6px">Выходы: ${esc(c.exits)}</div>` : ""}
+      <div class="dim">Таймфрейм ${esc(r.timeframe)} · id ${esc(r.id)} · статус с ${dt(r.since)}</div>
+      ${r.why ? `<div style="margin-top:8px"><b>Почему здесь:</b> ${esc(r.why)}</div>` : ""}
+    </div>
+    <div class="grid3">
+      ${box("Исследование (история, вне выборки)", [["сделок", oos.trades ?? "—"], ["profit factor", pf(oos.profit_factor)], ["Шарп", oos.sharpe == null ? "—" : nf(oos.sharpe, 2)],
+        ["доходность", oos.total_return == null ? "—" : sg(oos.total_return * 100, 1, "%")], ["макс. просадка", oos.max_drawdown == null ? "—" : nf(oos.max_drawdown * 100, 1) + "%"],
+        ["альфа к BTC", mk.alpha_ann == null ? "—" : `${sg(mk.alpha_ann * 100, 1, "%/год")} (t ${nf(mk.alpha_t, 1)})`],
+        ["чистая проверка", rs.clean_oos === false ? "нет — нужна проверка форвардом" : "да"]])}
+      ${box("Форвард-тест (данные после заморозки)", [["сделок", r.forward.trades || 0], ["profit factor", pf(r.forward.pf)], ["итог", r.forward.pnl_pct == null ? "—" : sg(r.forward.pnl_pct, 2, "%")],
+        ["доля прибыльных", r.forward.win_rate == null ? "—" : nf(r.forward.win_rate * 100, 0) + "%"], ["вероятность, что в плюсе", r.forward.p_pos == null ? "—" : nf(r.forward.p_pos * 100, 0) + "%"]])}
+      ${box("Демо-счёт (настоящие сделки)", [["сделок", r.demo.trades || 0], ["profit factor", pf(r.demo.pf)], ["прибыль с поправкой", r.demo.trades ? sg(r.demo.pnl, 2, " $") : "—"],
+        ["доля прибыльных", r.demo.win_rate == null ? "—" : nf(r.demo.win_rate * 100, 0) + "%"],
+        ["альфа к BTC", r.demo.alpha_ann == null ? "—" : `${sg(r.demo.alpha_ann * 100, 1, "%/год")} (β ${nf(r.demo.beta, 2)})`]])}
+    </div>
+    <div class="card"><h3>Сделки на графике</h3>
+      <div class="chips" id="pairChips">${pairs.map((p) => `<button data-p="${esc(p)}" class="${p === PAIR ? "on" : ""}">${esc(coin(p))}${tr.some((t) => t.pair === p) ? ` · ${tr.filter((t) => t.pair === p).length}` : ""}</button>`).join("") || `<span class="dim">Монет нет.</span>`}</div>
+      <div id="chart" style="margin-top:10px"><div class="empty">Загрузка свечей…</div></div>
+    </div>
+    <div class="card"><h3>Все сделки на демо-счёте (${tr.length}${tr.length - closed.length ? `, из них открыто ${tr.length - closed.length}` : ""})</h3>${tr.length ? `<div class="wrap"><table>
+      <thead><tr><th>Монета</th><th>Сторона</th><th>Вход</th><th class="r">цена</th><th>Выход</th><th class="r">цена</th><th class="r">результат</th><th>Причина</th></tr></thead>
+      <tbody>${tr.slice().reverse().map((t) => `<tr data-p="${esc(t.pair)}"><td>${esc(coin(t.pair))}</td><td>${t.is_short ? "шорт" : "лонг"}</td><td>${dt(t.open_date)}</td><td class="r num">${esc(t.open_rate)}</td>
+        <td>${t.close_date ? dt(t.close_date) : "открыта"}</td><td class="r num">${esc(t.close_rate ?? "—")}</td><td class="r num">${t.close_date ? sg(t.profit_abs, 2, " $") : t.profit_abs == null ? "—" : `<span class="dim">сейчас</span> ${sg(t.profit_abs, 2, " $")}`}</td><td>${esc(RS[t.exit_reason] || t.exit_reason || "")}</td></tr>`).join("")}</tbody></table></div>`
+      : `<div class="empty">Сделок на демо пока нет — стратегия ждёт своей точки входа${LIVE.includes(r.stage) ? "" : " или своей очереди"}.</div>`}
+      ${closed.length ? `<div class="dim" style="margin-top:8px">Закрыто ${closed.length}, в плюс ${closed.filter((t) => +t.profit_abs > 0).length}, сумма ${sg(closed.reduce((a, t) => a + +t.profit_abs, 0), 2, " $")} (без поправки на проскальзывание).</div>` : ""}
+    </div>
+    <div class="grid21">
+      <div class="card"><h3>Кривая капитала в исследовании (вне выборки)</h3>${lineChart(curve)}
+        ${(c.folds || []).length ? `<div class="chips" style="margin-top:8px">${c.folds.map((f, i) => `<span class="pill ${(f.ret ?? 0) > 0 ? "live" : "off"}">окно ${i + 1}: ${f.ret == null ? "—" : sg(f.ret * 100, 1, "%")}</span>`).join("")}</div>` : ""}</div>
+      <div class="card"><h3>Форвард-тест: накопленный итог, % (${fw.length} сделок)</h3>${lineChart(fwLine, 160, 0)}</div>
+    </div>
+    <div class="grid2">
+      <div class="card"><h3>Проверки исследования</h3><div class="checks">${checks || `<div class="dim">Проверок нет (внешняя или импортированная стратегия).</div>`}</div></div>
+      <div class="card"><h3>Параметры</h3><div class="kv">${params || `<span class="dim">—</span>`}</div></div>
+    </div>
+    <div class="card"><h3>История статусов</h3>${(d.history || []).slice().reverse().map((h) => `<div style="padding:3px 0"><span class="dim">${dt(h.ts)}</span> → <b>${esc(h.to)}</b> — ${esc(h.reason || "")}</div>`).join("") || `<div class="dim">—</div>`}</div>`;
+  for (const b of document.querySelectorAll("#pairChips button")) b.onclick = () => { PAIR = b.dataset.p; renderDetail(pairs); loadCandles(); };
+  for (const row of document.querySelectorAll("#dBody tbody tr[data-p]")) row.onclick = () => { PAIR = row.dataset.p; renderDetail(pairs); loadCandles(); };
+}
+async function loadCandles() {
+  const pair = PAIR, tf = DET.row.timeframe || "1h";
+  let data = {candles: []};
+  const width = ($("#chart") || {}).clientWidth || 1000, limit = Math.max(100, Math.min(400, Math.floor(width / 3)));  // ≥3 px per candle
+  try { data = await api(`/api/explorer/candles?pair=${encodeURIComponent(pair)}&tf=${encodeURIComponent(tf)}&limit=${limit}`); } catch (e) { /* shown as empty */ }
+  if (pair !== PAIR) return;
+  const el = $("#chart");
+  if (el) el.innerHTML = (data.timeframe && data.timeframe !== tf ? `<div class="dim" style="font-size:12px;margin-bottom:6px">Свечи ${esc(data.timeframe)} (таймфрейм ${esc(tf)} недоступен).</div>` : "") +
+                         candleChart(data.candles || [], (DET.trades || []).filter((t) => t.pair === pair), width);
+}
+document.addEventListener("click", (e) => {  // tap on a trade marker (phones have no hover)
+  const m = e.target.closest && e.target.closest("#chart [data-tip]"); const tip = $("#tip");
+  if (m && tip) tip.textContent = m.dataset.tip;
+});
+function closeDrawer() { document.body.classList.remove("open"); SEL = null; }
+
+// ------------------------------------------------------------------ wiring
+for (const b of document.querySelectorAll("#seg button")) b.onclick = () => {
+  for (const x of document.querySelectorAll("#seg button")) x.classList.toggle("on", x === b);
+  const was = VIEW; VIEW = b.dataset.v; if ((was === "retired") !== (VIEW === "retired")) loadList(); else renderList();
+};
+$("#q").oninput = renderList; $("#sort").onchange = renderList;
+$("#rows").onclick = (e) => { const tr = e.target.closest("tr[data-id]"); if (tr) openStrategy(tr.dataset.id); };
+$("#cards").onclick = (e) => { const c = e.target.closest(".sc[data-id]"); if (c) openStrategy(c.dataset.id); };
+$("#dClose").onclick = closeDrawer; $("#shade").onclick = closeDrawer;
+document.addEventListener("keydown", (e) => { if (e.key === "Escape") closeDrawer(); });
+loadList();
+setInterval(() => { if (!document.hidden) loadList(); }, 60000);  // a hidden tab does not poll (Railway bills egress)
+window.__ready = true;
+</script>
+</body>
+</html>

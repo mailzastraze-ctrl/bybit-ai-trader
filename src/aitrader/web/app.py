@@ -30,10 +30,10 @@ class _ApiGZip:
     Static assets (already-compressed models/images, cached by the browser) and the registry
     backup (already gzip, fetched with plain curl) pass through untouched."""
 
-    def __init__(self, app_):
+    def __init__(self, app):  # noqa: A002 – Starlette passes the wrapped app as `app`
         from starlette.middleware.gzip import GZipMiddleware
-        self.plain = app_
-        self.gzip = GZipMiddleware(app_, minimum_size=1024)
+        self.plain = app
+        self.gzip = GZipMiddleware(app, minimum_size=1024)
 
     async def __call__(self, scope, receive, send):
         path = scope.get("path", "") if scope.get("type") == "http" else ""
@@ -138,6 +138,48 @@ def trades(limit: int = 300) -> dict:
                    "FROM live_trades ORDER BY close_date DESC LIMIT ?", (limit,))
     c = ft()
     return {"closed": rows, "open": _safe(c.status, []) if c.ping() else []}
+
+
+@app.get("/explorer", dependencies=[Depends(auth)])
+def explorer_page() -> FileResponse:
+    return FileResponse(STATIC / "explorer.html", headers={"Cache-Control": "no-store"})
+
+
+@app.get("/api/explorer", dependencies=[Depends(auth)])
+def explorer_list(show: str = "active") -> dict:
+    from aitrader.web import explorer
+    return explorer.listing(reg(), show)
+
+
+@app.get("/api/explorer/candles", dependencies=[Depends(auth)])
+def explorer_candles(pair: str, tf: str = "1h", limit: int = 300) -> dict:
+    """Candles for one coin on the strategy's own timeframe, so the demo trades can be drawn on
+    the prices they were made on. The bot keeps only its base 15m timeframe analysed, so other
+    timeframes are built from its 15m candles."""
+    from aitrader.web import explorer
+    c = ft()
+    n = min(max(limit, 20), 1000)
+    used, built = tf, False
+    rows = explorer.candle_rows(_safe(lambda: c.pair_candles(pair, tf, n), {}))
+    if not rows and tf != "15m":
+        rows = explorer.candle_rows(_safe(lambda: c.pair_candles(pair, "15m", 1500), {}))
+        if explorer.TF_MIN.get(tf, 0) > 15:
+            rows, built = explorer.resample(rows, explorer.TF_MIN[tf]), True
+        else:
+            used = "15m"
+    return {"pair": pair, "timeframe": used, "from_15m": built, "candles": rows[-n:]}
+
+
+@app.get("/api/explorer/{sid}", dependencies=[Depends(auth)])
+def explorer_detail(sid: str) -> dict:
+    from aitrader.web import explorer
+    d = explorer.detail(reg(), sid)
+    if d is None:
+        raise HTTPException(404, "no such strategy")
+    c = ft()
+    if c.ping():
+        d["trades"] += explorer.open_trades(_safe(c.status, []), sid)
+    return d
 
 
 @app.get("/api/strategies", dependencies=[Depends(auth)])

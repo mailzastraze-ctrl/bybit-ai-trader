@@ -77,7 +77,8 @@ def evaluate_gates(g: Gates, m: dict) -> tuple[str, dict]:
     """Return ("validated" | "exploratory" | "rejected", per-gate results).
 
     `m` keys: oos (summary dict), stress (summary), wfe, robust_frac, mc (dict), dsr;
-    optional fold_pos, clean_oos (False = test windows were seen when the configuration was chosen).
+    optional fold_pos, clean_oos (False = test windows were seen when the configuration was chosen),
+    alpha/alpha_t (OOS alpha over BTC; only validation needs it, exploration does not).
     """
     oos, stress, mc = m["oos"], m["stress"], m["mc"]
     checks = {
@@ -98,6 +99,11 @@ def evaluate_gates(g: Gates, m: dict) -> tuple[str, dict]:
     fp = m.get("fold_pos")
     if fp is not None:  # every walk-forward slice is its own out-of-sample test
         checks["fold_consistency"] = (fp, g.min_fold_consistency, fp >= g.min_fold_consistency)
+    a_t = m.get("alpha_t")
+    if a_t is not None:
+        # the OOS profit must not be just the market's move (a short book in a falling year)
+        ok = a_t >= g.min_alpha_t and (m.get("alpha") or 0.0) > 0
+        checks["market_alpha"] = (a_t, g.min_alpha_t, ok)
     if m.get("clean_oos") is False:
         # the configuration was chosen on data that overlaps these test windows (screener
         # survivors, hand-found external configs): the walk-forward is a replication with real

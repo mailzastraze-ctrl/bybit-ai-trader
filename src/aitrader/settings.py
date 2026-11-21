@@ -25,7 +25,7 @@ def _i(name: str, default: int) -> int:
 class Gates:
     """Validation thresholds a candidate must pass (all on walk-forward out-of-sample data)."""
 
-    min_trades: int = 25
+    min_trades: int = 40  # "many trades" (was 25; owner's criterion, 2026-11-21)
     min_profit_factor: float = 1.15
     min_sharpe: float = 0.75
     max_drawdown: float = 0.20
@@ -35,6 +35,7 @@ class Gates:
     min_mc_prob_profit: float = 0.80  # Monte-Carlo bootstrap probability of profit
     min_dsr: float = 0.80  # Deflated Sharpe Ratio probability
     min_fold_consistency: float = 0.75  # share of walk-forward test slices that are profitable
+    min_alpha_t: float = 1.0  # OOS alpha over BTC (Newey–West t): the profit is not just market beta
     # relaxed gates for the exploration (tiny-risk) lane
     explore_min_trades: int = 15
     explore_min_pf: float = 1.05
@@ -52,10 +53,16 @@ class Lifecycle:
     # Demo account → evidence first (owner, 2026-11-20): run every promising strategy at
     # tiny risk in parallel so trade statistics accumulate fast; capital-at-risk is bounded
     # by the per-trade risk (0.1% exploration) and the portfolio open-risk cap, not by slots.
-    max_production: int = 6
-    max_incubation: int = 8
+    # Every strategy that has proven itself trades at the same time on the coins it passed on
+    # (owner, 2026-11-21): slots for proven stages are wide, their risk is scaled to a shared
+    # budget (lifecycle.proven_scale) and unproven exploration cannot crowd them out (ftbase).
+    max_production: int = 20
+    max_incubation: int = 20
     max_exploration: int = 24
-    max_family_sleeves: int = 6    # deployed sleeves per strategy family
+    max_family_sleeves: int = 12   # deployed sleeves per strategy family …
+    max_family_per_coin: int = 2   # … and at most this many of one family on the same coin
+    proven_risk_budget: float = 0.05  # open risk at stops for proven sleeves if half their coins are in a trade
+    rotate_idle_days: float = 7.0  # an exploration sleeve with < 3 trades after this long can be rotated out
     max_pairs_per_sleeve: int = 15  # an autopilot strategy trades every top coin it passed on
     max_sleeves_per_pair: int = 4  # independent strategies that may trade the same pair
     max_whitelist: int = 45        # pairs the bot follows (Hobby plan memory)
@@ -71,6 +78,7 @@ class Lifecycle:
     production_retire_pf: float = 0.85
     sleeve_max_dd: float = 0.15  # drawdown of sleeve PnL relative to equity
     account_kill_dd: float = 0.25  # account drawdown that pauses all entries
+    daily_loss_limit: float = 0.03  # loss vs the UTC day's first equity reading that pauses entries until 00:00 UTC
     kill_cooldown_hours: float = 48.0
 
 

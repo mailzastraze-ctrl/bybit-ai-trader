@@ -270,21 +270,20 @@ class Lifecycle:
     def _fill_slots(self) -> None:
         lc = self.lc
         n_inc = len(self.reg.strategies(("incubation",)))
-        for cand in self.reg.strategies(("validated",)):
+        for cand in sorted(self.reg.strategies(("validated",)), key=lambda c: self.evidence_rank(c), reverse=True):
             if n_inc >= lc.max_incubation:
                 break
-            if not self.tradable_tf(cand) or self._family_full(cand["family"]):
+            if not self.tradable_tf(cand) or self._family_full(cand, proven=True):
                 continue
             self.reg.set_stage(cand["id"], "incubation", "validated by research gates → forward test")
             n_inc += 1
         n_exp = len(self.reg.strategies(("exploration",)))
-        # autopilot strategies (passed the Strategy Lab checks AND the walk-forward) go first
-        exploratory = sorted(self.reg.strategies(("exploratory",)),
-                             key=lambda c: (not self.autopilot(c), -(c.get("score") or 0)))
+        # queue by evidence: forward-proven first, then autopilot, then research score
+        exploratory = sorted(self.reg.strategies(("exploratory",)), key=lambda c: self.evidence_rank(c), reverse=True)
         for cand in exploratory:
-            if not self.tradable_tf(cand) or self._family_full(cand["family"]):
+            if not self.tradable_tf(cand) or self._family_full(cand):
                 continue
-            if n_exp >= lc.max_exploration and not self._displace_placeholder(cand):
+            if n_exp >= lc.max_exploration and not self._displace_for(cand):
                 break
             self.reg.set_stage(cand["id"], "exploration", "relaxed gates passed → tiny-risk live experiment")
             n_exp = len(self.reg.strategies(("exploration",)))
@@ -292,7 +291,7 @@ class Lifecycle:
         # (profitable out-of-sample but failed a strict gate) so live evidence keeps flowing.
         if n_exp < lc.max_exploration:
             for cand in self.near_misses(lc.max_exploration - n_exp):
-                if self._family_full(cand["family"]):
+                if self._family_full(cand):
                     continue
                 self.reg.set_stage(cand["id"], "exploration",
                                    "always-on exploration: near-miss (positive OOS, failed a strict gate)")
@@ -310,32 +309,79 @@ class Lifecycle:
         look-ahead, so every research timeframe can trade."""
         return Lifecycle.strategy_tf(st) in BOT_TIMEFRAMES
 
-    def _family_full(self, family: str, cap: int | None = None) -> bool:
-        """Diversification: at most `max_family_sleeves` deployed sleeves per strategy family."""
+    def _family_full(self, cand, cap: int | None = None, proven: bool = False) -> bool:
+        """Diversification: at most `max_family_per_coin` sleeves of one family on the same coin;
+        for unproven exploration also at most `max_family_sleeves` per family in total. Proven
+        strategies of one family on *different* coins all trade (each proved itself on its own
+        coin); their combined risk is handled by the proven budget and the side cap."""
+        family = cand["family"] if isinstance(cand, dict) else cand
         cap = cap or self.lc.max_family_sleeves
-        return sum(1 for r in self.reg.strategies(DEPLOYED)
-                   if r["family"] == family and not str(r["id"]).startswith(("boot-", "rnd-"))) >= cap
+        mine = [r for r in self.reg.strategies(DEPLOYED)
+                if r["family"] == family and not str(r["id"]).startswith(("boot-", "rnd-"))]
+        if not proven and sum(1 for r in mine if r["stage"] == "exploration") >= cap:
+            return True
+        if isinstance(cand, dict) and cand.get("pairs"):  # every one of its coins already taken by the family
+            return all(sum(1 for r in mine if p in (r.get("pairs") or [])) >= self.lc.max_family_per_coin
+                       for p in cand["pairs"])
+        return False
+
+    # ------------------------------------------------------------------ rotation by evidence
+    @staticmethod
+    def _near_miss(st: dict) -> bool:
+        return any("near-miss" in str(h.get("reason", "")) for h in (st.get("history") or []))
+
+    def evidence_rank(self, st: dict) -> tuple:
+        """How much a strategy has shown, best first: 3 forward-proven on unseen data, 2 found by
+        the autopilot (seven checks + decoys), 1 research candidate, 0 near-miss/placeholder."""
+        o = st.get("oos") or {}
+        fw = o.get("forward") or {}
+        if str(st["id"]).startswith("fw-") or ((fw.get("trades") or 0) >= 20 and (fw.get("pf") or 0) >= 1.3):
+            cls = 3
+        elif self.autopilot(st):
+            cls = 2
+        elif str(st["id"]).startswith(("boot-", "rnd-")) or self._near_miss(st):
+            cls = 0
+        else:
+            cls = 1
+        return (cls, float(st.get("score") or 0.0))
+
+    def _displace_for(self, cand: dict) -> bool:
+        """Rotation by evidence. A full exploration lane makes room for a stronger candidate by
+        moving out a sleeve that holds its slot without evidence: a placeholder, a sleeve with
+        < 3 trades after `rotate_idle_days`, or (for an autopilot candidate) an ordinary sleeve
+        without a live edge. Sleeves that earned their place live (≥ 10 trades, PF ≥ 1.1) are
+        never moved. A rotated research candidate goes back to the queue, it did not fail."""
+        mine = self.evidence_rank(cand)
+        victims = []
+        for r in self.reg.strategies(("exploration",)):
+            live = r.get("live") or {}
+            n = int(live.get("trades", 0) or 0)
+            if n >= 10 and live.get("profit_factor", 0) >= 1.1:
+                continue  # earned its place with live evidence
+            placeholder = str(r["id"]).startswith(("boot-", "rnd-"))
+            age = _days_since(r.get("stage_since"))
+            idle = age >= self.lc.rotate_idle_days and n < 3
+            autopilot_rule = self.autopilot(cand) and not self.autopilot(r) and n < 10
+            if not (placeholder or idle or autopilot_rule):
+                continue
+            if not placeholder and self.evidence_rank(r) >= mine:
+                continue  # only a stronger candidate may take the slot
+            victims.append((0 if placeholder else 1, n, -age, r))
+        if not victims:
+            return False
+        victims.sort(key=lambda v: v[:3])
+        r = victims[0][3]
+        n = int((r.get("live") or {}).get("trades", 0) or 0)
+        why = f"rotated out: {n} trades in {_days_since(r.get('stage_since')):.0f} days, slot given to {cand['id']}"
+        if str(r["id"]).startswith(("boot-", "rnd-")) or self._near_miss(r):
+            self.reg.set_stage(r["id"], "retired", f"superseded by research candidate {cand['id']}" if not self._near_miss(r) else why)
+        else:
+            self.reg.set_stage(r["id"], "exploratory", why + " – back in the queue")
+        return True
 
     @staticmethod
     def autopilot(st: dict) -> bool:
         return bool((st.get("oos") or {}).get("autopilot"))
-
-    def _displace_placeholder(self, cand: dict) -> bool:
-        """Research-backed candidates replace unvalidated placeholders (bootstrap defaults,
-        random explorers) unless the placeholder has already shown a live edge. An autopilot
-        candidate also replaces ordinary exploration sleeves (near-misses, generic exploratory
-        finds) that have not earned their place live – the demo trades the best it has."""
-        mine = self.autopilot(cand)
-        for r in sorted(self.reg.strategies(("exploration",)), key=lambda x: x.get("stage_since") or ""):
-            placeholder = str(r["id"]).startswith("boot-") or str(r["id"]).startswith("rnd-")
-            if not (placeholder or (mine and not self.autopilot(r))):
-                continue
-            live = r.get("live") or {}
-            if live.get("trades", 0) >= 10 and live.get("profit_factor", 0) >= 1.1:
-                continue  # earned its place with live evidence
-            self.reg.set_stage(r["id"], "retired", f"superseded by research candidate {cand['id']}")
-            return True
-        return False
 
     def near_misses(self, k: int, days: int = 30) -> list[dict]:
         cutoff = iso(utcnow() - timedelta(days=days))
@@ -393,6 +439,23 @@ class Lifecycle:
         self.reg.kv_set("risk_scale", {"scale": round(scale, 3), "daily_vol": round(vol, 5), "ts": iso()})
         return scale
 
+    def proven_scale(self, rows: list[dict], concurrency: float = 0.5) -> float:
+        """All proven strategies hunt for entries at the same time, each on its own coins. Their
+        per-trade risk is scaled so that, with half of their coins in a trade at once, the open
+        risk stays within `proven_risk_budget` – no strategy is shut out because others entered
+        first. With a handful of proven sleeves this is 1.0 (nothing changes); it only shrinks
+        sizes when many strategies have proven themselves."""
+        proven = [r for r in rows if r["stage"] in ("production", "incubation", "eligible")]
+        potential = sum(self.risk_for(r["stage"]) * self.risk_multiplier(r)
+                        * min(len(r.get("pairs") or []), self.lc.max_pairs_per_sleeve) for r in proven)
+        if potential <= 0:
+            return 1.0
+        k = min(1.0, self.lc.proven_risk_budget / (concurrency * potential))
+        if proven:
+            self.reg.kv_set("proven_scale", {"scale": round(k, 3), "sleeves": len(proven),
+                                             "potential_risk": round(potential, 4), "ts": iso()})
+        return k
+
     def correlation_penalty(self, ids: list[str], max_corr: float = 0.7, min_days: int = 20) -> dict[str, float]:
         """Two live sleeves whose daily P&L moves together are one bet: halve the weaker."""
         import pandas as pd
@@ -422,6 +485,7 @@ class Lifecycle:
     def build_manifest(self, open_trades: list[dict], excluded: set[str], paused: bool) -> Manifest:
         rows = self.reg.strategies(DEPLOYED)
         scale = self.portfolio_scale()
+        pscale = self.proven_scale(rows)
         penalty = self.correlation_penalty([r["id"] for r in rows if r["stage"] in ("production", "incubation", "eligible")])
         rows.sort(key=lambda r: (-STAGE_PRIORITY.get("incubation" if r["stage"] == "eligible" else r["stage"], 0),
                                  -(r.get("score") or 0)))
@@ -449,7 +513,7 @@ class Lifecycle:
             sleeves.append(Sleeve(id=r["id"], family=r["family"], params=r["params"], pairs=mine,
                                   stage=stage,
                                   risk=round(self.risk_for(r["stage"]) * scale * penalty.get(r["id"], 1.0)
-                                             * (self.risk_multiplier(r)
+                                             * (self.risk_multiplier(r) * pscale
                                                 if r["stage"] in ("production", "incubation", "eligible") else 1.0), 6),
                                   leverage=self.lc.leverage, sides=r.get("sides") or ["long", "short"],
                                   score=float(r.get("score") or 0.0), timeframe=self.strategy_tf(r)))
