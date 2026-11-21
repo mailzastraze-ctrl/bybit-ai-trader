@@ -1,0 +1,17 @@
+{
+  "created": "2026-11-20T22:34:10.354Z",
+  "engine": "Bybit Strategy Lab engine.js (owner)",
+  "evaluated": 240771,
+  "expected_false": 0,
+  "fdr_q": 0.2,
+  "holdout_tests": 1191,
+  "n_survivors": 0,
+  "rules": {
+    "holdout": "last 40% (unseen by the search)",
+    "pass": "holdout trades>=15, PF>=1.15, return>0, equity R\u00b2>=0.5, last 90 days>=0, max DD<30%, and significant after Benjamini\u2013Hochberg over all holdout tests (q=0.2)",
+    "search": "first 60% of history"
+  },
+  "seconds": 131,
+  "series": 60,
+  "top": []
+}
