@@ -501,8 +501,11 @@ class Lifecycle:
         scale = self.portfolio_scale()
         pscale = self.proven_scale(rows)
         penalty = self.correlation_penalty([r["id"] for r in rows if r["stage"] in ("production", "incubation", "eligible")])
+        # within a stage the strongest evidence gets its coins first (forward-proven, autopilot and
+        # the owner's systems before plain research candidates), so a crowded coin (≤ 4 strategies)
+        # or a full whitelist never leaves the best of them without anything to trade
         rows.sort(key=lambda r: (-STAGE_PRIORITY.get("incubation" if r["stage"] == "eligible" else r["stage"], 0),
-                                 -(r.get("score") or 0)))
+                                 tuple(-x for x in self.evidence_rank(r))))
         # Pairs may be shared by up to `max_sleeves_per_pair` independent strategies (more
         # signals, more forward evidence); the whitelist is capped to protect the bot's memory.
         per_pair: dict[str, int] = {}
