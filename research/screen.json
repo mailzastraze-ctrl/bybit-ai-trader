@@ -1,17 +1,19 @@
 {
-  "created": "2026-11-21T06:38:01.436Z",
+  "created": "2026-11-21T09:35:13.573Z",
   "engine": "Bybit Strategy Lab engine.js (owner)",
-  "evaluated": 256803,
+  "evaluated": 211328,
   "expected_false": 0,
   "fdr_q": 0.2,
-  "holdout_tests": 1251,
+  "holdout_tests": 18,
+  "mode": "pooled",
   "n_survivors": 0,
   "rules": {
     "holdout": "last 40% (unseen by the search)",
-    "pass": "holdout trades>=15, PF>=1.15, return>0, equity R\u00b2>=0.5, last 90 days>=0, max DD<30%, and significant after Benjamini\u2013Hochberg over all holdout tests (q=0.2)",
+    "pass": "one config on all coins of a timeframe: holdout trades>=90, PF>=1.1, mean return>0, profitable on >=55% of coins, pooled equity R\u00b2>=0.5, last 90 days>=0, and significant after Benjamini\u2013Hochberg over all holdout tests (q=0.2)",
     "search": "first 60% of history"
   },
-  "seconds": 183,
+  "seconds": 208,
   "series": 64,
+  "tasks": 20,
   "top": []
 }
