@@ -155,13 +155,14 @@ def merge(dirs: list[Path], batch_id: str, ledger: dict | None = None) -> dict:
             "experiments_full": full,
             "experiments": [{k: e.get(k) for k in ("id", "batch_verdict", "batch_dsr", "error")}
                             | {"family": e.get("result", {}).get("variant", e["spec"]["family"]), "pairs": e["spec"]["pairs"],
+                               "timeframe": e["spec"].get("timeframe") or "1h",
                                "oos": e.get("result", {}).get("oos"),
                                "gates": e.get("batch_gates")} for e in exps]}
 
 
 def report_md(m: dict) -> str:
     lines = [f"# Research batch {m['batch_id']}", "",
-             f"- Created: {m['created']} · data: **{m['exchange']}** USDT perps (1h) · "
+             f"- Created: {m['created']} · data: **{m['exchange']}** USDT perps (15m + 1h) · "
              f"experiments: {m['n_completed']}/{m['n_experiments']} completed",
              f"- Deflated Sharpe uses N = {m['n_trials_for_dsr']} trials (whole batch).",
              f"- Candidates passing gates: **{len(m['candidates'])}** "
@@ -169,12 +170,13 @@ def report_md(m: dict) -> str:
              f"{sum(c['stage'] == 'exploratory' for c in m['candidates'])} exploratory)", "",
              "All metrics are walk-forward out-of-sample, after fees+slippage; stress = doubled costs. "
              "Imported strategies must still pass forward testing on Bybit Demo before production.", "",
-             "| Experiment | Family | Verdict | OOS trades | PF | Sharpe | Max DD | DSR | Failed gates |",
-             "|---|---|---|---:|---:|---:|---:|---:|---|"]
+             "| Experiment | Family | TF | Verdict | OOS trades | PF | Sharpe | Max DD | DSR | Failed gates |",
+             "|---|---|---|---|---:|---:|---:|---:|---:|---|"]
     for e in m["experiments"]:
         o = e.get("oos") or {}
         failed = ", ".join(k for k, g in (e.get("gates") or {}).items() if not g["pass"]) or ("error" if e.get("error") else "—")
-        lines.append(f"| {e['id']} | {e['family']} | {e.get('batch_verdict') or 'error'} | {o.get('trades', '–')} | "
+        lines.append(f"| {e['id']} | {e['family']} | {e.get('timeframe', '1h')} | {e.get('batch_verdict') or 'error'} | "
+                     f"{o.get('trades', '–')} | "
                      f"{o.get('profit_factor', '–')} | {o.get('sharpe', '–')} | {o.get('max_drawdown', '–')} | "
                      f"{e.get('batch_dsr', '–')} | {failed} |")
     if m["candidates"]:
@@ -422,7 +424,8 @@ def cmd_lab_run(out: Path, job: int, jobs: int, budget_min: float, run_id: str, 
         eid = reg.new_experiment(spec["family"], spec)
         watcher.cur.update(eid=eid, stage="download", epochs=spec.get("epochs"), job=job)
         lab.progress(eid, "download", spec=spec, job=job)
-        log.info("job %d experiment %d: %s %s on %s", job, len(results) + 1, eid, spec["family"], spec["pairs"])
+        log.info("job %d experiment %d: %s %s %s on %s", job, len(results) + 1, eid, spec["family"],
+                 spec.get("timeframe") or "1h", spec["pairs"])
         started, t1 = iso(), time.time()
         try:
             res = pipe.run(eid, spec)

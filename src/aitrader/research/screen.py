@@ -101,8 +101,8 @@ def to_params(sv: dict) -> dict | None:
 
 def survivor_id(sv: dict) -> str:
     import hashlib
-    key = json.dumps([sv.get("strategy"), sv.get("pair"), sv.get("timeframe"), sv.get("params"), sv.get("exits")],
-                     sort_keys=True)
+    key = json.dumps([sv.get("strategy"), sv.get("pairs") or sv.get("pair"), sv.get("timeframe"), sv.get("params"),
+                      sv.get("exits")], sort_keys=True)
     return "scr-" + hashlib.sha1(key.encode()).hexdigest()[:10]
 
 
@@ -115,7 +115,7 @@ def to_specs(screen: dict, job: int = 0, jobs: int = 1, per_job: int = 8, epochs
         params = to_params(sv)
         if params is None:
             continue
-        out.append({"family": sv["family"], "pairs": [sv["pair"]], "sides": ["long", "short"],
+        out.append({"family": sv["family"], "pairs": list(sv.get("pairs") or [sv["pair"]])[:8], "sides": ["long", "short"],
                     "fixed_params": params, "timeframe": sv.get("timeframe") or "1h", "screen": survivor_id(sv),
                     "screen_holdout": {k: sv.get(k) for k in ("B", "r2", "last90", "strategy", "name")},
                     "space_overrides": {}, "used_learnings": [], "epochs": epochs, "seed": 1})
@@ -127,7 +127,7 @@ def to_specs(screen: dict, job: int = 0, jobs: int = 1, per_job: int = 8, epochs
 def summary(screen: dict, top: int = 30) -> dict:
     sv = (screen or {}).get("survivors") or []
     return {k: screen.get(k) for k in ("created", "evaluated", "series", "seconds", "rules", "engine", "holdout_tests",
-                                       "fdr_q", "expected_false")} | {
+                                       "fdr_q", "expected_false", "mode", "tasks")} | {
         "n_survivors": len(sv),
         "top": [{"id": survivor_id(x), **{k: x.get(k) for k in ("name", "family", "pair", "timeframe", "params", "exits",
-                                                                 "A", "B", "r2", "last90", "curve", "strategy", "p")}} for x in sv[:top]]}
+                                                                 "A", "B", "r2", "last90", "curve", "strategy", "p", "pairs", "pooled")}} for x in sv[:top]]}

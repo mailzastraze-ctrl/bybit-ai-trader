@@ -133,7 +133,7 @@ jobs:
             work/batch/universe.json
           key: mkt-all-${{ github.run_id }}
       - name: Mass screening (owner's engine)
-        run: node screener/screen.js --data work/batch/candles --out work/batch/screen-results.json --combos 500 --top 4 --workers $(nproc)
+        run: node screener/screen.js --mode pooled --data work/batch/candles --out work/batch/screen-results.json --combos 400 --top 5 --workers $(nproc)
       - uses: actions/upload-artifact@v4
         with:
           name: lab-screen

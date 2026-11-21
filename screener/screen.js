@@ -116,6 +116,79 @@ function screenSeries(job, opt) {
   return { evaluated, survivors: out, pvals };
 }
 
+/* Pooled mode: one configuration must work across all coins of a timeframe. Per-coin
+   holdouts have only 15–40 trades, so after the false-discovery correction over ~1 200
+   tests nothing can be significant; pooling gives hundreds of holdout trades per test and
+   ~20× fewer tests, and an edge that holds on many coins is far less likely to be luck. */
+function screenPooled(job, opt) {
+  const series = job.files.map((f) => ({ pair: f.pair, d: JSON.parse(fs.readFileSync(f.file, 'utf8')) }))
+    .filter((x) => x.d.c.length >= 2000);
+  const ivMin = job.tf === '15m' ? 15 : 60, iv = String(ivMin), bpd = 1440 / ivMin, warm = 400;
+  const strat = E.STRATEGIES.find((x) => x.id === job.strategy);
+  let evaluated = 0;
+  const out = [], pvals = [];
+  if (!strat || series.length < 5) return { evaluated, survivors: out, pvals };
+  const ranges = strat.params.map((q) => ({ key: q.key, min: q.min, max: q.max, step: q.step, type: q.type }));
+  const combos = E.randomCombos({}, ranges, opt.combos, opt.seed + job.k * 7919);
+  let rnd = opt.seed + job.k;
+  const best = [];
+  for (const raw of combos) {
+    const p = symmetric(strat.id, raw);
+    rnd = (rnd * 1103515245 + 12345) & 0x7fffffff;
+    const x = EXITS[rnd % EXITS.length];
+    const nets = [];
+    let trades = 0;
+    for (const sr of series) {
+      const split = Math.floor(sr.d.c.length * 0.6);
+      const m = E.evaluate(sr.d, strat, p, settings(x), { from: warm, to: split - 1, iv });
+      evaluated++;
+      if (!m) continue;
+      nets.push(m.netPct); trades += m.trades;
+    }
+    if (trades < opt.minTradesA * 4 || nets.length < 5) continue;
+    const mean = nets.reduce((a, b) => a + b, 0) / nets.length;
+    const sd = Math.sqrt(nets.reduce((a, b) => a + (b - mean) ** 2, 0) / Math.max(nets.length - 1, 1)) || 1e-9;
+    const breadth = nets.filter((v) => v > 0).length / nets.length;
+    if (mean <= 0 || breadth < 0.55) continue;
+    best.push({ p, x, score: mean / sd * Math.sqrt(nets.length), A: { trades, net: +mean.toFixed(2), breadth: +breadth.toFixed(2) } });
+  }
+  best.sort((a, b) => b.score - a.score);
+  for (const c of best.slice(0, opt.top)) {
+    const all = [], per = [];
+    for (const sr of series) {
+      const n = sr.d.c.length, split = Math.floor(n * 0.6);
+      const r = E.run(sr.d, strat, c.p, settings(c.x), { from: split, to: n - 1, iv });
+      evaluated++;
+      per.push({ pair: sr.pair, net: r.m.netPct, trades: r.m.trades, dd: r.m.maxDD });
+      for (const t of r.bt.trades) all.push({ pct: t.pct / series.length, xt: t.xt, pnl: t.pnl });
+    }
+    const pv = pValue(all);
+    pvals.push(pv);
+    all.sort((a, b) => a.xt - b.xt);
+    const eq = [], ts = [];
+    let v = 1;
+    for (const t of all) { v *= 1 + t.pct / 100; eq.push(v); ts.push(t.xt); }
+    const st = steadiness(eq, 0);
+    const lastT = ts.length ? ts[ts.length - 1] : 0, k90 = ts.findIndex((t) => t >= lastT - 90 * 864e5);
+    const last90 = k90 >= 0 && eq[k90] > 0 ? eq[eq.length - 1] / (k90 > 0 ? eq[k90 - 1] : 1) - 1 : 0;
+    const gp = all.filter((t) => t.pnl > 0).reduce((a, t) => a + t.pnl, 0), gl = -all.filter((t) => t.pnl < 0).reduce((a, t) => a + t.pnl, 0);
+    const pf = gl > 0 ? gp / gl : 0, net = per.reduce((a, b) => a + b.net, 0) / per.length;
+    const breadth = per.filter((q) => q.net > 0).length / per.length;
+    const pass = all.length >= opt.minTradesB * 6 && pf >= 1.1 && net > 0 && st.r2 >= 0.5 && last90 >= 0 && breadth >= 0.55;
+    if (!pass) continue;
+    const step = Math.max(1, Math.ceil(eq.length / 100)), curve = [];
+    for (let i = 0; i < eq.length; i += step) curve.push([ts[i], +eq[i].toFixed(4)]);
+    if (eq.length) curve.push([ts[eq.length - 1], +eq[eq.length - 1].toFixed(4)]);
+    const goodPairs = per.filter((q) => q.net > 0).sort((a, b) => b.net - a.net).map((q) => q.pair);
+    out.push({ strategy: strat.id, family: FAMILY[strat.id], name: strat.name, pooled: true, pair: goodPairs[0],
+      pairs: goodPairs.slice(0, 8), timeframe: job.tf, curve, params: c.p, exits: c.x, A: c.A,
+      B: { trades: all.length, pf: +pf.toFixed(3), net: +net.toFixed(2), dd: +Math.max(...per.map((q) => q.dd)).toFixed(2),
+        win: +(all.filter((t) => t.pnl > 0).length / Math.max(all.length, 1) * 100).toFixed(1), breadth: +breadth.toFixed(2),
+        coins: per.length }, r2: +st.r2.toFixed(3), last90: +(last90 * 100).toFixed(2), p: pv });
+  }
+  return { evaluated, survivors: out, pvals };
+}
+
 /* Benjamini–Hochberg: among all holdout tests (m), keep discoveries with p <= p*, where p* is
    the largest p_(k) <= k/m * q. Controls the expected share of lucky survivors at q. */
 function bhThreshold(pvals, q) {
@@ -126,7 +199,7 @@ function bhThreshold(pvals, q) {
 }
 
 function parseArgs() {
-  const a = process.argv.slice(2), o = { combos: 260, top: 4, workers: os.cpus().length, seed: 7, minTradesA: 30, minTradesB: 15, fdr: 0.2 };
+  const a = process.argv.slice(2), o = { combos: 260, top: 4, workers: os.cpus().length, seed: 7, minTradesA: 30, minTradesB: 15, fdr: 0.2, mode: 'pooled' };
   for (let i = 0; i < a.length; i += 2) {
     const k = a[i].replace(/^--/, ''), v = a[i + 1];
     o[k.replace(/-([a-z])/g, (_, c) => c.toUpperCase())] = isNaN(+v) ? v : +v;
@@ -137,10 +210,18 @@ function parseArgs() {
 if (isMainThread && require.main === module) {
   const opt = parseArgs();
   const files = fs.readdirSync(opt.data).filter((f) => f.endsWith('.json')).sort();
-  const jobs = files.map((f, k) => {
+  const seriesJobs = files.map((f, k) => {
     const m = f.match(/^(.+)__(15m|1h)\.json$/);
     return m && { k, file: path.join(opt.data, f), pair: m[1].replace(/_/g, '/').replace(/\/USDT\/USDT$/, '/USDT:USDT'), tf: m[2] };
   }).filter(Boolean);
+  let jobs = seriesJobs;
+  if (opt.mode === 'pooled') {  // one task per strategy × timeframe, over all coins of that timeframe
+    jobs = [];
+    for (const tf of [...new Set(seriesJobs.map((j) => j.tf))]) {
+      const tfFiles = seriesJobs.filter((j) => j.tf === tf);
+      for (const st of E.STRATEGIES) if (FAMILY[st.id]) jobs.push({ k: jobs.length, pooled: true, tf, strategy: st.id, files: tfFiles });
+    }
+  }
   const t0 = Date.now();
   const all = [], pvals = [];
   let evaluated = 0, done = 0, next = 0;
@@ -151,14 +232,15 @@ if (isMainThread && require.main === module) {
     console.log(`false-discovery control: ${pvals.length} holdout tests, BH q=${q} → p ≤ ${thr < 0 ? "none" : thr.toExponential(2)}; ${before} → ${kept.length}`);
     all.sort((a, b) => b.B.sharpe - a.B.sharpe);
     const res = { created: new Date().toISOString(), engine: 'Bybit Strategy Lab engine.js (owner)', evaluated,
-      series: jobs.length, seconds: Math.round((Date.now() - t0) / 1000), holdout_tests: pvals.length, fdr_q: opt.fdr,
+      series: seriesJobs.length, mode: opt.mode, tasks: jobs.length, seconds: Math.round((Date.now() - t0) / 1000), holdout_tests: pvals.length, fdr_q: opt.fdr,
       expected_false: +(all.length * opt.fdr).toFixed(1), rules: {
         search: 'first 60% of history', holdout: 'last 40% (unseen by the search)',
-        pass: 'holdout trades>=15, PF>=1.15, return>0, equity R²>=0.5, last 90 days>=0, max DD<30%, ' +
+        pass: (opt.mode === 'pooled' ? 'one config on all coins of a timeframe: holdout trades>=90, PF>=1.1, mean return>0, ' +
+          'profitable on >=55% of coins, pooled equity R²>=0.5, last 90 days>=0, ' : 'holdout trades>=15, PF>=1.15, return>0, equity R²>=0.5, last 90 days>=0, max DD<30%, ') +
           'and significant after Benjamini–Hochberg over all holdout tests (q=' + opt.fdr + ')' },
       survivors: all };
     fs.writeFileSync(opt.out, JSON.stringify(res));
-    console.log(`screened ${evaluated} combinations on ${jobs.length} series in ${res.seconds}s → ${all.length} survivors`);
+    console.log(`screened ${evaluated} backtests (${opt.mode}) on ${seriesJobs.length} series in ${res.seconds}s → ${all.length} survivors`);
   };
   if (!jobs.length) { finish(); return; }
   const nw = Math.max(1, Math.min(opt.workers, jobs.length));
@@ -167,7 +249,7 @@ if (isMainThread && require.main === module) {
     const feed = () => { if (next < jobs.length) wk.postMessage(jobs[next++]); else wk.postMessage(null); };
     wk.on('message', (r) => {
       evaluated += r.evaluated; all.push(...r.survivors); pvals.push(...(r.pvals || [])); done++;
-      if (done % 10 === 0) console.log(`${done}/${jobs.length} series, ${evaluated} combinations, ${all.length} survivors`);
+      if (done % 10 === 0) console.log(`${done}/${jobs.length} tasks, ${evaluated} combinations, ${all.length} survivors`);
       feed();
     });
     wk.on('exit', () => { if (done === jobs.length && !finish.done) { finish.done = true; finish(); } });
@@ -177,9 +259,9 @@ if (isMainThread && require.main === module) {
   parentPort.on('message', (job) => {
     if (!job) { process.exit(0); }
     let r;
-    try { r = screenSeries(job, workerData.opt); } catch (e) { console.error(job.file, e.message); r = { evaluated: 0, survivors: [] }; }
+    try { r = job.pooled ? screenPooled(job, workerData.opt) : screenSeries(job, workerData.opt); } catch (e) { console.error(job.file || job.strategy, e.message); r = { evaluated: 0, survivors: [], pvals: [] }; }
     parentPort.postMessage(r);
   });
 }
 
-module.exports = { screenSeries, steadiness, FAMILY, pValue, bhThreshold };
+module.exports = { screenSeries, screenPooled, steadiness, FAMILY, pValue, bhThreshold };

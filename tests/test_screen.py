@@ -55,7 +55,7 @@ def test_node_screener_end_to_end(tmp_path):
         "t": (1_700_000_000_000 + np.arange(n) * 3_600_000).tolist(), "o": o.tolist(),
         "h": (np.maximum(o, c) * 1.002).tolist(), "l": (np.minimum(o, c) * 0.998).tolist(), "c": c.tolist(), "v": [1] * n}))
     out = tmp_path / "screen-results.json"
-    subprocess.run(["node", str(ROOT / "screener" / "screen.js"), "--data", str(data), "--out", str(out),
+    subprocess.run(["node", str(ROOT / "screener" / "screen.js"), "--mode", "pair", "--data", str(data), "--out", str(out),
                     "--combos", "40", "--workers", "1"], check=True, timeout=300)
     res = json.loads(out.read_text())
     assert res["evaluated"] > 300 and res["series"] == 1 and res["holdout_tests"] > 0 and res["fdr_q"] == 0.2
@@ -70,3 +70,27 @@ def test_benjamini_hochberg_threshold():
     out = subprocess.run(["node", "-e", "const S=require(process.argv[1]);console.log(S.bhThreshold([0.001,0.01,0.03,0.2,0.5,0.9],0.2))",
                           str(ROOT / "screener" / "screen.js")], capture_output=True, text=True, check=True)
     assert float(out.stdout) == 0.03
+
+
+@pytest.mark.skipif(shutil.which("node") is None, reason="node not installed")
+def test_pooled_screener_one_config_across_coins(tmp_path):
+    data = tmp_path / "candles"
+    data.mkdir()
+    for i in range(6):  # six coins sharing a slow cycle → a trend config can work on all of them
+        rng = np.random.default_rng(10 + i)
+        n = 5000
+        c = 100 * np.exp(np.cumsum(rng.normal(0, 0.005, n) + 0.002 * np.sin(np.arange(n) / (250 + 20 * i))))
+        o = np.r_[c[0], c[:-1]]
+        (data / f"C{i}_USDT_USDT__1h.json").write_text(json.dumps({
+            "t": (1_700_000_000_000 + np.arange(n) * 3_600_000).tolist(), "o": o.tolist(),
+            "h": (np.maximum(o, c) * 1.002).tolist(), "l": (np.minimum(o, c) * 0.998).tolist(), "c": c.tolist(), "v": [1] * n}))
+    out = tmp_path / "screen-results.json"
+    subprocess.run(["node", str(ROOT / "screener" / "screen.js"), "--data", str(data), "--out", str(out),
+                    "--combos", "30", "--workers", "1"], check=True, timeout=300)
+    res = json.loads(out.read_text())
+    assert res["mode"] == "pooled" and res["tasks"] == 10 and res["holdout_tests"] <= 10 * 4
+    assert res["survivors"], "a planted cross-coin trend must survive"
+    sv = res["survivors"][0]
+    assert sv["pooled"] and len(sv["pairs"]) >= 4 and sv["B"]["breadth"] >= 0.55 and sv["B"]["trades"] >= 90
+    spec = screen.to_specs(res, 0, 1)[0]
+    assert spec["pairs"] == sv["pairs"][:8] and spec["fixed_params"]

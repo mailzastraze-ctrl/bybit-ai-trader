@@ -134,7 +134,8 @@ def build(reg: Registry, limit: int = 120) -> dict:
         from aitrader.research.screen import to_params
         params = to_params(x) or {}
         b = x.get("B") or {}
-        card = _card("screen", {"id": x["id"], "family": fam, "params": params, "pairs": [x.get("pair")], "stage": "exploratory",
+        card = _card("screen", {"id": x["id"], "family": fam, "params": params, "pairs": x.get("pairs") or [x.get("pair")],
+                                "stage": "exploratory",
                                 "updated": sc.get("ts"), "oos": {"timeframe": x.get("timeframe")}},
                      {"oos": {"trades": b.get("trades"), "profit_factor": b.get("pf"), "sharpe": b.get("sharpe"),
                               "max_drawdown": (b.get("dd") or 0) / 100, "total_return": (b.get("net") or 0) / 100,

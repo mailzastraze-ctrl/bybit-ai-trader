@@ -237,13 +237,13 @@ function renderScreen() {
   const sc = S.scr || {}, top = sc.top || [];
   const tested = new Map((S.rs?.experiments || []).filter((e) => e.info?.screen).map((e) => [e.info.screen, e]));
   $("#scrSub").textContent = sc.evaluated ? `${nf(sc.evaluated, 0)} вариантов на ${sc.series} рядах «монета × таймфрейм» · выжило ${sc.n_survivors}${sc.expected_false != null ? ` (из них случайных ожидается ≈ ${nf(sc.expected_false, 1)})` : ""} · ${ago(sc.ts || sc.created)}` : "ваш движок Strategy Lab · первый запуск с ближайшим прогоном";
-  if (!top.length) { $("#screen").innerHTML = `<div class="empty">${sc.evaluated ? "Ни один вариант не удержал прибыль с ровной кривой на невиданных данных." : "Скринер ещё не запускался. Он переберёт тысячи вариантов 10 стратегий вашего анализатора на 30 монетах (15m и 1h) и покажет здесь выживших."}</div>`; return; }
+  if (!top.length) { $("#screen").innerHTML = `<div class="empty">${sc.evaluated ? "Ни один вариант не удержал прибыль с ровной кривой на невиданных данных." : "Скринер ещё не запускался. Он переберёт тысячи вариантов 10 стратегий вашего анализатора сразу на всех монетах (15m и 1h) и покажет здесь выживших."}</div>`; return; }
   const ex = (x) => `стоп ${x.sl}×ATR · ${x.tp ? "тейк " + x.tp + "R" : "без тейка"} · ${x.tr ? "трейлинг " + x.tr + "×ATR" : "без трейлинга"}`;
   $("#screen").innerHTML = `<table><thead><tr><th>Стратегия</th><th>Монета · ТФ</th><th class="r">Сделок</th><th class="r">PF</th><th class="r">Доходн.</th><th class="r">Просадка</th><th class="r">Ровность</th><th class="r">3 мес.</th><th>Строгая проверка</th></tr></thead><tbody>${top.map((x) => {
     const e = tested.get(x.id), v = e?.summary?.verdict;
     const wf = !e ? pill("в очереди", "") : e.status === "running" ? pill("идёт", "blue") : pill(`${{validated: "прошла", exploratory: "кандидат", rejected: "отсеяна"}[v] || v} · PF ${e.oos?.profit_factor ?? "—"}`, {validated: "good", exploratory: "warn", rejected: "crit"}[v] || "");
     return `<tr><td>${esc(x.name || famName(x.family))}<div class="dim mono">${esc(JSON.stringify(x.params))} · ${esc(ex(x.exits || {}))}</div></td>
-      <td>${esc(pair(x.pair))} · ${esc(x.timeframe)}</td><td class="r num">${x.B?.trades ?? "—"}</td><td class="r num pos">${x.B?.pf ?? "—"}</td>
+      <td>${x.pairs?.length > 1 ? `${x.B?.coins ?? x.pairs.length} монет (лучшие: ${esc(x.pairs.slice(0, 3).map(pair).join(", "))})` : esc(pair(x.pair))} · ${esc(x.timeframe)}</td><td class="r num">${x.B?.trades ?? "—"}</td><td class="r num pos">${x.B?.pf ?? "—"}</td>
       <td class="r num ${cls(x.B?.net)}">${x.B?.net != null ? (x.B.net > 0 ? "+" : "") + nf(x.B.net, 1) + "%" : "—"}</td><td class="r num">${x.B?.dd != null ? nf(x.B.dd, 1) + "%" : "—"}</td>
       <td class="r num">${x.r2}</td><td class="r num ${cls(x.last90)}">${x.last90 > 0 ? "+" : ""}${x.last90}%</td><td>${wf}</td></tr>`;
   }).join("")}</tbody></table>
