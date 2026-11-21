@@ -135,6 +135,19 @@ button:focus-visible, a:focus-visible { outline: 2px solid var(--blue); outline-
 .dots i:nth-child(2) { animation-delay: .15s; }
 .dots i:nth-child(3) { animation-delay: .3s; }
 @keyframes blink { 0%, 100% { opacity: .25; } 50% { opacity: 1; } }
+#tourCaption {
+  position: fixed;
+  z-index: 5;
+  left: var(--gutter);
+  bottom: calc(var(--gutter) + 50px);
+  padding: 10px 15px;
+  border-left: 2px solid var(--department, var(--blue));
+  background: rgba(13,22,30,.91);
+  max-width: calc(100vw - 2 * var(--gutter));
+}
+#tourCaption strong { display: block; font-size: 14px; font-weight: 650; }
+#tourCaption span { color: var(--text2); font: 10px/1.4 var(--mono); }
+.in-tour #feed, .in-tour #goals, .in-tour .tag { display: none; }
 @media (max-width: 1100px) {
   #goals { display: none; }
   #hud .stat { min-width: 70px; padding-inline: 8px; }
@@ -179,6 +192,7 @@ button:focus-visible, a:focus-visible { outline: 2px solid var(--blue); outline-
 <body>
 <div id="scene"></div>
 <div id="labels"></div>
+<div id="tourCaption" class="glass" hidden><strong></strong><span></span></div>
 <div id="hud">
   <div class="brand glass"><b>AI TRADER HQ</b><span>● BYBIT DEMO · simulated funds</span></div>
   <div class="stat glass"><div class="l">Equity</div><div class="v" id="hEq">–</div><div class="s" id="hEqS">USDT</div></div>
@@ -187,7 +201,7 @@ button:focus-visible, a:focus-visible { outline: 2px solid var(--blue); outline-
   <div class="stat glass"><div class="l">Strategies</div><div class="v" id="hSl">–</div><div class="s" id="hSlS"></div></div>
   <div class="stat glass"><div class="l">Research</div><div class="v" id="hRs">–</div><div class="s" id="hRsS"></div></div>
   <div class="spacer"></div>
-  <button class="btn" id="bTour" type="button" title="Orbit the office" aria-pressed="false">Tour</button>
+  <button class="btn" id="bTour" type="button" title="Tour the departments" aria-pressed="false">Tour</button>
   <button class="btn" id="bReset" type="button">⌂ Overview</button>
   <a class="btn" id="backBtn" href="/#overview" target="_top">← Пульт</a>
 </div>

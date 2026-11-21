@@ -86,13 +86,22 @@ export function buildSurroundings(scene, width, depth, canvasTex) {
     solid(trim, 205, 0.016, 0.04, 0, -12.23, k - 1.16);
   }
 
+  const skyline = [
+    {x:-41,z:-38,h:44,w:8.2,d:9.8,style:1},
+    {x:-24,z:-47,h:33,w:10.5,d:9.2,style:2},
+    {x:-9,z:-56,h:47,w:9.8,d:10.7,style:0},
+    {x:10,z:-49,h:29,w:12.0,d:7.6,style:2},
+    {x:23,z:-47,h:41,w:10.9,d:9.3,style:1},
+    {x:44,z:-44,h:52,w:9.2,d:10.1,style:0},
+  ];
   const positions = [];
   for (let row = -6; row <= 5; row++) {
     for (let col = -7; col <= 7; col++) {
       const id = row * 29 + col * 17;
       const x = col * 18 + Math.sin(id) * 4, z = row * 17 + Math.cos(id * 1.2) * 4;
       const distance = Math.hypot(x * 0.85, z);
-      if (distance < 44 || (z > 22 && x > -34 && distance < 68)) continue;
+      if (distance < 44 || (z > 22 && x > -34 && distance < 68) ||
+          skyline.some(tower => Math.abs(x-tower.x) < 10 && Math.abs(z-tower.z) < 9)) continue;
       const span = distance > 58 && z < 24 ? 28 : 9;
       const height = 10 + Math.abs(Math.sin(id * 0.43)) * span;
       positions.push({x, z, height, w: 4 + 5 * Math.abs(Math.cos(id)), d: 4 + 6 * Math.abs(Math.sin(id * 1.7)), style: Math.abs(id) % 3});
@@ -123,5 +132,61 @@ export function buildSurroundings(scene, width, depth, canvasTex) {
     if (i % 6 === 0) place(aerials, i / 6, 0.07, 1.65, 0.07, x, top + 1.47, z);
   });
   scene.add(...towers, roof, ledges, aerials);
+  const roofLine = new THREE.MeshBasicMaterial({color:0xc5a17c,toneMapped:false});
+  for (const tower of skyline) {
+    const {x,z,h,w,d,style} = tower, base = -12.24, top = base + h;
+    solid(cities[style],w,h,d,x,base+h/2,z);
+    solid(trim,w+0.23,0.16,d+0.23,x,top,z);
+    solid(cities[(style+1)%3],w*0.75,4.2,d*0.73,x,top+2.12,z);
+    solid(deck,w*0.59,1.05,d*0.56,x,top+4.63,z);
+    solid(roofLine,w*0.76,0.034,d*0.74,x,top+4.18,z);
+    if (style===0) {
+      solid(deck,0.2,3.5,0.19,x+w*0.10,top+6.1,z);
+      solid(coolLed,0.22,0.20,0.21,x+w*0.10,top+7.92,z);
+    }
+  }
   return cities;
+}
+
+export function buildAtmosphere(scene) {
+  const daylight = {value: 0};
+  const sky = new THREE.Mesh(new THREE.SphereGeometry(245,32,16),new THREE.ShaderMaterial({
+    uniforms:{
+      daylight,
+      midnight:{value:new THREE.Color(0x0c182b)},
+      nightHorizon:{value:new THREE.Color(0x456078)},
+      dayTop:{value:new THREE.Color(0x577e9d)},
+      dayHorizon:{value:new THREE.Color(0xc8b3a2)},
+    },
+    side:THREE.BackSide,
+    depthWrite:false,
+    toneMapped:false,
+    vertexShader:`
+      varying vec3 skyDirection;
+      void main() {
+        skyDirection = position;
+        gl_Position = projectionMatrix * modelViewMatrix * vec4(position,1.0);
+      }
+    `,
+    fragmentShader:`
+      uniform float daylight;
+      uniform vec3 midnight, nightHorizon, dayTop, dayHorizon;
+      varying vec3 skyDirection;
+      void main() {
+        vec3 direction = normalize(skyDirection);
+        float elevation = smoothstep(-0.12,0.71,direction.y);
+        vec3 low = mix(nightHorizon,dayHorizon,daylight);
+        vec3 high = mix(midnight,dayTop,daylight);
+        vec3 color = mix(low,high,elevation);
+        float warmBank = pow(max(0.0,dot(direction,normalize(vec3(-0.7,0.08,-1.0)))),12.0);
+        color += vec3(0.22,0.103,0.058) * warmBank * (0.16 + daylight*0.48) * (1.0-elevation);
+        float noise = fract(sin(dot(gl_FragCoord.xy,vec2(12.9898,78.233))) * 43758.5453);
+        gl_FragColor = vec4(color + (noise-0.5)*0.002,1.0);
+        #include <colorspace_fragment>
+      }
+    `,
+  }));
+  sky.renderOrder = -100;
+  scene.add(sky);
+  return daylight;
 }
