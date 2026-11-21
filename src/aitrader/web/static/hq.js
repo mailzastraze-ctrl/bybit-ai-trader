@@ -1507,7 +1507,7 @@ class Person {
     }
     const dist = this.pos.distanceTo(target);
     this.motionGoal = target;
-    if (dist < 0.009 && isClearOfPeople(this,target.x,target.z) && hallClear(target.x,target.z)) {
+    if (dist < 0.009 && hallClear(target.x,target.z)) {  // already standing on it: take the next one
       this.pos.copy(target);
       if (waitingBay) this.gaitSpeed = 0;
       else if (k.detour) k.detour = null;
@@ -1517,22 +1517,28 @@ class Person {
 
     const dx = target.x-this.pos.x, dz = target.z-this.pos.z, ux = dx/Math.max(dist,0.001), uz = dz/Math.max(dist,0.001);
     const desired = Math.atan2(dx,dz), turn = Math.abs(angDiff(this.yaw,desired));
-    this.turnTo(desired,dt,6,this.gaitSpeed > 0.3 ? 3.1 : 2.3);
+    // while held up, don't swivel between alternative targets; turn only for a real new heading
+    if (!((k.waited || 0) > 0.15 && turn < 1.0)) this.turnTo(desired,dt,6,this.gaitSpeed > 0.3 ? 3.1 : 2.3);
     const corner = !waitingBay && (k.path.length > 1 || k.detour);
     const stoppingSpeed = Math.sqrt(2*2.2*Math.max(0,dist-(corner ? 0 : 0.035)));
-    const course = clamp(Math.cos(turn),0,1);
+    // keep walking through ordinary bends (slower in a sharp one); only a near U-turn
+    // is done on the spot, the way people actually turn around
+    const course = turn > 2.2 ? 0 : clamp(0.35 + 0.65 * Math.cos(turn), 0.18, 1);
     const pace = Math.min(k.access ? 0.69 : this.speed, Math.max(0.11,stoppingSpeed)) * course;
     this.gaitSpeed = this.gaitSpeed + clamp(pace - this.gaitSpeed,-3.8*dt,2.25*dt);
-    const step = Math.min(dist,this.gaitSpeed*dt) * (turn > 0.9 ? 0 : course);
+    const step = Math.min(dist,this.gaitSpeed*dt) * (course > 0 ? 1 : 0) * ((k.squeezeUntil || 0) > officeTime ? 0.55 : 1);
     const nextX = this.pos.x+ux*step, nextZ = this.pos.z+uz*step;
-    const blockedByPerson = !isClearOfPeople(this,nextX,nextZ);
-    if (step <= 0.0001) return false;
+    // after waiting a while behind someone, squeeze past slowly instead of turning back
+    const squeezing = (k.squeezeUntil || 0) > officeTime;
+    const blockedByPerson = !squeezing && !isClearOfPeople(this,nextX,nextZ);
+    if (step <= 0.0001) { k.waited = (k.waited || 0) + dt; if (k.waited > 3) { k.path = null; k.detour = null; k.waited = 0; } return false; }
     if (!blockedByPerson && hallClear(nextX,nextZ)) {
-      this.pos.set(nextX,0,nextZ); k.waited = 0;
+      this.pos.set(nextX,0,nextZ); k.waited = 0; k.blockedFor = 0;
       return true;
     }
     this.gaitSpeed = Math.max(0,this.gaitSpeed - 5*dt);
     k.waited = (k.waited || 0) + dt;
+    if (blockedByPerson) k.blockedFor = (k.blockedFor || 0) + dt;
     if (!waitingBay && !k.access && k.waited > 0.37) {
       if (blockedByPerson) {
         const people = nearbyCentres(this,2.8);
@@ -1543,8 +1549,11 @@ class Person {
           }
         }
         if (!k.detour) {
+          // a re-route that sends us back the way we came looks lost: wait, then squeeze past
           const path = findPath(this.pos,k.to,people);
-          if (path.length) k.path = path;
+          const first = path[0], back = first && ((first.x-this.pos.x)*ux + (first.z-this.pos.z)*uz) < 0;
+          if (path.length && !back) k.path = path;
+          else if (k.blockedFor > 1.0) { k.squeezeUntil = officeTime + 1.6; k.blockedFor = 0; }
         }
       } else if (doorClear(nextX,nextZ,radius)) {
         const path = findPath(this.pos,k.to);
@@ -2759,6 +2768,12 @@ window.__hq = {chars, follow: (i, instant) => { follow = chars[i]; setTour(false
   names: () => chars.map(c => c.name + ":" + c.role),
   go: (i, x, z) => { chars[i].goTo(point(x, z)); },
   lounge: () => loungeBreak(), foosball: () => foosballMatch(),
+  trace: (i, seconds, step = 0.1) => { const c = chars[i], out = [];
+    for (let k = 0; k < seconds / step; k++) { for (let j = 0; j < step * 60; j++) { directOffice(1/60); moveDoors(1/60);
+      for (const p of chars) if (p.root.visible) p.update(1/60, officeTime); }
+      out.push([+c.pos.x.toFixed(2), +c.pos.z.toFixed(2), +c.yaw.toFixed(2), +(c.pace || 0).toFixed(2), +c.w.walk.toFixed(2), c.task?.type || "-",
+        c.task?.detour ? "D" : "", c.task?.path ? c.task.path.map((q) => q.x.toFixed(1) + "," + q.z.toFixed(1)).join(" ") : ""]); }
+    return out; },
   state: () => chars.map(c => `${c.name} ${c.task?.type || "-"}/${c.task?.pose || c.pose} q${c.queue.length} @${c.pos.x.toFixed(1)},${c.pos.z.toFixed(1)}${c.seat?.lounge ? " LOUNGE" : ""}`).join("\n"),
   // advance the office at a fixed 60 Hz without rendering (previews on slow software GL)
   sim: (seconds) => { for (let k = 0; k < seconds * 60; k++) { directOffice(1/60); moveDoors(1/60);
