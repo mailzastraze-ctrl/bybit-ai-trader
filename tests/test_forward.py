@@ -61,13 +61,16 @@ def test_verdict_is_too_early_without_enough_evidence():
 
 
 def test_verdict_works_when_top_quartile_keeps_its_edge():
-    v = forward.summarize(_rows(40, 0.0015, -0.0005))
+    # v2: the decision needs ≥ 90 forward days (20 days of a strong edge is still an early read)
+    assert forward.summarize(_rows(40, 0.0015, -0.0005))["verdict"] == "early_positive"
+    v = forward.summarize(_rows(40, 0.0015, -0.0005, days=120))
     assert v["verdict"] == "works" and v["top"]["trades"] >= 200 and v["top"]["pf"] > 1.15
     assert v["rank_corr"] > 0  # the backtest ranking predicted the forward ranking
 
 
 def test_verdict_not_working_when_best_ranked_lose():
-    v = forward.summarize(_rows(40, -0.001, 0.0))
+    assert forward.summarize(_rows(40, -0.001, 0.0))["verdict"] == "early_negative"  # v2: < 90 days
+    v = forward.summarize(_rows(40, -0.001, 0.0, days=100))
     assert v["verdict"] == "not_working"
 
 
@@ -163,7 +166,7 @@ def test_external_strategy_imported_frozen_and_tested_with_fixed_config(env, tmp
     labmod.apply_import(s, reg, {"batch_id": "b-ext", "experiments_full": [
         {"id": "xext000001", "spec": a, "result": res, "finished": iso()}], "candidates": []})
     assert "owner-sol15m-zscore" in reg.kv_get("external_tested")
-    assert not labmod.external_tests(reg)
+    assert not any(e["id"] == "owner-sol15m-zscore" for e in labmod.external_tests(reg))
 
 
 def test_strategy_cards_explain_every_strategy_in_russian(env):

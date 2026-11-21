@@ -33,7 +33,7 @@ def _trades_after(trades: list[dict], freeze) -> list[list]:
 def test_one(s: Settings, ft: FreqtradeRunner, root, e: dict) -> dict:
     freeze = parse_dt(e["freeze"])
     base = {k: e.get(k) for k in ("id", "kind", "family", "variant", "score", "freeze", "pairs", "bt_pf", "verdict",
-                                  "timeframe", "external")}
+                                  "timeframe", "external", "benchmark")}
     if freeze is None or utcnow() - freeze < timedelta(hours=MIN_FORWARD_H):
         return base | {"ok": True, "trades": []}
     job = Job(root / e["id"])

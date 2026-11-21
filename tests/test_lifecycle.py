@@ -76,8 +76,19 @@ def _live(reg, sid, pnls):
     learner.sync_trades(trades)
 
 
+def _btc_flat_noise(reg, start="2025-05-01", days=1000, seed=11):
+    """BTC daily closes (independent noise): a sleeve's alpha is then simply its own edge."""
+    import numpy as np
+    import pandas as pd
+    rng = np.random.default_rng(seed)
+    idx = pd.date_range(start, periods=days, freq="1D", tz="UTC")
+    px = 60_000 * np.exp(np.cumsum(rng.normal(0, 0.02, days)))
+    reg.kv_set("btc_daily", {d.strftime("%Y-%m-%d"): float(p) for d, p in zip(idx, px, strict=True)})
+
+
 def test_lifecycle_exploration_to_incubation_to_production(env):
     s, reg = env
+    _btc_flat_noise(reg)  # production needs alpha over BTC, measured on BTC daily candles
     life = Lifecycle(s, reg)
     _strategy(reg, "e1", "exploration", ["BTC"])
     _live(reg, "e1", [30, -10] * 10)
@@ -105,7 +116,7 @@ def test_lifecycle_retires_losers_and_fills_slots(env):
 def test_learner_pair_exclusion_and_exit_analysis(env):
     s, reg = env
     _strategy(reg, "t1", "production", ["BTC/USDT:USDT"])
-    pnls = [-20] * 10 + [5] * 6
+    pnls = [-20] * 20 + [5] * 12  # family patterns need ≥ 30 trades (≥ 12 losers with an MFE)
     _live(reg, "t1", pnls)
     learner = Learner(s, reg)
     learner.analyze_live()

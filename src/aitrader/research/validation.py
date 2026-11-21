@@ -63,10 +63,21 @@ def score(oos: dict, dsr: float) -> float:
     return round(sharpe * (1 - dd) * math.sqrt(min(trades, 100) / 100.0) * (0.5 + 0.5 * dsr) * steady * recent, 4)
 
 
+def clean_oos(spec: dict) -> bool:
+    """Are the walk-forward test windows genuinely unseen for this configuration?
+
+    Not for screener survivors: the screener chose them on (almost) the whole history,
+    including the last 360 days the walk-forward tests on. Not for external fixed configs
+    either (found by hand on the same history). Searched experiments re-optimise on each
+    train window and are tested on the next one, so their test windows are clean."""
+    return not (spec.get("screen") or spec.get("external"))
+
+
 def evaluate_gates(g: Gates, m: dict) -> tuple[str, dict]:
     """Return ("validated" | "exploratory" | "rejected", per-gate results).
 
-    `m` keys: oos (summary dict), stress (summary), wfe, robust_frac, mc (dict), dsr.
+    `m` keys: oos (summary dict), stress (summary), wfe, robust_frac, mc (dict), dsr;
+    optional fold_pos, clean_oos (False = test windows were seen when the configuration was chosen).
     """
     oos, stress, mc = m["oos"], m["stress"], m["mc"]
     checks = {
@@ -87,6 +98,12 @@ def evaluate_gates(g: Gates, m: dict) -> tuple[str, dict]:
     fp = m.get("fold_pos")
     if fp is not None:  # every walk-forward slice is its own out-of-sample test
         checks["fold_consistency"] = (fp, g.min_fold_consistency, fp >= g.min_fold_consistency)
+    if m.get("clean_oos") is False:
+        # the configuration was chosen on data that overlaps these test windows (screener
+        # survivors, hand-found external configs): the walk-forward is a replication with real
+        # fees and funding – it can reject, but it is not out-of-sample evidence, so it can
+        # never validate. Only the forward test (data after the freeze) can.
+        checks["clean_oos"] = (0.0, 1.0, False)
     gates = {k: {"value": round(float(v), 4), "threshold": t, "pass": bool(ok)}
              for k, (v, t, ok) in checks.items()}
     if all(x["pass"] for x in gates.values()):

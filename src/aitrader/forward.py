@@ -10,15 +10,29 @@ with fees plus the demo→reality slippage haircut. That yields hundreds of forw
 a week instead of the handful the demo account can carry, and it includes the weak
 candidates too, so the system can test whether its own ranking predicts the future.
 
-Pre-registered verdict (fixed before any forward data existed – do not tune):
+Pre-registered verdict, v2 (amended 2026-11-21 while the book had 1 completed forward
+trade, i.e. before any decision-relevant data existed; the amendment only makes "works"
+harder to reach – do not tune further):
   ranking by the backtest score known at freeze time → top quartile ("Q1") vs the rest
   * too early   – Q1 < 100 forward trades or < 7 forward days
-  * early read  – ≥ 100 trades and ≥ 7 days: direction only, no conclusion
-  * works       – Q1 ≥ 200 trades, ≥ 14 days, PF ≥ 1.15 after costs, daily t ≥ 2.0
-  * not working – Q1 ≥ 200 trades, ≥ 14 days, and PF < 1.0 or mean return ≤ 0
+  * early read  – ≥ 100 trades and ≥ 7 days but < 90 days: direction only, no conclusion
+  * works       – Q1 ≥ 200 trades, ≥ 90 days, PF ≥ 1.15 after costs, and daily t at or above
+                  the anytime-valid threshold (evidence.anytime_t_boundary: 3.26 at 90 daily
+                  observations, 2.79 at a year). The verdict is recomputed after every lab
+                  run, so a fixed t ≥ 2 would be crossed by luck far more often than 5 %.
+  * not working – Q1 ≥ 200 trades, ≥ 90 days, and PF < 1.0 or mean return ≤ 0
   * inconclusive otherwise
+v1 used 14 days and a fixed t ≥ 2.0: for a real edge of Sharpe 1.5, 30 days give a 6 % chance
+of "works" and a 33 % chance of "not working" – a coin flip, not evidence.
 Daily t-statistic: Q1 trades are pooled into an equal-weight daily return series, so many
 correlated trades on the same day are not counted as independent evidence.
+
+Objective comparison (does not change the verdict):
+  * benchmark – a pre-registered fixed TSMOM configuration (research/external/benchmark-*.json)
+    stays in the book permanently and is reported next to Q1: research must beat it;
+  * alpha vs BTC – the Q1 daily series regressed on BTC daily returns (beta, alpha, its t);
+  * leaderboard – per-strategy means shrunk towards the book mean (empirical Bayes), so a
+    lucky handful of trades does not outrank a long steady record.
 
 Strategies that individually prove themselves forward (≥ 20 trades, PF ≥ 1.3 after costs,
 positive) become `exploratory` candidates and can receive small demo capital.
@@ -30,13 +44,16 @@ import math
 from collections import defaultdict
 from datetime import timedelta
 
+import pandas as pd
+
+from aitrader import evidence as EV
 from aitrader.registry import Registry
 from aitrader.util import iso, parse_dt, utcnow
 
 BOOK_LIMIT = 120
 BOOK_MAX_AGE_DAYS = 60
-RULES = {"early_trades": 100, "early_days": 7, "final_trades": 200, "final_days": 14,
-         "pf_works": 1.15, "t_works": 2.0}
+RULES = {"version": 2, "early_trades": 100, "early_days": 7, "final_trades": 200, "final_days": 90,
+         "pf_works": 1.15, "t_works": EV.T_FLOOR, "t_rule": "anytime-valid (normal mixture, ρ = 90 days, α = 5 %)"}
 PROMOTE = {"trades": 20, "pf": 1.3}
 
 
@@ -45,6 +62,7 @@ def book(reg: Registry, limit: int = BOOK_LIMIT, max_age_days: int = BOOK_MAX_AG
     """Frozen strategies for the lab to forward-test (newest experiments first)."""
     since = iso(utcnow() - timedelta(days=max_age_days))
     out = []
+    benchmarks = {st["id"] for st in reg.strategies() if (st.get("oos") or {}).get("benchmark")}
     for r in reg.q("SELECT id, family, spec, result, finished FROM experiments WHERE status='done' "
                    "AND finished >= ? ORDER BY finished DESC", (since,)):
         res, spec = r.get("result") or {}, r.get("spec") or {}
@@ -52,6 +70,8 @@ def book(reg: Registry, limit: int = BOOK_LIMIT, max_age_days: int = BOOK_MAX_AG
             continue
         if spec.get("revalidates"):
             continue  # a re-test of an existing strategy, not a new frozen hypothesis
+        if spec.get("external") in benchmarks:
+            continue  # the benchmark's own replication run: the benchmark is in the book once, as itself
         pairs = res.get("pairs") or (spec.get("pairs") or [])[:8]
         if not pairs:
             continue
@@ -66,9 +86,19 @@ def book(reg: Registry, limit: int = BOOK_LIMIT, max_age_days: int = BOOK_MAX_AG
             break
     # candidates imported as strategies (e.g. offline batches) whose experiment isn't stored here
     seen = {e["id"] for e in out}
+    for st in reg.strategies():  # pre-registered benchmarks stay in the book for good
+        oos = st.get("oos") or {}
+        # also after a demo retirement: the shadow book judges it on data, not on its demo luck
+        if oos.get("benchmark") and st["id"] not in seen and st.get("params"):
+            out.append({"id": st["id"], "kind": "strategy", "benchmark": True, "family": st["family"],
+                        "params": st["params"], "pairs": st.get("pairs") or [], "sides": st.get("sides") or ["long", "short"],
+                        "freeze": st["created"], "score": 0.0, "verdict": st.get("stage"), "bt_pf": oos.get("profit_factor"),
+                        "bt_trades": oos.get("trades"), "variant": oos.get("variant") or st["family"],
+                        "timeframe": oos.get("timeframe") or "1h", "external": True})
+            seen.add(st["id"])
     for st in reg.q("SELECT id, experiment_id, family, params, pairs, sides, score, stage, oos, created FROM strategies "
                     "WHERE created >= ? AND stage != 'retired' ORDER BY created DESC", (since,)):
-        if len(out) >= limit or st.get("experiment_id") in seen or not st.get("params") or not st.get("pairs") \
+        if len(out) >= limit or st["id"] in seen or st.get("experiment_id") in seen or not st.get("params") or not st.get("pairs") \
                 or str(st["id"]).startswith(("fw-", "boot-", "rnd-", "exec-test")):
             continue
         oos = st.get("oos") or {}
@@ -114,7 +144,7 @@ def _spearman(a: list[float], b: list[float]) -> float | None:
     return round(cov / (va * vb), 3) if va > 0 and vb > 0 else None
 
 
-def _group(rows: list[dict]) -> dict:
+def _group(rows: list[dict], btc: pd.Series | None = None) -> dict:
     trades = [t for r in rows for t in r.get("trades", [])]
     rets = [t[1] for t in trades]
     days: dict[str, list[float]] = defaultdict(list)
@@ -125,23 +155,57 @@ def _group(rows: list[dict]) -> dict:
     for (_sid, d), x in per_strat_day.items():
         days[d].append(x)
     n_strats = max(len(rows), 1)
-    daily = [sum(v) / n_strats for _, v in sorted(days.items())]  # equal weight across the group
-    return {"strategies": len(rows), "trades": len(rets), "pnl_pct": round(sum(rets) * 100, 3),
-            "pf": _pf(rets), "win_rate": round(sum(1 for x in rets if x > 0) / len(rets), 3) if rets else None,
-            "mean_bp": round(sum(rets) / len(rets) * 1e4, 2) if rets else None,
-            "t_daily": _t(daily), "days_with_trades": len(daily)}
+    ordered = sorted(days.items())
+    daily = [sum(v) / n_strats for _, v in ordered]  # equal weight across the group
+    out = {"strategies": len(rows), "trades": len(rets), "pnl_pct": round(sum(rets) * 100, 3),
+           "pf": _pf(rets), "win_rate": round(sum(1 for x in rets if x > 0) / len(rets), 3) if rets else None,
+           "mean_bp": round(sum(rets) / len(rets) * 1e4, 2) if rets else None,
+           "t_daily": _t(daily), "days_with_trades": len(daily)}
+    if btc is not None and len(daily) >= 5:
+        y = pd.Series(daily, index=pd.to_datetime([d for d, _ in ordered], utc=True))
+        ab = EV.alpha_beta(y, btc)
+        out["beta"], out["alpha_t"] = ab["beta"], ab["alpha_t"]
+        out["alpha_bp"] = round(ab["alpha"] * 1e4, 2) if ab["alpha"] is not None else None
+    return out
 
 
-def summarize(results: list[dict], now=None) -> dict:
-    """results: [{id, score, freeze, trades: [[close_ts, return_on_10k], ...], ...}]"""
+def leaderboard(rows: list[dict], min_trades: int = 5) -> list[dict]:
+    """Per-strategy forward record with the mean return shrunk towards the book mean
+    (empirical Bayes), ranked by the conservative bound (posterior mean − 1 sd): what the
+    evidence supports, not the luckiest streak."""
+    means, ses, base = {}, {}, {}
+    for r in rows:
+        xs = [t[1] for t in r.get("trades", [])]
+        base[r["id"]] = {"id": r["id"], "variant": r.get("variant"), "family": r.get("family"), "trades": len(xs),
+                         "pnl_pct": round(sum(xs) * 100, 3), "pf": _pf(xs), "score": r.get("score"),
+                         "freeze": r.get("freeze"), "bt_pf": r.get("bt_pf"), "benchmark": bool(r.get("benchmark")),
+                         "shrunk_bp": None, "lcb_bp": None, "p_pos": None}
+        if len(xs) >= min_trades:
+            m = sum(xs) / len(xs)
+            sd = math.sqrt(sum((x - m) ** 2 for x in xs) / (len(xs) - 1))
+            if sd > 0:
+                means[r["id"]], ses[r["id"]] = m, sd / math.sqrt(len(xs))
+    for k, v in EV.shrink(means, ses).items():
+        base[k]["shrunk_bp"], base[k]["lcb_bp"], base[k]["p_pos"] = (round(v["shrunk"] * 1e4, 2),
+                                                                     round(v["lcb"] * 1e4, 2), v["p_pos"])
+    return sorted(base.values(), key=lambda x: (x["lcb_bp"] is None, -(x["lcb_bp"] or 0.0), -x["trades"]))
+
+
+def summarize(results: list[dict], now=None, btc: pd.Series | None = None) -> dict:
+    """results: [{id, score, freeze, trades: [[close_ts, return_on_10k], ...], ...}]
+    btc: optional BTC daily returns (evidence.btc_returns) for beta/alpha."""
     now = now or utcnow()
-    rows = [r for r in results if r.get("ok", True)]
+    rows_all = [r for r in results if r.get("ok", True)]
+    bench = [r for r in rows_all if r.get("benchmark")]
+    rows = [r for r in rows_all if not r.get("benchmark")]  # the verdict judges the research output only
     rows.sort(key=lambda r: -float(r.get("score") or 0.0))
     q = max(1, len(rows) // 4)
     top, rest = rows[:q], rows[q:]
     freezes = [parse_dt(r.get("freeze")) for r in rows if parse_dt(r.get("freeze"))]
     fwd_days = round((now - min(freezes)).total_seconds() / 86400, 1) if freezes else 0.0
-    g_top, g_rest, g_all = _group(top), _group(rest), _group(rows)
+    g_top, g_rest, g_all = _group(top, btc), _group(rest), _group(rows)
+    g_bench = _group(bench, btc) if bench else None
+    t_need = EV.anytime_t_boundary(g_top["days_with_trades"])
     ev = [(float(r.get("score") or 0.0), sum(t[1] for t in r.get("trades", [])))
           for r in rows if len(r.get("trades", [])) >= 5]
     rho = _spearman([a for a, _ in ev], [b for _, b in ev])
@@ -153,24 +217,28 @@ def summarize(results: list[dict], now=None) -> dict:
         lean = "positive" if (g_top["pf"] or 0) > 1.0 and g_top["pnl_pct"] > 0 else "negative"
         verdict, text = f"early_{lean}", (f"Early read ({n} trades, {fwd_days} days): leaning {lean}. "
                                           f"Decision at {R['final_trades']} trades and {R['final_days']} days.")
-    elif (g_top["pf"] or 0) >= R["pf_works"] and g_top["t_daily"] >= R["t_works"]:
+    elif (g_top["pf"] or 0) >= R["pf_works"] and g_top["t_daily"] >= t_need:
         verdict, text = "works", (f"Works: top-quartile strategies keep their edge on unseen data "
-                                  f"(PF {g_top['pf']} after costs, daily t {g_top['t_daily']}, {n} trades).")
+                                  f"(PF {g_top['pf']} after costs, daily t {g_top['t_daily']} ≥ {t_need}, {n} trades).")
     elif (g_top["pf"] or 0) < 1.0 or g_top["pnl_pct"] <= 0:
         verdict, text = "not_working", (f"Not working: the best-ranked strategies lose on unseen data "
                                         f"(PF {g_top['pf']}, {n} trades). The search is finding noise – new "
                                         "data sources/ideas are needed, not more of the same.")
     else:
         verdict, text = "inconclusive", (f"Inconclusive: positive but not significant yet (PF {g_top['pf']}, "
-                                         f"daily t {g_top['t_daily']}, {n} trades). Keep collecting.")
-    best = sorted(({"id": r["id"], "variant": r.get("variant"), "family": r.get("family"),
-                    "trades": len(r.get("trades", [])), "pnl_pct": round(sum(t[1] for t in r.get("trades", [])) * 100, 3),
-                    "pf": _pf([t[1] for t in r.get("trades", [])]), "score": r.get("score"),
-                    "freeze": r.get("freeze"), "bt_pf": r.get("bt_pf")} for r in rows),
-                  key=lambda x: (-x["pnl_pct"], -x["trades"]))
-    return {"ts": iso(now), "verdict": verdict, "text": text, "rules": R, "forward_days": fwd_days,
-            "top": g_top, "rest": g_rest, "all": g_all, "rank_corr": rho, "n_strategies": len(rows),
-            "best": best[:15], "worst": best[-5:][::-1] if len(best) > 15 else []}
+                                         f"daily t {g_top['t_daily']} of {t_need} needed, {n} trades). Keep collecting.")
+    board = leaderboard(rows_all)
+    families: dict[str, list[dict]] = defaultdict(list)
+    for r in rows:
+        families[r.get("family") or "?"].append(r)
+    fam = {f: {k: g[k] for k in ("strategies", "trades", "pf", "mean_bp", "t_daily")}
+           for f, g in ((f, _group(rs)) for f, rs in families.items()) if g["trades"]}
+    if g_bench and g_bench["trades"]:
+        text += (f" Benchmark (fixed TSMOM): {g_bench['trades']} trades, PF {g_bench['pf']}, "
+                 f"{g_bench['pnl_pct']}%; top quartile {g_top['pnl_pct']}%.")
+    return {"ts": iso(now), "verdict": verdict, "text": text, "rules": R, "t_needed": t_need, "forward_days": fwd_days,
+            "top": g_top, "rest": g_rest, "all": g_all, "benchmark": g_bench, "families": fam, "rank_corr": rho,
+            "n_strategies": len(rows), "best": board[:15], "worst": board[-5:][::-1] if len(board) > 15 else []}
 
 
 def persistence(reg: Registry, max_age_days: int = 90) -> dict:
@@ -211,7 +279,7 @@ def apply(reg: Registry, payload: dict) -> dict:
     live_ids = {e["id"] for e in book(reg, limit=10_000)}
     prev = {k: v for k, v in prev.items() if k in live_ids}
     reg.kv_set("forward_results", prev)
-    summ = summarize(list(prev.values()))
+    summ = summarize(list(prev.values()), btc=EV.btc_returns(reg.kv_get("btc_daily")) if reg.kv_get("btc_daily") else None)
     summ["persistence"] = persistence(reg)
     summ["errors"] = sum(1 for r in results if not r.get("ok", True))
     old = (reg.kv_get("forward") or {}).get("verdict")
