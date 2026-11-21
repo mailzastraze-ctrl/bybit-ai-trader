@@ -8,6 +8,8 @@ import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
 import * as SkeletonUtils from "three/addons/utils/SkeletonUtils.js";
 import { buildSurroundings, tileTexture } from "./hq-architecture.js";
 import { deskLayout, prepareStaffClips } from "./hq-staff-motion.js";
+import { Footsteps } from "./hq-footsteps.js";
+import { officeNavigation, PERSON_CLEARANCE, PASSING_DISTANCE } from "./hq-navigation.js";
 import { mergeGeometries } from "three/addons/utils/BufferGeometryUtils.js";
 import { fittedProp, loadSurface, officeModels, staffBones } from "./hq-visual-assets.js";
 
@@ -114,7 +116,7 @@ const M = {
   warmLight: new THREE.MeshBasicMaterial({color: 0xffd6a8, toneMapped: false}),
   coolLight: new THREE.MeshBasicMaterial({color: 0x84d7e3, toneMapped: false}),
 };
-loadSurface(M.floor, "terrazzo", 2.8, 2.0, 0x989da3, 0.24);
+loadSurface(M.floor, "terrazzo", 9, 6, 0x888992, 0.15);
 loadSurface(M.deskWood, "oak", 1, 1, 0xcbbba5, 0.23);
 const [planterAsset, sofaAsset] = await Promise.all([officeModels.planter, officeModels.sofa]);
 function at(o, x, y, z) { o.position.set(x, y, z); return o; }
@@ -159,80 +161,20 @@ windowWall(W, "x", -D / 2); windowWall(D, "z", -W / 2);
 scene.add(boxM(W, 0.22, 0.28, M.wall, 0, 0.11, D / 2), boxM(0.28, 0.22, D, M.wall, W / 2, 0.11, 0));
 scene.add(boxM(W, 0.026, 0.04, M.coolLight, 0, 0.224, D / 2), boxM(0.04, 0.026, D, M.coolLight, W / 2, 0.224, 0));
 
-// ============================================================== nav grid (A*)
-const CELL = 0.5, GX = Math.round(W / CELL), GZ = Math.round(D / CELL);
-const blocked = new Uint8Array(GX * GZ);
-const toCell = (x, z) => [clamp(Math.floor((x + W / 2) / CELL), 0, GX - 1), clamp(Math.floor((z + D / 2) / CELL), 0, GZ - 1)];
-const toWorld = (cx, cz) => new THREE.Vector3(-W / 2 + (cx + 0.5) * CELL, 0, -D / 2 + (cz + 0.5) * CELL);
-function block(x0, z0, x1, z1) {
-  const [a, b] = toCell(Math.min(x0, x1), Math.min(z0, z1)), [c, d] = toCell(Math.max(x0, x1), Math.max(z0, z1));
-  for (let i = a; i <= c; i++) for (let j = b; j <= d; j++) blocked[j * GX + i] = 1;
+// ============================================================== navigation
+const nav = officeNavigation(W,D);
+const block = nav.add;
+function blockObj(obj, pad = 0.06) {
+  obj.updateWorldMatrix(true,true);
+  const box = new THREE.Box3().setFromObject(obj);
+  block(box.min.x-pad,box.min.z-pad,box.max.x+pad,box.max.z+pad);
 }
-function blockObj(obj, pad = 0.15) { obj.updateWorldMatrix(true, true); const bb = new THREE.Box3().setFromObject(obj); block(bb.min.x - pad, bb.min.z - pad, bb.max.x + pad, bb.max.z + pad); }
-block(-W / 2, -D / 2, W / 2, -D / 2 + 0.6); block(-W / 2, -D / 2, -W / 2 + 0.6, D / 2);
-function freeStep(from, x, z) {
-  const [a,b] = toCell(from.x,from.z), [c,d] = toCell(x,z);
-  return !blocked[d*GX+c] && (a===c || b===d || (!blocked[b*GX+c] && !blocked[d*GX+a]));
-}
-function findPath(from, to) {
-  const free = (x, z) => x >= 0 && z >= 0 && x < GX && z < GZ && !blocked[z * GX + x];
-  function nearest(point) {
-    const [x, z] = toCell(point.x, point.z);
-    if (free(x, z)) return [x, z];
-    for (let r = 1; r < 10; r++) {
-      let best = null, cost = Infinity;
-      for (let dx = -r; dx <= r; dx++) for (let dz = -r; dz <= r; dz++) {
-        if (Math.max(Math.abs(dx), Math.abs(dz)) !== r || !free(x + dx, z + dz)) continue;
-        const d = toWorld(x + dx, z + dz).distanceToSquared(point);
-        if (d < cost) { best = [x + dx, z + dz]; cost = d; }
-      }
-      if (best) return best;
-    }
-    return null;
-  }
-  const start = nearest(from), end = nearest(to);
-  if (!start || !end) return [];
-  const [sx, sz] = start, [tx, tz] = end;
-  const goal = freeStep(to,to.x,to.z) ? to.clone() : toWorld(tx,tz);
-  // A sampled line includes its endpoints. A wall corner cannot be cut diagonally.
-  const clear = (a, b) => {
-    const n = Math.max(1, Math.ceil(a.distanceTo(b) / (CELL * 0.27)));
-    let [px, pz] = toCell(a.x, a.z);
-    for (let i = 1; i <= n; i++) {
-      const [x, z] = toCell(lerp(a.x, b.x, i/n), lerp(a.z, b.z, i/n));
-      if (!free(x, z) || (x !== px && z !== pz && (!free(px, z) || !free(x, pz)))) return false;
-      px = x; pz = z;
-    }
-    return true;
-  };
-  if (clear(from, goal)) return [goal];
-  const key = (x, z) => z * GX + x, open = [[0, sx, sz]], cost = new Map([[key(sx, sz), 0]]), came = new Map(), closed = new Set();
-  const dirs = [[1,0],[-1,0],[0,1],[0,-1],[1,1],[-1,1],[1,-1],[-1,-1]];
-  while (open.length) {
-    let best = 0;
-    for (let i = 1; i < open.length; i++) if (open[i][0] < open[best][0]) best = i;
-    const [, x, z] = open.splice(best, 1)[0], previous = key(x, z);
-    if (closed.has(previous)) continue;
-    closed.add(previous);
-    if (x === tx && z === tz) break;
-    for (const [dx, dz] of dirs) {
-      const nx = x + dx, nz = z + dz, k = key(nx, nz);
-      if (!free(nx,nz) || closed.has(k) || (dx && dz && (!free(x + dx,z) || !free(x,z + dz)))) continue;
-      const g = cost.get(previous) + (dx && dz ? Math.SQRT2 : 1);
-      if (g >= (cost.get(k) ?? Infinity)) continue;
-      cost.set(k,g); came.set(k,previous); open.push([g + Math.hypot(nx-tx,nz-tz),nx,nz]);
-    }
-  }
-  if (!closed.has(key(tx,tz))) return [];
-  const path = [];
-  for (let k = key(tx,tz); k !== key(sx,sz); k = came.get(k)) path.push(toWorld(k % GX, Math.floor(k/GX)));
-  path.reverse(); path.push(goal);
-  const out = []; let anchor = from;
-  for (let i = 0; i < path.length; i++) {
-    if (i < path.length - 1 && clear(anchor, path[i + 1])) continue;
-    if (anchor.distanceToSquared(path[i]) > 0.0001) { out.push(path[i]); anchor = path[i]; }
-  }
-  return out;
+block(-W/2,-D/2,W/2,-D/2+0.3);
+block(-W/2,-D/2,-W/2+0.3,D/2);
+const findPath = nav.route;
+const rugs = [];
+function groundAt(x,z) {
+  return rugs.some(r => Math.abs(x-r.x) < r.halfWidth && Math.abs(z-r.z) < r.halfDepth) ? 0.025 : 0;
 }
 
 // ============================================================== screens (live canvases)
@@ -403,23 +345,45 @@ function desk(name, x, z, rot = 0, opts = {}) {
   blockObj(top, 0.1);
   const mark = (x, z) => new THREE.Vector3(x, 0, z).applyAxisAngle(UP_AXIS, rot).add(g.position);
   const seatPos = mark(0, deskLayout.feetZ), dock = mark(0, deskLayout.feetZ - deskLayout.pullback);
-  const approach = mark(1.35, -0.97), chairCenter = mark(0, deskLayout.seatZ - 0.10);
-  block(chairCenter.x - 0.24, chairCenter.z - 0.24, chairCenter.x + 0.24, chairCenter.z + 0.24);
+  const approach = mark(1.35, -0.97);
+  const chairBack = mark(0,deskLayout.seatZ - deskLayout.pullback - 0.31);
+  const chairFront = mark(0,deskLayout.seatZ + 0.30);
+  block(Math.min(chairFront.x,chairBack.x) - 0.30*Math.abs(Math.cos(rot)),
+    Math.min(chairFront.z,chairBack.z) - 0.30*Math.abs(Math.sin(rot)),
+    Math.max(chairFront.x,chairBack.x) + 0.30*Math.abs(Math.cos(rot)),
+    Math.max(chairFront.z,chairBack.z) + 0.30*Math.abs(Math.sin(rot)),ch);
   seats[name] = {pos: seatPos, dock, approach, face: rot, desk: g, screen: scr, chair: ch, taken: null};
   return seats[name];
 }
-function rug(x, z, w, d, hex, accent) {
-  const r = mesh(new THREE.BoxGeometry(w, 0.025, d), new THREE.MeshStandardMaterial({map: carpetTex(hex), roughness: 0.96}), false, true);
-  r.position.set(x, 0.0125, z); scene.add(r);
-  const inlay = new THREE.MeshStandardMaterial({color: accent, emissive: accent, emissiveIntensity: 0.3, metalness: 0.55, roughness: 0.35});
-  for (const side of [-1, 1]) {
-    const strip = boxM(w - 0.45, 0.006, 0.032, inlay, x, 0.029, z + side * (d / 2 - 0.16));
-    strip.castShadow = false; scene.add(strip);
-    for (const corner of [-1, 1]) {
-      const line = boxM(0.032, 0.006, 0.72, inlay, x + corner * (w / 2 - 0.22), 0.03, z + side * (d / 2 - 0.47));
-      line.castShadow = false; scene.add(line);
+function rug(x, z, width, depth, hex, accent) {
+  rugs.push({x,z,halfWidth:width/2,halfDepth:depth/2});
+  const fabric = canvasTex(256,256,(ctx,size) => {
+    ctx.fillStyle = hex; ctx.fillRect(0,0,size,size);
+    for (let row=0; row<4; row++) for (let col=0; col<4; col++) {
+      const left = col*64, top = row*64, turned = (row+col)%2;
+      ctx.fillStyle = (row*7+col)%3 ? "#e6e5ec09" : "#09101915";
+      ctx.fillRect(left,top,64,64);
+      for (let line=1; line<64; line+=3) {
+        ctx.fillStyle = line%5 ? "#eef1ff0d" : "#060c1840";
+        if (turned) ctx.fillRect(left+line,top,1,64);
+        else ctx.fillRect(left,top+line,64,1);
+      }
+      ctx.fillStyle = "#11151c45";
+      ctx.fillRect(left,top,64,1); ctx.fillRect(left,top,1,64);
     }
+  }, [Math.round(width/2.15),Math.round(depth/2.15)]);
+  const carpet = new THREE.MeshStandardMaterial({map:fabric,roughness:0.95});
+  const tile = mesh(new THREE.BoxGeometry(width,0.025,depth),carpet,false,true);
+  tile.position.set(x,0.0125,z); scene.add(tile);
+
+  const trim = new THREE.MeshStandardMaterial({color:accent,roughness:0.52,metalness:0.55});
+  trim.color.multiplyScalar(0.37);
+  const rails = [];
+  for (const side of [-1,1]) {
+    rails.push(boxM(width-0.06,0.005,0.023,trim,x,0.026,z+side*(depth/2-0.025)));
+    rails.push(boxM(0.023,0.005,depth-0.06,trim,x+side*(width/2-0.025),0.026,z));
   }
+  scene.add(...rails); batchSolids(scene,rails);
 }
 function glassWall(x0, z0, x1, z1) {
   const len = Math.hypot(x1 - x0, z1 - z0), g = new THREE.Group();
@@ -447,8 +411,94 @@ function slidingDoors(x, z, width, rot = 0) {
     doorway.add(panel);
     return panel;
   });
-  doors.push({x, z, width, panels, open: 0});
+  // Even when fully open the leaves occupy the outer halves of the doorway.
+  // Route to the actual clear aperture, rather than through the leaf pockets.
+  const aperture = width*0.24 + 0.02;
+  for (const side of [-1,1]) {
+    const sweep = at(new THREE.Object3D(),side*(aperture + width/2)*0.5,0,0.052);
+    doorway.add(sweep); sweep.updateWorldMatrix(true,false);
+    const position = sweep.getWorldPosition(new THREE.Vector3());
+    const length = (width/2-aperture)/2;
+    const hx = Math.abs(Math.cos(rot))*length + Math.abs(Math.sin(rot))*0.028;
+    const hz = Math.abs(Math.sin(rot))*length + Math.abs(Math.cos(rot))*0.028;
+    block(position.x-hx,position.z-hz,position.x+hx,position.z+hz); doorway.remove(sweep);
+  }
+  doors.push({x, z, width, rotation:rot, panels, open:0, waiting:new Map()});
   scene.add(doorway);
+}
+function doorClear(x,z,radius) {
+  for (const door of doors) {
+    const dx = x-door.x, dz = z-door.z;
+    if (Math.abs(dx) > 2.1 || Math.abs(dz) > 2.1) continue;
+    const co = Math.cos(door.rotation), si = Math.sin(door.rotation);
+    const across = Math.abs(co*dx - si*dz), depth = Math.abs(si*dx + co*dz - 0.052);
+    if (depth > radius + 0.025 || across > door.width/2 + radius) continue;
+    const leafGap = door.width*door.open*0.24 + 0.018;
+    if (across + Math.sqrt(Math.max(0,radius*radius-Math.max(0,depth-0.025)**2)) > leafGap) return false;
+  }
+  return true;
+}
+function doorLocal(door,pos) {
+  const x = pos.x-door.x, z = pos.z-door.z, co = Math.cos(door.rotation), si = Math.sin(door.rotation);
+  return {along:co*x-si*z, side:si*x+co*z-0.052};
+}
+function approachingDoor(actor,path) {
+  for (const door of doors) {
+    const at = doorLocal(door,actor.pos);
+    if (Math.abs(at.side) > 2.75 || Math.abs(at.along) > door.width/2+1.8) continue;
+    let before = at;
+    for (const step of path) {
+      const after = doorLocal(door,step);
+      if (before.side*after.side <= 0 && Math.abs(after.side-before.side) > 0.0001) {
+        const along = lerp(before.along,after.along,before.side/(before.side-after.side));
+        if (Math.abs(along) <= door.width*0.30) return {door,side:Math.sign(at.side) || -Math.sign(after.side)};
+      }
+      if (Math.abs(after.side) > 4.7 || Math.abs(after.along) > 4.7) break;
+      before = after;
+    }
+  }
+  return null;
+}
+function doorDetour(actor,task) {
+  if (!task.passage) task.passage = approachingDoor(actor,task.path);
+  if (!task.passage) return null;
+  const {door,side} = task.passage, local = doorLocal(door,actor.pos);
+  if (local.side*side < -0.9) {
+    task.passage = null;
+    return null;
+  }
+  if (!door.crossing || door.crossing.actor === actor) {
+    if (!door.crossing) door.crossing = {actor,side,task};
+    if (door.waiting.delete(actor)) {
+      task.path = findPath(actor.pos,task.to); task.detour = null;
+    }
+    return null;
+  }
+  if (door.waiting.has(actor)) return door.waiting.get(actor).point;
+  const co = Math.cos(door.rotation), si = Math.sin(door.rotation), bays = [];
+  for (const depth of [1.52,2.12,2.62]) for (const along of [-1.22,1.22]) {
+    const n = depth*side+0.052;
+    const mark = point(door.x+co*along+si*n,door.z-si*along+co*n);
+    if (!nav.segment(actor.pos,mark) || !isClearOfPeople(actor,mark.x,mark.z)) continue;
+    if ([...door.waiting.values()].some(other => other.point.distanceToSquared(mark) < PASSING_DISTANCE**2)) continue;
+    bays.push(mark);
+  }
+  bays.sort((a,b) => a.distanceToSquared(actor.pos)-b.distanceToSquared(actor.pos));
+  const mark = bays[0] || actor.pos.clone();
+  door.waiting.set(actor,{point:mark,task});
+  return mark;
+}
+function moveDoors(dt) {
+  for (const door of doors) {
+    const crossing = door.crossing;
+    if (crossing && (!crossing.actor.root.visible || crossing.actor.task !== crossing.task ||
+        doorLocal(door,crossing.actor.pos).side*crossing.side < -1.18)) door.crossing = null;
+    for (const [person,bay] of door.waiting) if (!person.root.visible || person.task !== bay.task) door.waiting.delete(person);
+    const near = chars.some(c => c.root.visible && Math.hypot(c.pos.x-door.x,c.pos.z-door.z) < 2.28);
+    door.open = reducedMotion.matches ? Number(near) : damp(door.open,Number(near),near ? 8 : 4,dt);
+    const gap = door.width * (0.25 + door.open*0.24);
+    door.panels[0].position.x = -gap; door.panels[1].position.x = gap;
+  }
 }
 function acousticPanel(x, width, tint) {
   const h = 3.2, z = -14.73;
@@ -474,6 +524,32 @@ function pendant(x, z, width) {
 }
 
 // ============================================================== departments
+function mountDisplay(display, x, width, height, sign, tone) {
+  const wallY = 2.23, z = -14.76;
+  const surround = [];
+  surround.push(boxM(width+0.84,height+0.82,0.28,M.wallDark,x,wallY,z));
+  surround.push(boxM(width+0.18,height+0.15,0.16,M.black,x,wallY-0.14,z+0.16));
+  surround.push(boxM(width+0.60,0.07,0.24,M.brass,x,wallY-height/2-0.29,z+0.136));
+  const strip = boxM(width+0.43,0.016,0.018,tone,x,wallY-height/2-0.25,z+0.26);
+  surround.push(strip);
+  for (const side of [-1,1]) {
+    surround.push(boxM(0.105,height+0.76,0.31,M.frame,x+side*(width/2+0.4),wallY,z));
+    surround.push(boxM(0.016,height+0.55,0.04,M.brass,x+side*(width/2+0.365),wallY,z+0.18));
+  }
+  scene.add(...surround); batchSolids(scene,surround);
+  block(x-width/2-0.42,z-0.12,x+width/2+0.42,z+0.25);
+  display.mesh.position.set(x,wallY-0.14,z+0.25); scene.add(display.mesh);
+
+  const mark = canvasTex(1024,64,(ctx,w,h) => {
+    ctx.clearRect(0,0,w,h); ctx.font = "600 33px system-ui";
+    ctx.textBaseline = "middle"; ctx.textAlign = "center"; ctx.fillStyle = "#dee3e9";
+    ctx.letterSpacing = "6px";
+    ctx.fillText(sign,w*0.5,h*0.5);
+  });
+  const label = new THREE.Mesh(new THREE.PlaneGeometry(Math.min(width*0.78,6.5),0.406),
+    new THREE.MeshBasicMaterial({map:mark,transparent:true, depthWrite:false}));
+  label.position.set(x,wallY+height/2+0.12,z+0.151); scene.add(label);
+}
 const departments = {};
 function dept(key, name, x, z, color, info = "") { departments[key] = {key, name, pos: new THREE.Vector3(x, 0, z), anchor: new THREE.Vector3(x, 3.85, z), color, info, status: "good"}; }
 
@@ -481,11 +557,10 @@ function dept(key, name, x, z, color, info = "") { departments[key] = {key, name
 dept("trading", "Trading Floor", 0, -7.5, 0x8badff);
 rug(0, -7.5, 15, 8, "#343e46", departments.trading.color);
 const tradeSeats = [];
-for (let i = 0; i < 8; i++) { const r = Math.floor(i / 4), c = i % 4; tradeSeats.push(desk("trade" + i, -5.4 + c * 3.6, r ? -5.2 : -9.6, r ? 0 : Math.PI, {second: true})); }
+for (let i = 0; i < 8; i++) { const r = Math.floor(i / 4), c = i % 4; tradeSeats.push(desk("trade" + i, -5.4 + c * 3.6, r ? -5.2 : -9.6, r ? 0 : Math.PI, {second: true,dark:true})); }
 // video wall on north wall
-const wall = screen(13, 3.2, 1300, 320); wall.mesh.position.set(0, 2.16, -14.63); scene.add(wall.mesh);
-scene.add(boxM(13.36, 3.48, 0.22, M.black, 0, 2.16, -14.76), boxM(13.4, 0.03, 0.055, M.coolLight, 0, 0.46, -14.62));
-scene.add(boxM(0.082, 3.45, 0.08, M.frame, -6.62, 2.16, -14.65), boxM(0.082, 3.45, 0.08, M.frame, 6.62, 2.16, -14.65));
+const wall = screen(13,3.20,1300,320);
+mountDisplay(wall,0,13,3.20,"TRADING FLOOR",M.coolLight);
 lightPool(0x53a8fa, 0, 0.006, -13.15, 16, 4.8, 0.34);
 acousticPanel(-7.27, 1.15, 0xe4bd8d); acousticPanel(7.27, 1.15, 0xe4bd8d);
 pendant(-3.65, -11.38, 3.2); pendant(3.65, -11.38, 3.2);
@@ -494,8 +569,8 @@ pendant(-3.65, -11.38, 3.2); pendant(3.65, -11.38, 3.2);
 dept("research", "Research Lab", -15.5, -8.5, 0x78e7d1);
 rug(-15.5, -8.5, 9, 9, "#3d4745", departments.research.color);
 const labSeats = [desk("lab0", -17.8, -10.5, Math.PI), desk("lab1", -14.2, -10.5, Math.PI), desk("lab2", -17.8, -6.4, 0), desk("lab3", -14.2, -6.4, 0)];
-const board = screen(7.55, 3.02, 660, 264); board.mesh.position.set(-15.5, 1.98, -14.64); scene.add(board.mesh);
-scene.add(boxM(7.82, 3.27, 0.19, M.frame, -15.5, 1.98, -14.76), boxM(7.86, 0.027, 0.045, M.coolLight, -15.5, 0.34, -14.64));
+const board = screen(7.55,3.02,660,264);
+mountDisplay(board,-15.5,7.55,3.02,"RESEARCH LAB",M.warmLight);
 lightPool(0x65e7c4, -15.5, 0.006, -13.43, 9.3, 4.2, 0.31);
 acousticPanel(-20.48, 1.43, 0xe4bd8d); acousticPanel(-11.27, 0.59, 0xe4bd8d);
 glassWall(-10.5, -14.6, -10.5, -10); glassWall(-10.5, -7, -10.5, -3.6); glassWall(-22, -3.6, -13.5, -3.6);
@@ -748,12 +823,17 @@ const pipeLine = new THREE.Mesh(new THREE.TubeGeometry(pipeline, 156, 0.013, 6, 
 scene.add(pipeLine);
 let flowSpeed = 0.02;
 
-// Snap each side approach to an open aisle after walls and all furniture are in
-// the grid. People cross the reserved chair bay only to enter or leave that seat.
+// Door openings and furniture in the route planner use the same world bounds
+// as movement. The final step to a chair uses its own side entrance.
+nav.finish();
 for (const seat of Object.values(seats)) {
-  for (const [x,z] of [[1.35,-0.97],[-1.35,-0.97],[1.45,-1.16],[-1.45,-1.16],[1.56,-1.28],[-1.56,-1.28]]) {
-    const candidate = seat.desk.localToWorld(new THREE.Vector3(x,0,z));
-    if (freeStep(candidate,candidate.x,candidate.z)) { seat.approach.copy(candidate); break; }
+  const dockZ = deskLayout.feetZ - deskLayout.pullback;
+  for (const [side,width,z] of [[1,1.30,dockZ],[-1,1.30,dockZ],[1,1.42,dockZ],[-1,1.42,dockZ],
+      [1,1.42,dockZ-0.19],[-1,1.42,dockZ-0.19],[1,1.57,dockZ-0.31],[-1,1.57,dockZ-0.31]]) {
+    const candidate = seat.desk.localToWorld(new THREE.Vector3(side*width,0,z));
+    if (nav.clear(candidate.x,candidate.z) && nav.segment(candidate,seat.dock,0.245,seat.chair)) {
+      seat.approach.copy(candidate); break;
+    }
   }
 }
 
@@ -846,7 +926,7 @@ function rotWorld(bone, axis, angle) {
 class Person {
   constructor(name, role, home, opts = {}) {
     this.name = name; this.role = role; this.homeSeat = home; this.state = "idle"; this.queue = [];
-    this.speed = rand(1.15, 1.45); this.phase = rand(0, 10); this.talkT = 0; this.mood = 0; this.speaking = false;
+    this.speed = rand(1.05, 1.22); this.phase = rand(0, 10); this.talkT = 0; this.mood = 0; this.speaking = false;
     this.blinkT = rand(1, 4); this.lookTarget = null; this.sitBlend = 0; this.line = "";
     const model = officeCast[name] || maleStaff || staff.find(Boolean) || XBOT;
     const R = new THREE.Group(); this.root = R;
@@ -1003,6 +1083,7 @@ class Person {
     this.layerBones = ["LeftUpLeg", "RightUpLeg", "LeftLeg", "RightLeg", "Spine1", "RightArm", "RightForeArm", "LeftArm", "LeftForeArm", "Neck", "Head"]
       .map(k => this.bones[k]).filter(Boolean);
     this.baseQ = this.layerBones.map(bone => bone.quaternion.clone());
+    if (detailed) this.footsteps = new Footsteps(m);
   }
   animateModel(dt, t, walking) {
     const R = this.root, seated = !!this.seat && !walking, b = this.bones;
@@ -1010,7 +1091,8 @@ class Person {
     R.position.set(this.pos.x, 0, this.pos.z); R.rotation.y = this.yaw;
     const pose = walking ? "walk" : t < this.reactionUntil ? this.reaction : this.pose, sb = this.sitBlend;
     // clip weights: walk vs idle; additive nod / head-shake / slump layered on top
-    this.w.walk = damp(this.w.walk, walking ? Math.min(1, this.gaitSpeed / this.speed) : 0, 10, dt);
+    const motionWeight = this.footsteps ? 0.43 : 1;
+    this.w.walk = damp(this.w.walk, !seated && walking ? motionWeight * clamp(this.pace / this.speed,0,1) : 0, 9, dt);
     const dockWeight = this.act.dock ? THREE.MathUtils.smoothstep(sb, 0, 0.2) * (1 - this.w.walk) : 0;
     const sitWeight = this.act.sit ? dockWeight * this.workReach : 0;
     this.act.walk.setEffectiveWeight(this.w.walk);
@@ -1021,18 +1103,23 @@ class Person {
       this.act.dock.time = 0.68 + 1.65 * sb;
       this.act.sit.timeScale = this.typingFast ? 1.14 : 0.98;
     }
-    this.act.walk.timeScale = Math.max(0.45, this.gaitSpeed) / (this.detailedModel ? 1.30 : 1.25);
+    this.act.walk.timeScale = this.pace / 1.25;
     const listening = pose === "talk" && !this.speaking;
     const tgt = {agree: listening && Math.sin(t * 0.7 + this.phase) > 0.2 ? 1 : 0, headShake: pose === "facepalm" ? 1 : 0, sad_pose: this.mood < -0.4 && !walking ? 0.7 : 0};
     for (const k of ["agree", "headShake", "sad_pose"]) if (this.act[k]) { this.w[k] = damp(this.w[k], tgt[k], 4, dt); this.act[k].setEffectiveWeight(this.w[k]); }
     // Three skips writes for unchanged mixer tracks. Restore the previous mixed
     // pose, advance it, then retain that exact result before layering gestures.
     this.layerBones.forEach((bone, i) => bone.quaternion.copy(this.baseQ[i]));
+    this.footsteps?.restoreMixerInput();
     this.mixer.update(dt);
+    this.footsteps?.saveMixerOutput();
     this.layerBones.forEach((bone, i) => this.baseQ[i].copy(bone.quaternion));
-    this.model.position.y = this.detailedModel ? deskLayout.floorY : -sb * (this.hipH - 0.56);
+    this.model.position.y = this.detailedModel ? (this.seat ? deskLayout.floorY : groundAt(this.pos.x,this.pos.z)) : -sb * (this.hipH - 0.56);
     this.model.position.z = this.detailedModel ? 0 : (deskLayout.seatZ - deskLayout.feetZ) * sb;
     R.updateWorldMatrix(true, false);
+    if (this.seat) this.footsteps?.reset();
+    else this.footsteps?.update(dt,this.pos,this.yaw,this.pace,groundAt,(x,z) =>
+      nav.clear(x,z,0.105,this.chairAccess?.chair) && doorClear(x,z,0.105));
     // procedural layer (world-axis rotations, rig independent)
     const f = _v1.set(Math.sin(this.yaw), 0, Math.cos(this.yaw)), right = _v2.set(-Math.cos(this.yaw), 0, Math.sin(this.yaw));
     const P = this.pose3, ks = 1 - Math.exp(-10 * dt);
@@ -1050,10 +1137,10 @@ class Person {
     if (pose === "talk" && this.speaking) { const g = Math.sin(t * 1.9 + this.phase), g2 = Math.sin(t * 1.3 + this.phase * 1.7); want.uarm = 0.26 + Math.max(0, g) * 0.32; want.farm = 0.86 + g * 0.18; want.inR = 0.25; want.uarmL = 0.14 + Math.max(0, g2) * 0.13; want.farmL = 0.4 + Math.max(0, g2) * 0.13; want.inL = -0.2; }
     if (pose === "coffee") { want.uarm = 0.55; want.farm = 1.9 + Math.max(0, Math.sin(t * 0.8 + this.phase)) * 0.35; want.inR = 0.3; }
     if (pose === "phone") { want.uarm = 0.35; want.farm = 2.35; want.inR = 0.8; want.headY = 0.15; }
-    if (pose === "cheer") { want.uarm = want.uarmL = 2.9 + Math.sin(t * 9) * 0.1; want.farm = want.farmL = 0.15; }
+    if (pose === "cheer" && !seated) { want.uarm = 0.89; want.farm = 1.07; want.inR = 0.15; }
     if (pose === "clap") { const c = Math.sin(t * 16) * 0.15; want.uarm = want.uarmL = 0.75; want.farm = want.farmL = 1.25; want.inR = 0.75 + c; want.inL = -0.75 - c; }
     if (pose === "highfive") { want.uarm = 2.6; want.farm = 0.1; }
-    if (pose === "facepalm") { want.uarm = 0.9; want.farm = 2.3; want.inR = 0.9; want.headX = 0.25; }
+    if (pose === "facepalm") { want.headX = 0.12; if (!seated) { want.uarm = 0.65; want.farm = 1.45; want.inR = 0.26; } }
     if (pose === "think") { want.uarm = 0.6; want.farm = 2.2; want.inR = 0.7; want.uarmL = 0.4; want.farmL = 1.4; want.inL = -0.9; }
     if (pose === "point") { want.uarm = 1.45; want.farm = 0.05; want.inR = 0.15; }
     if (pose === "present") { want.uarm = 1.2 + Math.sin(t * 1.3) * 0.12; want.farm = 0.25; want.inR = -0.3; want.uarmL = 0.4; want.farmL = 0.9; }
@@ -1110,7 +1197,7 @@ class Person {
   resetAtDesk() {
     this.clear(); this.seat = this.homeSeat; this.seat.taken = this;
     this.seat.chair.position.z = deskLayout.seatZ; this.pos.copy(this.seat.pos); this.yaw = this.seat.face;
-    this.gaitSpeed = 0; this.workReach = 1; this.sitBlend = 1; this.pose = "work";
+    this.gaitSpeed = 0; this.pace = 0; this.chairAccess = null; this.workReach = 1; this.sitBlend = 1; this.pose = "work";
     this.lookTarget = null; this.carryTablet = false; this.speaking = false;
     this.bubbleUntil = 0; this.lineAt = 0; this.bubble.classList.remove("on");
     this.animate(0,0,false);
@@ -1120,64 +1207,87 @@ class Person {
   goTo(p) { return this.do({type: "walk", to: p.clone()}); }
   sitAt(seat) {
     if (this.seat === seat && !this.queue.some(k => k.type === "walk") && this.task?.type !== "leave") return this;
-    return this.goTo(seat.approach).do({type: "walk", to: seat.dock, direct: true})
+    return this.goTo(seat.approach).do({type: "walk", to: seat.dock, access: seat})
       .face(seat.desk.position).do({type: "sit", seat});
   }
   wait(ms, pose = "stand") { return this.do({type: "wait", ms, pose}); }
   face(target) { return this.do({type: "face", target}); }
   stepAlong(k, dt) {
-    if (!k.path) k.path = k.direct ? [k.to.clone()] : findPath(this.pos, k.to);
-    const target = k.path[0];
-    if (!target) { this.task = null; return false; }
-    const dx = target.x - this.pos.x, dz = target.z - this.pos.z, dist = Math.hypot(dx, dz);
-    if (dist < 0.021) {
-      this.pos.copy(target); k.path.shift(); if (!k.path.length) this.task = null;
+    this.chairAccess = k.access || null;
+    const radius = k.access ? 0.245 : PERSON_CLEARANCE;
+    const hallClear = (x,z) => nav.clear(x,z,radius,k.access?.chair) && doorClear(x,z,radius);
+    if (!k.path) k.path = k.access ? [k.to.clone()] : findPath(this.pos,k.to);
+    const waitingBay = !k.access && k.path.length ? doorDetour(this,k) : null;
+    const target = waitingBay || k.detour || k.path[0];
+    if (!target) {
+      if ((k.retry || 0) <= officeTime) { k.retry = officeTime + 0.9; k.path = null; }
       return false;
     }
-    const desired = Math.atan2(dx, dz), diff = Math.abs(angDiff(this.yaw, desired));
-    this.turnTo(desired, dt, 8);
-    const turning = clamp(1 - diff / 1.75, 0, 1);
-    const arrival = k.path.length === 1 ? clamp(dist / 0.35, 0.24, 1) : 1;
-    const pace = this.speed * turning * arrival;
-    this.gaitSpeed = damp(this.gaitSpeed, pace, pace < this.gaitSpeed ? 11 : 6, dt);
-    const step = Math.min(dist, this.gaitSpeed * dt);
-    let ux = dx / dist, uz = dz / dist;
-    if (!k.direct && dist > 0.58) {
-      // Pass on the right when two people approach each other in an aisle.
-      for (const other of chars) {
-        if (other === this || !other.root.visible || other.seat) continue;
-        const x = other.pos.x - this.pos.x, z = other.pos.z - this.pos.z;
-        const ahead = x*ux + z*uz, lateral = x*uz-z*ux;
-        if (ahead <= 0 || ahead > 1.05 || Math.abs(lateral) > 0.49) continue;
-        const sidestep = (1 - ahead/1.1) * (1 - Math.abs(lateral)/0.5) * 1.65;
-        const side = Math.abs(lateral) < 0.12 ? -1 : -Math.sign(lateral);
-        const vx = ux + uz * sidestep * side, vz = uz - ux * sidestep * side;
-        const [cx,cz] = toCell(this.pos.x + vx * 0.38, this.pos.z + vz * 0.38);
-        if (!blocked[cz*GX+cx]) { const length=Math.hypot(vx,vz); ux=vx/length; uz=vz/length; }
-        break;
+    const dist = this.pos.distanceTo(target);
+    if (dist < 0.048 && isClearOfPeople(this,target.x,target.z) && hallClear(target.x,target.z)) {
+      this.pos.copy(target);
+      if (waitingBay) this.gaitSpeed = 0;
+      else if (k.detour) k.detour = null;
+      else { k.path.shift(); if (!k.path.length) this.task = null; }
+      return dist > 0.002;
+    }
+
+    const dx = target.x-this.pos.x, dz = target.z-this.pos.z, ux = dx/Math.max(dist,0.001), uz = dz/Math.max(dist,0.001);
+    const desired = Math.atan2(dx,dz), turn = Math.abs(angDiff(this.yaw,desired));
+    this.turnTo(desired,dt,7);
+    const corner = !waitingBay && (k.path.length > 1 || k.detour);
+    const stoppingSpeed = Math.sqrt(2*2.2*Math.max(0,dist-(corner ? 0 : 0.035)));
+    const course = clamp(Math.cos(turn),0,1);
+    const pace = Math.min(k.access ? 0.69 : this.speed, Math.max(0.11,stoppingSpeed)) * course;
+    this.gaitSpeed = this.gaitSpeed + clamp(pace - this.gaitSpeed,-3.8*dt,2.25*dt);
+    const step = Math.min(dist,this.gaitSpeed*dt) * (turn > 0.9 ? 0 : course);
+    const nextX = this.pos.x+ux*step, nextZ = this.pos.z+uz*step;
+    const blockedByPerson = !isClearOfPeople(this,nextX,nextZ);
+    if (step <= 0.0001) return false;
+    if (!blockedByPerson && hallClear(nextX,nextZ)) {
+      this.pos.set(nextX,0,nextZ); k.waited = 0;
+      return true;
+    }
+    this.gaitSpeed = Math.max(0,this.gaitSpeed - 5*dt);
+    k.waited = (k.waited || 0) + dt;
+    if (!waitingBay && !k.access && k.waited > 0.37) {
+      if (blockedByPerson) {
+        const people = nearbyCentres(this,2.8);
+        for (const side of [-1,1]) {
+          const bypass = point(this.pos.x + ux*0.24 + uz*side*0.86,this.pos.z + uz*0.24 - ux*side*0.86);
+          if (nav.segment(this.pos,bypass) && doorClear(bypass.x,bypass.z,radius) && isClearOfPeople(this,bypass.x,bypass.z)) {
+            k.detour = bypass; break;
+          }
+        }
+        if (!k.detour) {
+          const path = findPath(this.pos,k.to,people);
+          if (path.length) k.path = path;
+        }
+      } else if (doorClear(nextX,nextZ,radius)) {
+        const path = findPath(this.pos,k.to);
+        if (path.length) k.path = path;
       }
+      k.waited = 0.06;
     }
-    let x = this.pos.x + ux * step, z = this.pos.z + uz * step;
-    if (!k.direct && !freeStep(this.pos,x,z)) {
-      x = this.pos.x + dx / dist * step; z = this.pos.z + dz / dist * step;
-      if (!freeStep(this.pos,x,z)) { k.path = findPath(this.pos,k.to); return false; }
-    }
-    this.pos.x = x; this.pos.z = z;
-    return step > 0.0002;
+    return false;
   }
   chairMotion(k, dt) {
     const seat = k.seat, entering = k.type === "sit";
     if (seat.taken && seat.taken !== this) { this.task = null; return; }
     seat.taken = this; this.seat = seat;
-    k.elapsed = Math.min(2.75, (k.elapsed || 0) + dt);
-    const sequence = entering ? k.elapsed : 2.75 - k.elapsed;
+    const elapsed = Math.min(2.75, (k.elapsed || 0) + dt);
+    const sequence = entering ? elapsed : 2.75 - elapsed;
     // Bend with planted feet, roll the occupied chair in, then reach for the keys.
-    this.sitBlend = clamp(sequence / 1.45, 0, 1);
+    const blend = clamp(sequence / 1.45, 0, 1);
     const tucked = THREE.MathUtils.smoothstep(sequence, 1.45, 2.20);
+    const x = lerp(seat.dock.x,seat.pos.x,tucked), z = lerp(seat.dock.z,seat.pos.z,tucked);
+    if (!isClearOfPeople(this,x,z,blend)) return;
+    k.elapsed = elapsed; this.sitBlend = blend;
     this.workReach = THREE.MathUtils.smoothstep(sequence, 2.02, 2.75);
     seat.chair.position.z = deskLayout.seatZ - deskLayout.pullback * (1 - tucked);
     this.pos.lerpVectors(seat.dock, seat.pos, tucked);
     this.yaw = seat.face;
+    this.chairAccess = seat;
     if (k.elapsed >= 2.75) {
       this.task = null; this.pose = entering ? "work" : "stand";
       if (!entering) { this.seat = null; seat.taken = null; }
@@ -1185,7 +1295,7 @@ class Person {
   }
   startTask(k) {
     if (k.type === "walk" && this.seat) {
-      this.queue.unshift({type:"walk", to:this.seat.approach, direct:true}, k);
+      this.queue.unshift({type:"walk", to:this.seat.approach, access:this.seat}, k);
       k = {type:"leave", seat:this.seat};
     }
     this.task = k;
@@ -1195,19 +1305,21 @@ class Person {
   update(dt, t) {
     this.updateSpeech(t);
     if (!this.task && this.queue.length) this.startTask(this.queue.shift());
-    const k = this.task;
+    const k = this.task, x = this.pos.x, z = this.pos.z;
     let walking = false;
     if (k?.type === "walk") walking = this.stepAlong(k, dt);
     else if (k?.type === "leave" || k?.type === "sit") this.chairMotion(k, dt);
     else if (k?.type === "wait") { k.left -= dt * 1000; if (k.left <= 0) this.task = null; }
     else if (k?.type === "face") {
       const p = k.target.pos || k.target, angle = Math.atan2(p.x-this.pos.x, p.z-this.pos.z);
-      this.turnTo(angle,dt,8); if (Math.abs(angDiff(this.yaw,angle)) < 0.04) this.task = null;
+      this.turnTo(angle,dt,8);
+      if (Math.abs(angDiff(this.yaw,angle)) < 0.022 && (!this.footsteps || this.footsteps.settled)) this.task = null;
     } else if (k?.type === "call") { this.task = null; k.fn(this); }
-    if (!walking) this.gaitSpeed = damp(this.gaitSpeed, 0, 11, dt);
-    this.animate(dt, t, walking);
+    if (!walking) this.gaitSpeed = damp(this.gaitSpeed,0,10,dt);
+    this.pace = dt > 0 && walking ? Math.min(this.speed,Math.hypot(this.pos.x-x,this.pos.z-z)/dt) : 0;
+    this.animate(dt,t,walking);
   }
-  turnTo(a, dt, rate) { this.yaw += angDiff(this.yaw, a) * (1 - Math.exp(-rate * dt)); }
+  turnTo(a, dt, rate) { this.yaw += clamp(angDiff(this.yaw,a)*(1-Math.exp(-rate*dt)),-2.08*dt,2.08*dt); }
   animate(dt, t, walking) {
     if (this.model) return this.animateModel(dt, t, walking);
     const R = this.root, seated = !!this.seat && !walking;
@@ -1297,6 +1409,22 @@ class Person {
 function angDiff(a, b) { let d = b - a; while (d > Math.PI) d -= 2 * Math.PI; while (d < -Math.PI) d += 2 * Math.PI; return d; }
 function roleName(r) { return {trader: "Trader", research: "Quant researcher", risk: "Risk officer", scanner: "Market scanner", learn: "Learning analyst", ops: "Site reliability", ceo: "Lifecycle manager"}[r] || r; }
 
+function bodyCentre(actor,x=actor.pos.x,z=actor.pos.z,sit=actor.sitBlend) {
+  return {x:x - Math.sin(actor.yaw)*sit*0.32, z:z - Math.cos(actor.yaw)*sit*0.32};
+}
+function nearbyCentres(actor,radius) {
+  return chars.filter(other => other !== actor && other.root.visible && actor.pos.distanceToSquared(other.pos) < radius*radius)
+    .map(other => bodyCentre(other));
+}
+function isClearOfPeople(actor,x,z,sit=actor.sitBlend) {
+  const before = bodyCentre(actor), after = bodyCentre(actor,x,z,sit);
+  for (const p of nearbyCentres(actor,1.65)) {
+    const next = (p.x-after.x)**2 + (p.z-after.z)**2;
+    if (next < PASSING_DISTANCE**2 && next < (p.x-before.x)**2 + (p.z-before.z)**2 - 1e-7) return false;
+  }
+  return true;
+}
+
 // ---- cast (names are fixed so they stay recognisable)
 const ceo = new Person("Mila", "ceo", ceoSeat, {hair: 2, badge: true});
 const scout = new Person("Ravi", "scanner", seats.scan0);
@@ -1324,7 +1452,7 @@ function drawFootShadows() {
     for (const sole of c.soles) {
       sole.getWorldPosition(footPosition);
       const lift = clamp((footPosition.y - 0.035) * 4.4, 0, 0.68);
-      footStamp.position.set(footPosition.x - 0.055*Math.sin(c.yaw), 0.031, footPosition.z - 0.055*Math.cos(c.yaw));
+      footStamp.position.set(footPosition.x - 0.055*Math.sin(c.yaw), groundAt(footPosition.x,footPosition.z)+0.006, footPosition.z - 0.055*Math.cos(c.yaw));
       footStamp.rotation.y = c.yaw;
       footStamp.scale.set(0.20*(1-lift),0.33*(1-lift),1);
       footStamp.updateMatrix(); footShadows.setMatrixAt(count++,footStamp.matrix);
@@ -2097,7 +2225,7 @@ function adjustResolution(delta, now) {
 }
 let lastScreens = 0, lastShadow = 0, pipeOffset = 0, beamOffset = 0;
 function tick() {
-  const delta = clock.getDelta(), dt = document.hidden ? 0 : Math.min(delta, 0.25), now = performance.now();
+  const delta = clock.getDelta(), dt = document.hidden ? 0 : Math.min(delta, 0.075), now = performance.now();
   directOffice(dt);
   const t = officeTime;
   adjustResolution(delta, now);
@@ -2135,6 +2263,7 @@ function tick() {
     pk.m.quaternion.setFromUnitVectors(UP, direction);
   }
   // people
+  moveDoors(dt);
   for (const c of chars) {
     if (!c.root.visible) continue;
     c.update(dt, t);
@@ -2143,13 +2272,6 @@ function tick() {
 
   }
   drawFootShadows();
-  for (const door of doors) {
-    const near = chars.some(c => c.root.visible && Math.hypot(c.pos.x - door.x, c.pos.z - door.z) < 1.95);
-    const target = near ? 1 : 0;
-    door.open = reducedMotion.matches ? target : damp(door.open, target, near ? 8 : 5, dt);
-    const gap = door.width * (0.25 + door.open * 0.24);
-    door.panels[0].position.x = -gap; door.panels[1].position.x = gap;
-  }
   if (now - lastScreens > 700) { drawAll(t); refreshPersonCard(); lastScreens = now; }
   // camera
   if (camTween) {

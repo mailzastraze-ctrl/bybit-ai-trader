@@ -3,7 +3,7 @@
 import * as THREE from "three";
 
 export const deskLayout = {
-  seatZ: -0.72, feetZ: -0.375, pullback: 0.235, keyboardZ: -0.22, mouseX: -0.302,
+  seatZ: -0.72, feetZ: -0.375, pullback: 0.41, keyboardZ: -0.22, mouseX: -0.302,
   floorY: 0.024,
 };
 
