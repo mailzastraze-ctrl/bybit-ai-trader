@@ -51,5 +51,5 @@
     "password": ""
   },
   "internals": {"process_throttle_secs": 5, "heartbeat_interval": 300},
-  "aitrader": {"manifest_path": "/data/aitrader/manifest.json", "max_open_risk": 0.08, "max_same_side": 25, "max_leverage": 1}
+  "aitrader": {"manifest_path": "/data/aitrader/manifest.json", "max_open_risk": 0.08, "max_side_risk": 0.04, "max_same_side": 25, "max_leverage": 1}
 }

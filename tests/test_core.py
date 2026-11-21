@@ -223,3 +223,33 @@ def test_oi_family_is_silent_without_open_interest():
     fam = get_family("oi_flow")
     out = fam.populate(ohlcv(1500, seed=2), fam.defaults())
     assert out["long_sig"].sum() + out["short_sig"].sum() == 0
+
+
+def test_careful_trader_exit_rules_are_off_by_default_and_only_tighten():
+    from datetime import datetime, timezone
+
+    from aitrader.families import FAMILIES
+    from aitrader.riskcore import EntryContext
+
+    p = FAMILIES["ema_cross"].normalize({"sl_atr": 2.0, "tp_rr": 3.0, "be_rr": 1.0, "lock_rr": 1.5, "lock_frac": 0.4,
+                                          "trail_rr": 3.0, "trail_atr": 2.5})
+    ctx = EntryContext(entry=100.0, atr=1.0, is_short=False)       # R = 2, TP = 106
+    calm = datetime(2026, 11, 2, 12, tzinfo=timezone.utc)          # no US release within 8 h
+    base = ctx.managed_stop(p, 105.4)                              # 2.7 R: ratchet locks 40% of 5.4
+    assert base == pytest.approx(102.16)
+    assert ctx.managed_stop(p, 105.4, now=calm, cur_atr=3.0) == base  # genes off: identical to before
+    # near the take profit (90% of the way): keep 75% of the best open profit
+    assert ctx.managed_stop({**p, "tp_near": 0.85, "tp_lock": 0.75}, 105.4) == pytest.approx(104.05)
+    assert ctx.managed_stop({**p, "tp_near": 0.95, "tp_lock": 0.75}, 105.4) == base   # not that close yet
+    # 1 h before the 10 Nov 2026 CPI release (13:30 UTC): lock half of the profit
+    before_cpi = datetime(2026, 11, 10, 12, 30, tzinfo=timezone.utc)
+    assert ctx.managed_stop({**p, "event_lock": 1}, 105.4, now=before_cpi) == pytest.approx(102.7)
+    assert ctx.managed_stop({**p, "event_lock": 1}, 105.4, now=calm) == base
+    # volatility shock: ATR doubled → trail 2.5 ATR(entry) from the best price
+    assert ctx.managed_stop({**p, "vol_shock": 2}, 105.4, cur_atr=2.1) == pytest.approx(102.9)
+    assert ctx.managed_stop({**p, "vol_shock": 2}, 105.4, cur_atr=1.5) == base
+    # a short mirrors everything, and nothing ever loosens the initial stop
+    s = EntryContext(entry=100.0, atr=1.0, is_short=True)
+    assert s.managed_stop({**p, "tp_near": 0.85}, 94.6) == pytest.approx(95.95)
+    assert ctx.managed_stop({**p, "tp_near": 0.5, "event_lock": 2, "vol_shock": 1}, 99.0, now=before_cpi, cur_atr=9) == 98.0
+    assert ctx.break_even() == pytest.approx(100.12) and s.break_even() == pytest.approx(99.88)

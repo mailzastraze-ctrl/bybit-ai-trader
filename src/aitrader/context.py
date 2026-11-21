@@ -66,6 +66,14 @@ def near_event(times: pd.Series, hours: float) -> pd.Series:
     return pd.Series(np.minimum(lo, hi) <= hours * 3600e9, index=times.index)
 
 
+def hours_to_next_event(now) -> float | None:
+    """Hours until the next high-impact US release (None if the calendar has run out)."""
+    ev = _event_ns()
+    t = pd.Timestamp(now).tz_convert("UTC") if pd.Timestamp(now).tzinfo else pd.Timestamp(now, tz="UTC")
+    i = int(np.searchsorted(ev, t.value))
+    return None if i >= len(ev) else (ev[i] - t.value) / 3600e9
+
+
 # ------------------------------------------------------------------ sessions
 def region_open(times: pd.Series, region: str) -> pd.Series:
     """True while any regular market of the region is open (weekdays, local hours)."""

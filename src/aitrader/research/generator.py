@@ -13,7 +13,7 @@ import math
 import random
 
 from aitrader.families import FAMILIES, MULTI_TF
-from aitrader.families.base import CONTEXT_GENES
+from aitrader.families.base import CONTEXT_GENES, EXIT_GENES
 from aitrader.registry import Registry
 from aitrader.settings import Settings
 from aitrader.util import iso
@@ -108,13 +108,13 @@ class Generator:
         params = fam.normalize(cand.get("params"))
         over = {}
         for p in fam.params:
-            if p.name in ("htf_trend", "vol_regime", "session", "no_weekend", "event_guard"):
+            if p.name in ("htf_trend", "vol_regime", "session", "no_weekend", "event_guard", "event_lock", "vol_shock"):
                 over[p.name] = [params[p.name], params[p.name]]  # keep the structural genes
                 continue
             span = (p.high - p.low) * width
             over[p.name] = [max(p.low, params[p.name] - span), min(p.high, params[p.name] + span)]
         merged = {**over, **spec.get("space_overrides", {})}
-        for g in ("htf_trend", "vol_regime") + CONTEXT_GENES:  # a refinement keeps its structure
+        for g in ("htf_trend", "vol_regime", "tp_lock") + CONTEXT_GENES + EXIT_GENES:  # a refinement keeps its structure
             merged[g] = over[g]
         spec["space_overrides"] = merged
         own = [p for p in (cand.get("pairs") or []) if p in universe]
@@ -166,4 +166,9 @@ class Generator:
         if self.rng.random() >= 0.35:
             for g in CONTEXT_GENES:
                 overrides.setdefault(g, [0, 0])
+        # careful-trader exits (lock near TP, before macro releases, on volatility shocks): same idea
+        if self.rng.random() >= 0.35:
+            for g in EXIT_GENES:
+                overrides.setdefault(g, [0, 0])
+            overrides.setdefault("tp_lock", [0.75, 0.75])
         return spec

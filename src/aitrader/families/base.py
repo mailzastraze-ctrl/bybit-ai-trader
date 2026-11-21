@@ -46,6 +46,11 @@ EXIT_PARAMS: tuple[Param, ...] = (
     Param("be_rr", "float", 0.3, 2.0, 1.0, "sell", 2),  # move stop to break-even at this R
     Param("lock_rr", "float", 0.5, 3.0, 1.5, "sell", 2),  # start the profit ratchet at this R
     Param("lock_frac", "float", 0.0, 0.8, 0.4, "sell", 2),  # share of best open profit that is locked
+    # what a careful trader adds (all off by default; research decides whether they pay):
+    Param("tp_near", "float", 0.0, 0.95, 0.0, "sell", 2),  # >0: once this share of the way to TP was reached …
+    Param("tp_lock", "float", 0.5, 0.95, 0.75, "sell", 2),  # … lock this share of the best open profit
+    Param("event_lock", "int", 0, 2, 0, "sell"),  # lock half the profit 2 h (1) / 8 h (2) before US CPI/jobs/Fed
+    Param("vol_shock", "int", 0, 3, 0, "sell"),  # trail from the best price once ATR ≥ 1.6× / 2× / 2.5× the entry ATR
     Param("conv_w", "float", 0.0, 1.0, 0.5, "sell", 2),  # sizing: weight on signal conviction
 )
 
@@ -63,6 +68,7 @@ GENE_PARAMS: tuple[Param, ...] = (
     Param("event_guard", "int", 0, 2, 0, "buy"),  # 1 = none ±2 h around US CPI/jobs/Fed, 2 = ±12 h
 )
 CONTEXT_GENES = ("session", "no_weekend", "event_guard")
+EXIT_GENES = ("tp_near", "event_lock", "vol_shock")  # careful-trader exits, searched like the context genes
 
 ATR_LEN = 14
 VOL_WINDOW = 500

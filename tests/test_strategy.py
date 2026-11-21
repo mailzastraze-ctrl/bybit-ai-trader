@@ -280,3 +280,48 @@ def test_crossing_falls_back_when_quotes_fail(portfolio):
     long_tr = SimpleNamespace(is_short=False)
     assert portfolio.adjust_exit_price(long_tr, order, "X", t0 + timedelta(seconds=120), 100.0, 100.0, "s1", "long") \
         == pytest.approx(100.0 * 0.998)
+
+
+def test_take_profit_waits_at_target_side_risk_cap_and_market_shock_guard(portfolio, monkeypatch):
+    from datetime import datetime, timezone
+
+    import pandas as pd
+    from freqtrade.persistence import Trade
+
+    from aitrader.riskcore import EntryContext
+    portfolio.config["runmode"] = "live"
+    t0 = datetime(2026, 1, 1, tzinfo=timezone.utc)
+    p = {"sl_atr": 2.0, "tp_rr": 2.0, "be_rr": 1.0, "lock_rr": 1.5, "lock_frac": 0.4, "trail_rr": 3.0, "trail_atr": 2.5,
+         "max_hold": 72}
+    monkeypatch.setattr(portfolio, "_ctx", lambda pair, tr: EntryContext(entry=100.0, atr=1.0, is_short=tr.is_short))
+    monkeypatch.setattr(portfolio, "_params", lambda tr: dict(p))
+    long_tr, short_tr = SimpleNamespace(is_short=False), SimpleNamespace(is_short=True)   # TP 104 / 96
+    portfolio.dp = SimpleNamespace(orderbook=lambda pair, n: {"bids": [[103.0, 1]], "asks": [[103.2, 1]]})
+    order = SimpleNamespace(order_date_utc=t0, ft_order_tag="take_profit")
+    # a wick hit TP and fell back: the resting order waits at 104 instead of chasing down to 103.2
+    assert portfolio.adjust_exit_price(long_tr, order, "X", t0 + timedelta(seconds=30), 103.2, 104.0, "s1", "long") == 104.0
+    assert portfolio.custom_exit_price("X", long_tr, t0, 103.2, 0.03, "take_profit") == 104.0
+    assert portfolio.custom_exit_price("X", short_tr, t0, 96.5, 0.03, "take_profit") == 96.0
+    assert portfolio.custom_exit_price("X", long_tr, t0, 103.2, 0.03, "exit_signal") == 103.2
+    # risk per side: 1.5% of equity by default (half of max_open_risk) – the other side stays open
+    portfolio.wallets = FakeWallets()
+    mk = lambda short: SimpleNamespace(is_short=short, open_rate=100.0, stop_loss=101.0 if short else 99.0,  # noqa: E731
+                                       stake_amount=1000.0, leverage=1.0)
+    monkeypatch.setattr(Trade, "get_open_trades", staticmethod(lambda: [mk(True)] * 1), raising=False)
+    ok = lambda side: portfolio.confirm_trade_entry("BTC/USDT:USDT", "limit", 1, 100, "GTC", None, "s1", side)  # noqa: E731
+    portfolio.config.setdefault("aitrader", {})["max_side_risk"] = 0.001
+    assert ok("short") is False and ok("long") is False   # 0.1% cap: any new risk exceeds it
+    portfolio.config["aitrader"]["max_side_risk"] = 0.5
+    assert ok("short") is True
+    # market shock: BTC +3% in the last hour → a profitable short goes to break-even; a long is untouched
+    btc = pd.DataFrame({"close": [100.0] * 10 + [103.0]})
+    portfolio.dp = SimpleNamespace(get_pair_dataframe=lambda pair, tf: btc, get_analyzed_dataframe=lambda pair, tf: (None, None))
+    tr = SimpleNamespace(id=7, is_short=True, min_rate=98.8, max_rate=100.0, open_rate=100.0, enter_tag="s1")
+    stop = portfolio._stop("ETH/USDT:USDT", tr, EntryContext(entry=100.0, atr=1.0, is_short=True), dict(p), t0)
+    assert stop == pytest.approx(99.88)
+    lt = SimpleNamespace(id=8, is_short=False, min_rate=100.0, max_rate=103.0, open_rate=100.0, enter_tag="s1")
+    assert portfolio._stop("ETH/USDT:USDT", lt, EntryContext(entry=100.0, atr=1.0, is_short=False), dict(p), t0) \
+        == EntryContext(entry=100.0, atr=1.0, is_short=False).managed_stop(dict(p), 103.0)
+    portfolio.config["runmode"] = "backtest"
+    portfolio._shock_at = None
+    assert portfolio._stop("ETH/USDT:USDT", tr, EntryContext(entry=100.0, atr=1.0, is_short=True), dict(p), t0) == pytest.approx(102.0)

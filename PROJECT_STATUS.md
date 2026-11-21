@@ -1,6 +1,6 @@
 # PROJECT_STATUS
 
-_Last updated: 2026-11-21 12:45 CET_
+_Last updated: 2026-11-21 14:40 CET_
 
 ## Summary
 The system is **deployed and running autonomously on Bybit Demo**. It never trades real money: `demo_trading` is hard-required.
@@ -26,6 +26,21 @@ Links and rules:
 | 7 | Web terminal | ✅ live | **Control room** (primary, desktop + phone): capital curve, positions with protection state, forward-test verdict, 4 live lab runners, results with fold squares, bandit, gates, lifecycle, goals, readiness, log, learnings, closed trades. **3D HQ v3** at `/hq`: real data on every screen (live 1h candles with entry/stop/target, live GitHub hyperopt epochs, fold results, gates, bandit, market map, goals). Company mission board, stand-up meetings built from real numbers, GitHub-lab cloud with data beam, expressive characters. Rendered headlessly on every UI change (`hq-preview` workflow, screenshots in `docs/preview/`, fails on JS errors) |
 | — | Cloud, independent of your PC | ✅ / ⚠️ | Railway **trial** credit runs out in about 15 days. Hobby is needed for indefinite operation |
 | — | GitHub + PROJECT_STATUS | ✅ | CI green with the real Freqtrade image; 113 tests |
+
+## Position management like a careful trader (2026-11-21, owner's request)
+**Live protection (protective direction only):**
+- **Take-profit execution:**
+  - Before: when price touched the target, the passive maker order followed the price for up to 90 s and could fill below the target after a wick.
+  - Now: the order waits at the target, then crosses as before.
+- **Risk per side:** at most 4% of equity at stops in one direction (`max_side_risk`, half of the 8% total). Crypto positions in one direction are close to a single bet; at the time of this change all 7 open positions were shorts.
+- **Market-shock guard:** if BTC moves ≥ 2.5% in one hour against a side, every position of that side that is ≥ 0.5 R in profit gets its stop moved to break-even (+ fees). Nothing is opened or closed by this rule, and losing positions keep their stop.
+
+**Careful-trader exits as researched genes** (off by default; searched in ~35% of new experiments, refinements keep them):
+- `tp_near` / `tp_lock`: once `tp_near` of the way to the take profit has been reached, lock `tp_lock` of the best open profit (the habit of not giving back a nearly-won trade).
+- `event_lock`: 2 h or 8 h before a US CPI, jobs or Fed release, lock half the profit if ≥ 0.5 R.
+- `vol_shock`: trail from the best price once current ATR ≥ 1.6× / 2× / 2.5× the entry ATR.
+
+All three live in `riskcore.managed_stop`, with identical inputs in backtests and live. The walk-forward, the decoys and the forward test decide whether "closing a bit early" earns more than it gives up.
 
 ## Market context + simpler control panel (2026-11-21, owner's request)
 **Context as testable conditions (research decides, nothing is traded on faith):**

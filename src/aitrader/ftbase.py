@@ -124,8 +124,8 @@ class AIBase(IStrategy):
         if self._needs_funding():
             ftf = self._funding_tf()
             out += [(p, ftf, "funding_rate") for p in wl]
-        if self._needs_market():
-            out.append((MARKET_PAIR, self.timeframe))
+        if self._needs_market() or self.config.get("runmode") in (RunMode.LIVE, RunMode.DRY_RUN):
+            out.append((MARKET_PAIR, self.timeframe))  # also the live market-shock guard
             out += [(MARKET_PAIR, self._tf(sl)) for sl in self.all_sleeves()
                     if sl.family in NEEDS_MARKET and self._tf(sl) != self.timeframe]
         return list(dict.fromkeys(out))
@@ -311,6 +311,57 @@ class AIBase(IStrategy):
                 self._entry_atr[key] = atr
         return EntryContext(entry=float(trade.open_rate), atr=atr, is_short=bool(trade.is_short))
 
+    def _cur_atr(self, pair: str, trade: Trade, current_time: datetime) -> float | None:
+        """ATR of the last closed candle of the trade's strategy (for the vol-shock rule)."""
+        try:
+            df, _ = self.dp.get_analyzed_dataframe(pair, self.timeframe)
+            sl = None if (trade.enter_tag or "").startswith(EXEC_TEST_TAG) else self.sleeve_for_trade(trade)
+            col = f"at:{sl.id}" if sl is not None and df is not None and f"at:{sl.id}" in df else "atr"
+            row = signal_row(df, current_time, self._tf_min)
+            v = None if row is None else row.get(col)
+            return float(v) if v is not None and v == v and v > 0 else None
+        except Exception:  # noqa: BLE001 – optional input
+            return None
+
+    def _stop(self, pair: str, trade: Trade, ctx: EntryContext, p: dict, current_time: datetime) -> float:
+        best = trade.min_rate if trade.is_short else trade.max_rate
+        cur_atr = self._cur_atr(pair, trade, current_time) if int(p.get("vol_shock") or 0) else None
+        stop = ctx.managed_stop(p, float(best or trade.open_rate), now=current_time, cur_atr=cur_atr)
+        shock = self._market_shock(current_time)
+        # live portfolio guard: BTC lurched against this side – a profitable position is moved to
+        # break-even (protective only; losing positions keep their stop, nothing is opened)
+        if shock and (shock > 0) == bool(trade.is_short) and ctx.r_multiple(float(best or trade.open_rate), p) >= 0.5:
+            be = ctx.break_even()
+            stop = min(stop, be) if trade.is_short else max(stop, be)
+            if trade.id not in self._shock_logged:
+                self._shock_logged.add(trade.id)
+                logger.info("market shock guard: BTC %+.1f%% in 1h, %s %s stop to break-even", 100 * self._shock_move,
+                            "short" if trade.is_short else "long", pair)
+        return stop
+
+    SHOCK_MOVE = 0.025  # BTC move in one hour that counts as a market shock
+
+    def _market_shock(self, current_time: datetime) -> int:
+        """+1 / −1 when BTC moved ≥ SHOCK_MOVE up / down over the last hour (live only)."""
+        if self.config.get("runmode") not in (RunMode.LIVE, RunMode.DRY_RUN) or not self.dp:
+            return 0
+        if not hasattr(self, "_shock_logged"):
+            self._shock_logged, self._shock_at, self._shock, self._shock_move = set(), None, 0, 0.0
+        if self._shock_at and (current_time - self._shock_at).total_seconds() < 30:
+            return self._shock
+        self._shock_at, self._shock = current_time, 0
+        try:
+            df = self.dp.get_pair_dataframe(MARKET_PAIR, self.timeframe)
+            n = max(1, int(60 / max(self._tf_min, 1)))
+            if df is not None and len(df) > n:
+                c = df["close"].to_numpy()
+                self._shock_move = float(c[-1] / c[-1 - n] - 1)
+                if abs(self._shock_move) >= self.SHOCK_MOVE:
+                    self._shock = 1 if self._shock_move > 0 else -1
+        except Exception:  # noqa: BLE001
+            pass
+        return self._shock
+
     # ------------------------------------------------------------------ exits
     def custom_stoploss(self, pair: str, trade: Trade, current_time: datetime,
                         current_rate: float, current_profit: float, after_fill: bool,
@@ -318,9 +369,7 @@ class AIBase(IStrategy):
         ctx = self._ctx(pair, trade)
         if ctx is None:
             return None
-        p = self._params(trade)
-        best = trade.min_rate if trade.is_short else trade.max_rate
-        stop = ctx.managed_stop(p, float(best or trade.open_rate))
+        stop = self._stop(pair, trade, ctx, self._params(trade), current_time)
         return stoploss_from_absolute(stop, current_rate, is_short=trade.is_short,
                                       leverage=trade.leverage or 1.0)
 
@@ -332,8 +381,7 @@ class AIBase(IStrategy):
         p = self._params(trade)
         if ctx.tp_hit(current_rate, p):
             return "take_profit"
-        best = trade.min_rate if trade.is_short else trade.max_rate
-        stop = ctx.managed_stop(p, float(best or trade.open_rate))
+        stop = self._stop(pair, trade, ctx, p, current_time)
         if (trade.is_short and current_rate >= stop) or (not trade.is_short and current_rate <= stop):
             return "managed_stop"
         sl = None if (trade.enter_tag or "").startswith(EXEC_TEST_TAG) else self.sleeve_for_trade(trade)
@@ -402,7 +450,21 @@ class AIBase(IStrategy):
             return proposed_rate
         if (exit_tag or "") in self.URGENT_EXITS:
             return self._cross_price(pair, not trade.is_short) or proposed_rate
-        return proposed_rate
+        return self._not_below_tp(pair, trade, proposed_rate, exit_tag)
+
+    def _not_below_tp(self, pair: str, trade: Trade, rate: float, exit_tag: str | None) -> float:
+        """A resting take-profit order never sells below (buys above) the take-profit level:
+        after a wick to the target the order waits there instead of chasing the price away."""
+        if (exit_tag or "") != "take_profit" or not rate:
+            return rate
+        try:
+            ctx = self._ctx(pair, trade)
+            if ctx is None:
+                return rate
+            tp = ctx.take_profit(self._params(trade))
+        except Exception:  # noqa: BLE001 – never block an exit on a lookup problem
+            return rate
+        return min(rate, tp) if trade.is_short else max(rate, tp)
 
     def adjust_exit_price(self, trade: Trade, order, pair: str, current_time: datetime,
                           proposed_rate: float, current_order_rate: float, entry_tag: str | None,
@@ -412,8 +474,9 @@ class AIBase(IStrategy):
         placed = getattr(order, "order_date_utc", None) if order is not None else None
         age = (current_time - placed).total_seconds() if placed else 0.0
         if age < self.MAKER_EXIT_WAIT_S:
+            tag = getattr(order, "ft_order_tag", None) if order is not None else None
             if proposed_rate and current_order_rate and abs(proposed_rate / current_order_rate - 1) > 0.0005:
-                return proposed_rate  # follow the touch, stay passive
+                return self._not_below_tp(pair, trade, proposed_rate, tag)  # follow the touch, stay passive
             return current_order_rate
         px = self._cross_price(pair, not trade.is_short)
         if px is None:
@@ -451,6 +514,15 @@ class AIBase(IStrategy):
             if open_risk + new_risk > max_risk * equity:
                 logger.info("portfolio limit: %s %s skipped (open risk %.2f%% of equity, cap %.1f%%)", side, pair,
                             100 * open_risk / equity, 100 * max_risk)
+                return False
+            # one direction is close to one bet (crypto moves together): cap the risk per side too
+            side_risk = sum(max(((t.stop_loss - t.open_rate) / t.open_rate if t.is_short else (t.open_rate - t.stop_loss) / t.open_rate), 0.0)
+                            * float(t.stake_amount or 0) * float(t.leverage or 1)
+                            for t in trades if t.open_rate and t.stop_loss and bool(t.is_short) == short)
+            max_side_risk = float(cfg.get("max_side_risk", max_risk / 2))
+            if side_risk + new_risk > max_side_risk * equity:
+                logger.info("portfolio limit: %s %s skipped (%s risk %.2f%% of equity, cap %.1f%% per side)", side, pair,
+                            side, 100 * side_risk / equity, 100 * max_side_risk)
                 return False
         return True
 
