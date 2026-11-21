@@ -364,6 +364,13 @@ def cards_api() -> dict:
     return cards.build(reg())
 
 
+@app.get("/api/context", dependencies=[Depends(auth)])
+def context_api() -> dict:
+    """«Мир сейчас»: open exchanges, upcoming US macro releases, crowd and options mood."""
+    from aitrader import context
+    return context.snapshot(reg())
+
+
 @app.get("/api/screen", dependencies=[Depends(auth)])
 def screen_api() -> dict:
     """Stage 1 of the lab: the owner's Strategy Lab engine screening thousands of combinations."""

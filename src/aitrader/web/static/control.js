@@ -48,10 +48,10 @@ function renderHeader() {
   const ov = S.ov || {}, rs = S.rs || {};
   chip("#chBot", ov.bot_up ? "good live" : "crit", ov.bot_up ? "Бот торгует · Bybit Demo" : "Бот не отвечает");
   const running = (rs.experiments || []).filter((e) => e.status === "running" && e.progress?.stage !== "evaluated").length;
-  chip("#chLab", labActive() ? "good live" : rs.paused ? "warn" : "", labActive() ? `Лаборатория: идёт ${running} опытов` : rs.paused ? "Лаборатория на паузе" : "Лаборатория между прогонами");
+  chip("#chLab", labActive() ? "good live" : rs.paused ? "warn" : "", labActive() ? `Лаборатория: ${running} ${plural(running, "опыт идёт", "опыта идут", "опытов идут")}` : rs.paused ? "Лаборатория на паузе" : "Лаборатория между прогонами");
   const ks = ov.kill_switch, paused = ov.entries_paused;
   chip("#chRisk", ks ? "crit" : paused ? "warn" : "good", ks ? "Аварийный стоп" : paused ? "Входы на паузе" : "Риск в норме");
-  $("#chUpd span").textContent = "обновлено " + new Date().toLocaleTimeString("ru-RU");
+  S.updated = new Date();
 }
 function kpi(label, value, sub, k = "") { return `<div class="kpi"><div class="l">${esc(label)}</div><div class="v num ${k}">${value}</div><div class="s">${sub}</div></div>`; }
 function renderKpis() {
@@ -62,16 +62,78 @@ function renderKpis() {
   const fw = S.fw || {}, rd = S.ready || {}, rsg = (G.goals || []).find((g) => g.id === "research");
   const nTrading = (ov.manifest?.sleeves || []).filter((s) => s.stage !== "closing").length;
   const fwLabel = {works: "Работает", not_working: "Не работает", inconclusive: "Неясно", early_positive: "Скорее +", early_negative: "Скорее −", too_early: "Сбор данных"}[fw.verdict] || "Сбор данных";
+  const coins = new Set((ov.manifest?.sleeves || []).filter((s) => s.stage !== "closing").flatMap((s) => s.pairs)).size;
+  const tr = S.trades?.closed || [], wins = tr.filter((t) => +t.profit_abs > 0).length;
   $("#kpis").innerHTML = [
     kpi("Торговый капитал", usd(now, 0), ch == null ? "копим снимки" : `<span class="${cls(ch)}">${pct(ch)}</span> за 24ч`),
-    kpi("Стратегий торгует", `${nTrading}`, `${open.length} открытых позиций · <span class="${cls(upnl)}">${sgnUsd(upnl)}</span>`),
-    kpi("Закрытый P&L (демо)", `<span class="${cls(ov.closed_pnl)}">${sgnUsd(ov.closed_pnl)}</span>`, `${ov.closed_count ?? 0} сделок`),
-    kpi("Форвард-тест", fwLabel, `${fw.top?.trades || 0} сделок на новых данных · ${fw.book_size ?? 0} стратегий`, {works: "pos", not_working: "neg"}[fw.verdict] || ""),
-    kpi("Исследования · 7 дней", `${rsg?.value ?? 0}`, `строгих проверок (цель ${rsg?.target ?? "—"})`),
-    kpi("Готовность к реалу", `${rd.passed ?? 0}/${rd.total ?? 8}`, rd.ready ? "все проверки пройдены" : "проверок пройдено · только совет"),
+    kpi("Результат на демо", `<span class="${cls(ov.closed_pnl)}">${sgnUsd(ov.closed_pnl)}</span>`, `${ov.closed_count ?? 0} закрытых сделок${tr.length ? ` · ${Math.round(wins / tr.length * 100)}% в плюс` : ""}`),
+    kpi("Сейчас в рынке", `${open.length} ${plural(open.length, "позиция", "позиции", "позиций")}`, `<span class="${cls(upnl)}">${sgnUsd(upnl)}</span> · ${nTrading} стратегий на ${coins} монетах`),
+    kpi("Может ли зарабатывать?", fwLabel, `форвард-тест: ${fw.top?.trades || 0} из ${fw.rules?.final_trades ?? 200} сделок`, {works: "pos", not_working: "neg"}[fw.verdict] || ""),
+    kpi("Готовность к реалу", `${rd.passed ?? 0}/${rd.total ?? 8}`, rd.ready ? "все проверки пройдены — решать вам" : "проверок пройдено · только совет"),
   ].join("");
-  $("#mission").textContent = "Миссия: найти, доказать и масштабировать реальные торговые преимущества на Bybit Demo — без подгонки и без выдуманных результатов.";
-  const gs = G.goals || []; $("#goalsDone").textContent = gs.length ? `${gs.filter((g) => g.progress >= 1).length} из ${gs.length} целей достигнуто` : "";
+  const gs = G.goals || [];
+  $("#mission").textContent = `Миссия: найти, доказать и масштабировать реальные торговые преимущества на Bybit Demo — без подгонки и без выдуманных результатов.${gs.length ? ` Целей достигнуто: ${gs.filter((g) => g.progress >= 1).length} из ${gs.length}.` : ""}`;
+}
+const plural = (n, a, b, c) => { const m = Math.abs(n) % 100, k = m % 10; return m > 10 && m < 20 ? c : k === 1 ? a : k >= 2 && k <= 4 ? b : c; };
+const span = (ms) => { const m = Math.max(0, Math.round(ms / 60000)); if (m < 60) return `${m} мин`; const h = Math.floor(m / 60); if (h < 24) return `${h} ч ${m % 60 ? (m % 60) + " мин" : ""}`.trim(); return `${Math.floor(h / 24)} дн ${h % 24 ? (h % 24) + " ч" : ""}`.trim(); };
+const whenRu = (iso) => new Date(iso).toLocaleString("ru-RU", {weekday: "short", day: "numeric", month: "short", hour: "2-digit", minute: "2-digit"});
+
+// ---------------------------------------------------------------------------- сводка + внимание
+function renderBrief() {
+  if (S.tab !== "overview") return;
+  const ov = S.ov || {}, rs = S.rs || {}, fw = S.fw || {}, sc = S.scr || {}, ctx = S.ctx || {};
+  const open = ov.open_trades || [], upnl = open.reduce((a, t) => a + (+t.profit_abs || 0), 0);
+  const sl = (ov.manifest?.sleeves || []).filter((s) => s.stage !== "closing");
+  const coins = new Set(sl.flatMap((s) => s.pairs)).size;
+  const att = [];
+  if (S.err) att.push(["crit", `Пульт не получает данные с сервера (${esc(S.err)}). Торговля на сервере от этого не зависит.`]);
+  if (!ov.bot_up && S.ov) att.push(["crit", "Бот не отвечает. Менеджер перезапустит его сам; если это длится больше 10 минут — напишите мне."]);
+  if (ov.kill_switch) att.push(["crit", `Сработал аварийный стоп: ${esc(ov.kill_switch.reason || "просадка счёта")}. Новые входы закрыты до остывания.`]);
+  else if (ov.entries_paused) att.push(["warn", "Новые входы на паузе (риск-контроль). Открытые позиции защищены стопами."]);
+  const imp = rs.lab?.last_import ? Date.now() - new Date(rs.lab.last_import).getTime() : null;
+  if (imp != null && imp > 10 * 3600e3) att.push(["warn", `Лаборатория не присылала результаты ${span(imp)}. Прогоны перезапускаются сами по расписанию.`]);
+  for (const d of ctx.delistings || []) att.push(["warn", `Bybit объявил делистинг ${esc(pair(d.pair))} — новые входы по этой монете закрыты автоматически.`]);
+  const soon = (ctx.events || []).find((e) => { const dt = new Date(e.ts).getTime() - Date.now(); return dt > -3600e3 && dt < 24 * 3600e3; });
+  if (soon) att.push(["", `${esc(soon.name)} — ${new Date(soon.ts) > new Date() ? "через " + span(new Date(soon.ts) - Date.now()) : "только что"}. Возможны резкие движения.`]);
+  if (S.ready?.ready) att.push(["good", "Все проверки готовности к реальному счёту пройдены. Решение — только за вами."]);
+  const status = att.some((a) => a[0] === "crit") ? "crit" : att.some((a) => a[0] === "warn") ? "warn" : "";
+  const head = status === "crit" ? "Нужно ваше внимание" : status === "warn" ? "Работает, есть замечания" : "Всё работает";
+  const labLine = labActive() ? `идёт прогон лаборатории (${(rs.experiments || []).filter((e) => e.status === "running").length} опытов одновременно)` : "лаборатория между прогонами, следующий запустится сам";
+  const auto = sc.swing_tested != null ? ` Автопоиск: принято ${sc.swing_survivors ?? 0} стратегий на ${sc.swing_coins_covered ?? 0} монетах.` : "";
+  $("#brief").innerHTML = `<div class="head"><span class="dot ${status}"></span>${head}</div>
+    <p>Бот торгует на <b>Bybit Demo</b> (без плеча): ${sl.length} стратегий на ${coins} монетах, открыто ${open.length} ${plural(open.length, "позиция", "позиции", "позиций")}${open.length ? ` (<span class="${cls(upnl)}">${sgnUsd(upnl)}</span>)` : ""}.</p>
+    <p>Исследования: ${labLine}; за 7 дней — ${(S.goals?.goals || []).find((g) => g.id === "research")?.value ?? 0} строгих проверок.${auto}</p>
+    <p>Главный вопрос «может ли система зарабатывать»: ${fw.verdict === "works" ? "<b class=pos>да, форвард-тест подтвердил</b>" : fw.verdict === "not_working" ? "<b class=neg>пока нет</b>" : `копим данные — ${fw.top?.trades || 0} из ${fw.rules?.final_trades ?? 200} сделок форвард-теста`}.</p>
+    <div class="upd">обновлено ${S.updated ? S.updated.toLocaleTimeString("ru-RU") : "—"} · данные обновляются каждые 10 секунд</div>`;
+  $("#attention").innerHTML = `<div class="t">Требует внимания</div>` + (att.length
+    ? att.map(([k, t]) => `<div class="it ${k}">${t}</div>`).join("")
+    : `<div class="it good">Ничего — компания работает сама. Можно просто заглядывать.</div>`);
+}
+
+// ---------------------------------------------------------------------------- мир сейчас
+function renderWorld() {
+  if (S.tab !== "overview") return;
+  const c = S.ctx;
+  const now = new Date();
+  $("#worldNow").textContent = now.toLocaleString("ru-RU", {weekday: "long", day: "numeric", month: "long", hour: "2-digit", minute: "2-digit"});
+  if (!c) { $("#world").innerHTML = `<div class="empty">Загрузка…</div>`; return; }
+  const mk = (c.markets || []).map((m) => {
+    const left = new Date(m.next) - now;
+    return `<div class="mk"><i class="${m.open ? "on" : ""}"></i><span>${esc(m.name)} <span class="dim">${esc(m.local)}</span></span><span class="r">${m.open ? `открыта · закроется через ${span(left)}` : `закрыта · откроется через ${span(left)}`}</span></div>`;
+  }).join("");
+  const ev = (c.events || []).slice(0, 4).map((e) => {
+    const left = new Date(e.ts) - now, soon = left < 24 * 3600e3;
+    return `<div class="ev ${soon ? "soon" : ""}"><span>${esc(e.name)}</span><span class="when">${left > 0 ? `${whenRu(e.ts)} · через ${span(left)}` : "только что"}</span></div>`;
+  }).join("") || `<div class="dim" style="font-size:12px">В ближайшие 3 недели крупных публикаций США нет.</div>`;
+  const fg = c.fear_greed, dv = c.dvol, ls = c.long_short || {};
+  const FG = {"Extreme Fear": "сильный страх", Fear: "страх", Neutral: "нейтрально", Greed: "жадность", "Extreme Greed": "сильная жадность"};
+  const mood = [
+    fg ? [`Страх и жадность`, `<b>${fg.value}</b> · ${FG[fg.label] || esc(fg.label || "")}${fg.week_ago != null ? ` <span class="dim">(неделю назад ${fg.week_ago})</span>` : ""}`] : null,
+    dv ? [`Нервность опционов BTC (DVOL)`, `<b>${nf(dv.value, 0)}</b> <span class="dim">· ${dv.pct30 >= 80 ? "высокая" : dv.pct30 <= 20 ? "низкая" : "обычная"} для месяца</span>`] : null,
+    ls.BTC != null ? [`Толпа на Bybit (BTC)`, `<b>${nf(ls.BTC, 0)}%</b> <span class="dim">счетов в лонге</span>`] : null,
+  ].filter(Boolean).map(([k, v]) => `<div class="mood"><span>${k}</span><span>${v}</span></div>`).join("") || `<div class="dim" style="font-size:12px">Данные настроения появятся после первого обновления сервера.</div>`;
+  $("#world").innerHTML = `${mk}<h3>Важные события (время ваше)</h3>${ev}<h3>Настроение рынка</h3>${mood}
+    <div class="note">Это контекст, а не сигналы. Часы торгов, выходные и макро-события лаборатория проверяет как условия стратегий — в торговлю попадает только то, что прошло проверку. Делистинг на Bybit сразу закрывает новые входы по монете.</div>`;
 }
 function renderPipeline() {
   const sc = S.scr || {}, rs = S.rs || {}, st = S.strats?.strategies || [], fw = S.fw || {};
@@ -142,7 +204,7 @@ function renderPositions() {
     const prot = !stop ? pill("нет данных о стопе", "warn") : locked ? pill(`прибыль зафиксирована ${sgnUsd(atStop)}`, "good") : pill(`риск до стопа ${usd(Math.abs(atStop))}`, "");
     const pr = +(t.profit_ratio ?? 0);
     return `<tr><td><b>${esc(pair(t.pair))}</b> ${pill(short ? "шорт" : "лонг", short ? "crit" : "good")}<div class="dim mono">вход ${entry}</div></td>
-      <td>${esc(famName(sl?.family))}<div class="dim mono">${esc(t.enter_tag || "")}</div></td>
+      <td>${esc(famName(sl?.family))}<div class="dim mono hide-m">${esc(t.enter_tag || "")}</div></td>
       <td class="r num"><span class="${cls(t.profit_abs)}">${sgnUsd(+t.profit_abs)}</span><div class="dim">${pct(pr)}</div></td>
       <td>${prot}<div class="dim mono">стоп ${stop || "—"}</div></td><td class="r num">${dur(t.open_date)}</td></tr>`;
   }).join("")}</tbody></table>`;
@@ -338,7 +400,8 @@ function renderGoals() {
   if (S.tab !== "overview") return;
   const RU = {forward: "Форвард-тест: лучшие стратегии в плюсе на новых данных", readiness: "Готовность к реальному счёту (все проверки)", validated: "Найти стратегию, прошедшую все строгие проверки",
     evidence: "Набрать сделки на демо", research: "Исследования: строгих проверок за 7 дней", pf: "Profit factor на демо ≥ 1,3 (≥ 30 сделок)", production: "Стратегий в основной торговле", return: "Капитал демо +10% (просадка < 15%)"};
-  $("#goals").innerHTML = (S.goals?.goals || []).map((g) => `<div class="goal"><span class="t">${esc(RU[g.id] || g.title)}</span><b class="num">${esc(g.value)}${g.unit === "%" ? "%" : ""}<span class="dim"> / ${esc(g.target)}${g.unit === "%" ? "%" : ""}</span></b>
+  const U = (u) => u === "%" ? "%" : u === "trades" ? " сделок" : "";
+  $("#goals").innerHTML = (S.goals?.goals || []).map((g) => `<div class="goal"><span class="t">${esc(RU[g.id] || g.title)}</span><b class="num">${esc(String(g.value).replace(" trades", ""))}<span class="dim"> / ${esc(String(g.target).replace(" trades", ""))}${String(g.target).includes("trades") ? " сделок" : U(g.unit)}</span></b>
     <div class="bar"><i style="width:${Math.round(Math.max(0, Math.min(1, g.progress)) * 100)}%;background:${g.progress >= 1 ? "var(--good)" : g.warning ? "var(--crit)" : "var(--blue)"}"></i></div></div>`).join("");
 }
 // журнал: сервер пишет по-английски (для отладки), пульт показывает по-русски
@@ -406,18 +469,19 @@ function renderTrades() {
 
 // ---------------------------------------------------------------------------- опрос данных
 function safe(fn) { try { fn(); } catch (e) { console.warn(fn.name, e); } }
-function renderAll() { [renderHeader, renderKpis, renderPipeline, renderEquity, renderPositions, renderForward, renderGoals, renderLog, renderCards, renderLab, renderTrades].forEach(safe); }
+function renderAll() { [renderHeader, renderKpis, renderBrief, renderWorld, renderPipeline, renderEquity, renderPositions, renderForward, renderGoals, renderLog, renderCards, renderLab, renderTrades].forEach(safe); }
 async function fast() {
   try { const [ov, rs] = await Promise.all([api("/api/overview"), api("/api/research")]); Object.assign(S, {ov, rs}); renderAll(); }
-  catch (e) { chip("#chUpd", "crit", "ошибка данных: " + e.message); }
+  catch (e) { S.err = e.message; safe(renderBrief); return; }
+  S.err = null;
 }
 let lastSlow = 0;
 async function slow() {
   if (Date.now() - lastSlow < 50000) return; lastSlow = Date.now();
   const get = (p) => api(p).catch(() => null);
-  const [goals, ready, strats, trades, ln, fw, ev, scr, cards] = await Promise.all([get("/api/goals"), get("/api/readiness"), get("/api/strategies"), get("/api/trades?limit=200"),
-    get("/api/learnings"), get("/api/forward"), get("/api/events?limit=60"), get("/api/screen"), get("/api/cards")]);
-  Object.assign(S, Object.fromEntries(Object.entries({goals, ready, strats, trades, ln, fw, ev, scr, cards}).filter(([, v]) => v)));
+  const [goals, ready, strats, trades, ln, fw, ev, scr, cards, ctx] = await Promise.all([get("/api/goals"), get("/api/readiness"), get("/api/strategies"), get("/api/trades?limit=200"),
+    get("/api/learnings"), get("/api/forward"), get("/api/events?limit=60"), get("/api/screen"), get("/api/cards"), get("/api/context")]);
+  Object.assign(S, Object.fromEntries(Object.entries({goals, ready, strats, trades, ln, fw, ev, scr, cards, ctx}).filter(([, v]) => v)));
   renderAll();
 }
 async function tick() { await fast(); await slow(); window.__ready = true; }

@@ -151,3 +151,39 @@ def test_zero_trade_summary_has_every_key_of_a_normal_one():
                        "profit_abs": 5.0, "profit_ratio": 0.01}], 10_000,
                      datetime(2026, 1, 1, tzinfo=timezone.utc), datetime(2026, 2, 1, tzinfo=timezone.utc))
     assert set(full) <= set(empty)
+
+
+def test_context_genes_filter_entries_and_refinements_keep_them(tmp_path):
+    import numpy as np
+    import pandas as pd
+
+    from aitrader import context
+    from aitrader.families import FAMILIES
+    from aitrader.registry import Registry
+    from aitrader.research.generator import Generator
+    from aitrader.settings import Settings
+
+    n = 24 * 4 * 21  # three weeks of 15m candles around the 10 Nov 2026 CPI release
+    rng = np.random.default_rng(3)
+    c = 100 * np.exp(np.cumsum(rng.normal(0, 0.004, n)))
+    df = pd.DataFrame({"date": pd.date_range("2026-11-01", periods=n, freq="15min", tz="UTC"), "open": c, "high": c * 1.003,
+                       "low": c * 0.997, "close": c, "volume": 1.0})
+    fam = FAMILIES["ema_cross"]
+    base = fam.populate(df, {"ema_fast": 5, "ema_slow": 20})
+    assert base["long_sig"].sum() + base["short_sig"].sum() > 20
+    guarded = fam.populate(df, {"ema_fast": 5, "ema_slow": 20, "event_guard": 2, "no_weekend": 1, "session": 3})
+    t = context.decision_times(df)
+    sig = guarded["long_sig"] | guarded["short_sig"]
+    assert sig.sum() < (base["long_sig"] | base["short_sig"]).sum()
+    assert not (sig & (t.dt.weekday >= 5)).any() and not (sig & context.near_event(t, 12)).any()
+    assert (sig <= context.region_open(t, "us")).all()
+    assert "+US-hours" in fam.variant({"session": 3}) and "+event-day-guard" in fam.variant({"event_guard": 2})
+    # most new searches keep the context genes off; refinements keep the candidate's value
+    s = Settings(data_dir=tmp_path, app_dir=tmp_path)
+    s.ensure_dirs()
+    gen = Generator(s, Registry(s.registry_path), seed=4)
+    pinned = [gen.next_spec(["BTC/USDT:USDT", "ETH/USDT:USDT"])["space_overrides"].get("session") == [0, 0] for _ in range(60)]
+    assert 0.45 < sum(pinned) / 60 < 0.85
+    spec = gen.refine_spec(["BTC/USDT:USDT"], {"id": "c1", "family": "ema_cross", "params": {"session": 2, "event_guard": 1},
+                                                "pairs": ["BTC/USDT:USDT"]})
+    assert spec["space_overrides"]["session"] == [2, 2] and spec["space_overrides"]["event_guard"] == [1, 1]

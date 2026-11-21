@@ -100,6 +100,7 @@ td.r,th.r{text-align:right}
 .dv:before{content:"";position:absolute;left:50%;top:-2px;bottom:-2px;width:1px;background:var(--line2)}
 .dv i{position:absolute;top:1px;height:8px;border-radius:2px}
 .funnel{display:flex;gap:6px;align-items:stretch}
+@media (max-width:640px){.funnel{display:grid;grid-template-columns:1fr 1fr}.hide-m{display:none}.world .mk span.r{font-size:11px}}
 .fstep{flex:1;background:var(--card2);border:1px solid var(--line);border-radius:8px;padding:8px 10px;text-align:center}
 .fstep b{display:block;font-size:20px}
 .fstep span{font-size:11px;color:var(--muted)}
@@ -161,6 +162,33 @@ body.t-office main{display:none}
 .kv2 span{display:block;color:var(--muted);font-size:11.5px}.kv2 b{font-size:16px}
 .howto{color:var(--text2);font-size:12.5px;line-height:1.55}
 .fstep b{margin:2px 0}
+.brief{display:grid;grid-template-columns:minmax(0,1.6fr) minmax(0,1fr);gap:18px;align-items:start}
+@media (max-width:900px){.brief{grid-template-columns:1fr}}
+#brief .head{display:flex;align-items:center;gap:10px;font-size:16px;font-weight:600;margin-bottom:6px}
+#brief .dot{width:10px;height:10px;border-radius:50%;background:var(--good);box-shadow:0 0 0 4px rgba(12,163,12,.18);flex:none}
+#brief .dot.warn{background:var(--warn);box-shadow:0 0 0 4px rgba(250,178,25,.18)}#brief .dot.crit{background:var(--crit);box-shadow:0 0 0 4px rgba(208,59,59,.2)}
+#brief p{margin:3px 0;color:var(--text2);line-height:1.5}
+#brief .upd{font-size:11.5px;color:var(--muted);margin-top:6px}
+.att{display:flex;flex-direction:column;gap:6px}
+.att .t{font-size:11.5px;color:var(--muted);text-transform:uppercase;letter-spacing:.5px}
+.att .it{display:flex;gap:8px;align-items:flex-start;background:var(--card2);border:1px solid var(--line);border-left:3px solid var(--blue);border-radius:8px;padding:7px 10px;font-size:12.5px;line-height:1.45}
+.att .it.warn{border-left-color:var(--warn)}.att .it.crit{border-left-color:var(--crit)}.att .it.good{border-left-color:var(--good)}
+.world .mk{display:grid;grid-template-columns:14px 1fr auto;gap:6px;align-items:center;padding:4px 0;font-size:12.5px}
+.world .mk i{width:8px;height:8px;border-radius:50%;background:var(--line2)}.world .mk i.on{background:var(--good)}
+.world .mk span.r{color:var(--muted);font-size:11.5px;text-align:right}
+.world h3{font-size:11px;font-weight:600;letter-spacing:.5px;text-transform:uppercase;color:var(--muted);margin:12px 0 4px}
+.world .ev{display:flex;justify-content:space-between;gap:8px;padding:4px 0;font-size:12.5px;border-bottom:1px solid var(--line)}
+.world .ev:last-child{border-bottom:0}.world .ev .when{color:var(--muted);white-space:nowrap;font-size:11.5px}
+.world .ev.soon .when{color:var(--warn)}
+.world .mood{display:grid;grid-template-columns:1fr auto;gap:2px 8px;font-size:12.5px;padding:3px 0}
+.world .mood b{font-weight:600}.world .note{font-size:11px;color:var(--muted);margin-top:10px;line-height:1.45}
+details.more{margin-top:12px;border-top:1px solid var(--line);padding-top:10px}
+details.more summary{cursor:pointer;color:var(--text2);font-size:12.5px;list-style:none}
+details.more summary::before{content:"▸ ";color:var(--muted)}details.more[open] summary::before{content:"▾ "}
+details.more[open] summary{margin-bottom:10px}
+.kpis{grid-template-columns:repeat(5,1fr)}
+@media (max-width:1200px){.kpis{grid-template-columns:repeat(3,1fr)}}
+@media (max-width:640px){.kpis{grid-template-columns:repeat(2,1fr)}.kpi .v{font-size:19px}}
 @media (max-width:900px){header{flex-wrap:wrap}.tabs{order:3;width:100%;overflow-x:auto}}
 </style>
 </head>
@@ -175,32 +203,33 @@ body.t-office main{display:none}
     <div class="chip" id="chBot"><i></i><span>Бот</span></div>
     <div class="chip" id="chLab"><i></i><span>Лаборатория</span></div>
     <div class="chip" id="chRisk"><i></i><span>Риск</span></div>
-    <div class="chip" id="chUpd"><span class="num">—</span></div>
   </div>
 </header>
 <main>
   <!-- ======================= ОБЗОР ======================= -->
-  <section class="card c12 mission" data-tab="overview"><div class="logo" style="width:30px;height:30px">◎</div><p id="mission">Загрузка…</p><span class="done" id="goalsDone"></span></section>
+  <section class="card c12" data-tab="overview"><div class="brief"><div id="brief">Загрузка…</div><div class="att" id="attention"></div></div></section>
   <section class="c12 kpis" id="kpis" data-tab="overview"></section>
-  <section class="card c12" data-tab="overview">
-    <h2>Как работает компания <span class="sub">путь каждой стратегии к реальному счёту</span></h2>
-    <div class="funnel" id="pipeline"></div>
-  </section>
-  <section class="card c7" data-tab="overview">
+  <section class="card c8" data-tab="overview">
     <h2>Торговый капитал (USDT) <span class="sub"><span class="seg" id="eqRange"><button data-h="24">24ч</button><button data-h="168" class="on">7д</button><button data-h="0">Всё</button></span></span></h2>
-    <div id="eqChart" style="height:260px"></div>
+    <div id="eqChart" style="height:250px"></div>
   </section>
-  <section class="card c5" data-tab="overview trades">
+  <section class="card c4 world" data-tab="overview">
+    <h2>Мир сейчас <span class="sub" id="worldNow"></span></h2>
+    <div id="world"></div>
+  </section>
+  <section class="card c12" data-tab="overview trades">
     <h2>Открытые позиции <span class="sub" id="posSub"></span></h2>
     <div class="scroll" id="positions"></div>
   </section>
   <section class="card c12" data-tab="overview">
-    <h2>Форвард-тест · держат ли найденные стратегии прибыль на новых данных <span class="sub">ответ на вопрос «может ли система зарабатывать»</span></h2>
-    <div id="forward"></div>
+    <h2>Как работает компания <span class="sub">путь каждой стратегии к реальному счёту</span></h2>
+    <div class="funnel" id="pipeline"></div>
+    <details class="more"><summary>Форвард-тест: держат ли найденные стратегии прибыль на новых данных</summary><div id="forward"></div></details>
   </section>
   <section class="card c6" data-tab="overview">
     <h2>Цели компании <span class="sub">считаются по реальным данным</span></h2>
     <div id="goals"></div>
+    <p class="dim" id="mission" style="margin:10px 0 0;font-size:12px"></p>
   </section>
   <section class="card c6" data-tab="overview">
     <h2>Журнал компании</h2>

@@ -13,6 +13,7 @@ import math
 import random
 
 from aitrader.families import FAMILIES, MULTI_TF
+from aitrader.families.base import CONTEXT_GENES
 from aitrader.registry import Registry
 from aitrader.settings import Settings
 from aitrader.util import iso
@@ -107,12 +108,15 @@ class Generator:
         params = fam.normalize(cand.get("params"))
         over = {}
         for p in fam.params:
-            if p.name in ("htf_trend", "vol_regime"):
+            if p.name in ("htf_trend", "vol_regime", "session", "no_weekend", "event_guard"):
                 over[p.name] = [params[p.name], params[p.name]]  # keep the structural genes
                 continue
             span = (p.high - p.low) * width
             over[p.name] = [max(p.low, params[p.name] - span), min(p.high, params[p.name] + span)]
-        spec["space_overrides"] = {**over, **spec.get("space_overrides", {})}
+        merged = {**over, **spec.get("space_overrides", {})}
+        for g in ("htf_trend", "vol_regime") + CONTEXT_GENES:  # a refinement keeps its structure
+            merged[g] = over[g]
+        spec["space_overrides"] = merged
         own = [p for p in (cand.get("pairs") or []) if p in universe]
         n = self.s.research.pairs_per_experiment
         spec["pairs"] = sorted((own + [p for p in spec["pairs"] if p not in own])[:max(n, len(own))])
@@ -146,7 +150,7 @@ class Generator:
         # top affinity pairs plus a little randomness to avoid always testing the same set
         pool = ranked[: max(n_pairs + 4, n_pairs)]
         pairs = sorted(self.rng.sample(pool, k=min(n_pairs, len(pool)))) if pool else []
-        return {
+        spec = {
             "family": family,
             "pairs": pairs,
             "sides": sides,
@@ -156,3 +160,10 @@ class Generator:
             "seed": self.rng.randint(1, 10_000),
             "timeframe": "15m" if family in MULTI_TF and self.rng.random() < 0.5 else self.s.research.timeframe,
         }
+        # Market-context genes (trading hours, weekends, US macro releases) are searched in
+        # about a third of new experiments; elsewhere they stay off, so the usual search keeps
+        # its size and speed. The bandit, walk-forward and decoys judge the difference.
+        if self.rng.random() >= 0.35:
+            for g in CONTEXT_GENES:
+                overrides.setdefault(g, [0, 0])
+        return spec

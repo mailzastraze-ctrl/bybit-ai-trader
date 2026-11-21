@@ -1,6 +1,6 @@
 # PROJECT_STATUS
 
-_Last updated: 2026-11-21 11:40 CET_
+_Last updated: 2026-11-21 12:45 CET_
 
 ## Summary
 The system is **deployed and running autonomously on Bybit Demo**. It never trades real money: `demo_trading` is hard-required.
@@ -26,6 +26,38 @@ Links and rules:
 | 7 | Web terminal | ✅ live | **Control room** (primary, desktop + phone): capital curve, positions with protection state, forward-test verdict, 4 live lab runners, results with fold squares, bandit, gates, lifecycle, goals, readiness, log, learnings, closed trades. **3D HQ v3** at `/hq`: real data on every screen (live 1h candles with entry/stop/target, live GitHub hyperopt epochs, fold results, gates, bandit, market map, goals). Company mission board, stand-up meetings built from real numbers, GitHub-lab cloud with data beam, expressive characters. Rendered headlessly on every UI change (`hq-preview` workflow, screenshots in `docs/preview/`, fails on JS errors) |
 | — | Cloud, independent of your PC | ✅ / ⚠️ | Railway **trial** credit runs out in about 15 days. Hobby is needed for indefinite operation |
 | — | GitHub + PROJECT_STATUS | ✅ | CI green with the real Freqtrade image; 113 tests |
+
+## Market context + simpler control panel (2026-11-21, owner's request)
+**Context as testable conditions (research decides, nothing is traded on faith):**
+- New structural genes for every family, tested like `htf_trend` / `vol_regime`:
+  - `session`: Asia, Europe, US or Europe+US exchange hours. Local hours with DST via zoneinfo: Tokyo, Hong Kong, Frankfurt, London, New York.
+  - `no_weekend`.
+  - `event_guard`: no entries ±2 h or ±12 h around US CPI, jobs report (NFP) and Fed decisions.
+- **Calendar:** official dates in `src/aitrader/data/macro_events.json`, 2022–2027, from federalreserve.gov and bls.gov with the release times.
+- The genes only remove entries, and they behave identically in backtests and live (decision time = candle close).
+- They are searched in about 35% of new experiments and pinned off elsewhere, so the usual search keeps its speed. Refinements keep a candidate's genes.
+
+**Live snapshot ("Мир сейчас"):**
+- Sources:
+  - Fear & Greed (alternative.me);
+  - Deribit BTC DVOL with its 30-day percentile;
+  - Bybit long/short account ratio for BTC, ETH and SOL;
+  - Bybit delisting announcements.
+- Refreshed every 15 min by the manager, with 6-second timeouts. Failures keep the last value and never block trading.
+- An hourly history is kept for 90 days as evidence for later research. A long/short "crowd" gene comes once that history exists.
+- **Safety rule:** a coin Bybit announces to delist gets no new entries; open trades keep their exits.
+
+**Control panel (owner's convenience):**
+- **Top summary** in plain Russian (bot, research, "can it make money") plus **"Требует внимания"**. It lists only things that need the owner, or says that nothing does.
+- **Five key tiles:** capital, demo result, in the market now, can it make money (forward test), real-money readiness.
+- **"Мир сейчас" panel** next to the equity chart:
+  - which exchanges are open, with countdowns;
+  - next US macro releases in the owner's local time;
+  - fear/greed, options nervousness and the crowd on Bybit.
+- **Layout:** open positions full width; the pipeline with the forward-test detail folded; goals and the log.
+- **Header:** compact, the "updated" chip is gone.
+- **Phone:** tiles in two columns, the pipeline in two columns, the strategy id hidden.
+- **Other tabs:** goal units in Russian, lab chip grammar fixed.
 
 ## Strategy Lab autopilot (2026-11-21, owner's request)
 The owner's goal: the company should find what his Strategy Lab found by hand (stable strategies with rare, accurate trades over 3 years plus the last 3 months, e.g. EMA cross on BTC 6h), automatically and without the Lab's many tabs, and trade the best ones on at least 15 coins.

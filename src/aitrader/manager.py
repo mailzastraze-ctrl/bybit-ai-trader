@@ -6,7 +6,7 @@ from __future__ import annotations
 import time
 from datetime import timedelta
 
-from aitrader import memguard, readiness
+from aitrader import context, memguard, readiness
 from aitrader.ftclient import FtClient
 from aitrader.learner import Learner
 from aitrader.lifecycle import Lifecycle
@@ -78,7 +78,7 @@ def main() -> None:
     # make sure the bot has a manifest + pairlist before it starts trading
     life.write(life.build_manifest([], set(scanner.excluded_pairs()), False), [])
     reg.event("manager", "manager started")
-    last_learn = last_ready = 0.0
+    last_learn = last_ready = last_ctx = 0.0
     while True:
         t0 = time.time()
         detail: dict = {}
@@ -101,7 +101,20 @@ def main() -> None:
             if time.time() - last_learn > 6 * 3600:
                 learner.analyze_live()
                 last_learn = time.time()
-            man = life.build_manifest(open_trades, set(scanner.excluded_pairs()), paused)
+            if time.time() - last_ctx > 900:  # market context; never blocks trading
+                last_ctx = time.time()
+                try:
+                    before = context.delisted_pairs(reg)
+                    context.refresh(reg)
+                    new = context.delisted_pairs(reg) - before
+                    if new:
+                        reg.event("manager", f"Bybit announced delisting of {', '.join(sorted(new))} — no new entries there",
+                                  "warning")
+                except Exception as e:  # noqa: BLE001
+                    log.info("context refresh failed: %s", e)
+            # safety: no new entries on coins Bybit has announced to delist (open trades keep their exits)
+            excluded = set(scanner.excluded_pairs()) | context.delisted_pairs(reg)
+            man = life.build_manifest(open_trades, excluded, paused)
             life.write(man, open_trades)
             detail.update(sleeves=len(man.sleeves), paused=paused)
             if time.time() - last_ready > 600:

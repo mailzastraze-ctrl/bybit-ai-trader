@@ -56,7 +56,13 @@ GENE_PARAMS: tuple[Param, ...] = (
     Param("htf_trend", "int", 0, 1, 0, "buy"),  # 1 = trade only with the higher-timeframe trend
     Param("htf_len", "int", 100, 400, 200, "buy"),  # EMA length (1h bars) defining that trend
     Param("vol_regime", "int", 0, 2, 0, "buy"),  # 0 any, 1 only high-vol, 2 only low-vol regime
+    # market context a human trader keeps in mind (aitrader.context); like the genes above
+    # they only remove entries, and only research decides whether that helps
+    Param("session", "int", 0, 4, 0, "buy"),      # 0 any, 1 Asia, 2 Europe, 3 US hours, 4 Europe or US
+    Param("no_weekend", "int", 0, 1, 0, "buy"),   # 1 = no entries on Saturday/Sunday (UTC)
+    Param("event_guard", "int", 0, 2, 0, "buy"),  # 1 = none ±2 h around US CPI/jobs/Fed, 2 = ±12 h
 )
+CONTEXT_GENES = ("session", "no_weekend", "event_guard")
 
 ATR_LEN = 14
 VOL_WINDOW = 500
@@ -126,6 +132,13 @@ class Family:
             ok = ok.fillna(False)
             df["long_sig"] &= ok
             df["short_sig"] &= ok
+        ctx = [int(p.get(k, 0)) for k in CONTEXT_GENES]
+        if any(ctx):
+            from aitrader.context import entry_filter
+            ok = entry_filter(df, *ctx)
+            if ok is not None:
+                df["long_sig"] &= ok.to_numpy()
+                df["short_sig"] &= ok.to_numpy()
 
     def variant(self, params: dict) -> str:
         """Human-readable strategy variant, e.g. 'donchian_breakout +HTF-trend(200) +low-vol'."""
@@ -134,6 +147,9 @@ class Family:
         if int(p["htf_trend"]) == 1:
             parts.append(f"+HTF-trend({int(p['htf_len'])})")
         parts.append({0: "", 1: "+high-vol", 2: "+low-vol"}[int(p["vol_regime"])])
+        parts.append({0: "", 1: "+Asia-hours", 2: "+Europe-hours", 3: "+US-hours", 4: "+EU/US-hours"}[int(p["session"])])
+        parts.append("+no-weekend" if int(p["no_weekend"]) else "")
+        parts.append({0: "", 1: "+event-guard", 2: "+event-day-guard"}[int(p["event_guard"])])
         return " ".join(x for x in parts if x)
 
     def populate(self, df: pd.DataFrame, params: dict) -> pd.DataFrame:
