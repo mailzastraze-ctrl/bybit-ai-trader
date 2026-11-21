@@ -133,7 +133,10 @@ def merge(dirs: list[Path], batch_id: str, ledger: dict | None = None) -> dict:
                 "score": score(oos, dsr), "variant": r.get("variant", e["spec"]["family"]),
                 "oos": {**oos, "mc": r["mc"], "dsr": round(dsr, 4), "wfe": r["wfe"],
                         "variant": r.get("variant", e["spec"]["family"]),
-                        "timeframe": e["spec"].get("timeframe") or "1h"},
+                        "timeframe": e["spec"].get("timeframe") or "1h",
+                        # found by the Strategy Lab autopilot (seven checks + decoy control)
+                        "autopilot": (e["spec"].get("screen_holdout") or {}).get("mode") == "swing",
+                        "screen": e["spec"].get("screen")},
                 "gates": gates, "experiment": e["id"],
             })
     candidates.sort(key=lambda c: -c["score"])
@@ -406,7 +409,8 @@ def cmd_lab_run(out: Path, job: int, jobs: int, budget_min: float, run_id: str, 
         from itertools import chain
 
         from aitrader.research import screen
-        first = screen.to_specs(json.loads(sfile.read_text()), job, max(jobs, 1))
+        first = screen.to_specs(json.loads(sfile.read_text()), job, max(jobs, 1),
+                                skip=set(state.get("screen_tested") or []))
         log.info("job %d: %d screener survivors to walk-forward test", job, len(first))
         specs = chain(first, specs)
     jdir = out / f"job-{job}"
@@ -446,7 +450,8 @@ def cmd_lab_run(out: Path, job: int, jobs: int, budget_min: float, run_id: str, 
 
 
 def cmd_lab_candles(out: Path, run_id: str, server: str | None) -> int:
-    """Screener input: the universe's Bybit candles (15m + 1h) as compact JSON."""
+    """Screener input: the universe's Bybit candles (15m + 1h) and the top coins on 2h–12h
+    (autopilot) as compact JSON."""
     from aitrader.research import screen
     from aitrader.research.labclient import LabClient
     s = get_settings()
@@ -459,6 +464,9 @@ def cmd_lab_candles(out: Path, run_id: str, server: str | None) -> int:
         return 0
     s.research.exchange = plan_doc["exchange"]
     n = screen.export_candles(s, plan_doc["universe"]["pairs"], out / "candles")
+    # the autopilot: top coins by volume on 2h–12h with ~3.3 years of history
+    n += screen.export_candles(s, plan_doc["universe"]["pairs"][:screen.SWING_TOP], out / "candles",
+                               timeframes=screen.SWING_TIMEFRAMES)
     if s.research.relay:  # open interest for the whole universe once per run (incremental, cached
         from datetime import timedelta  # with the market data) – runners then need no OI downloads
 

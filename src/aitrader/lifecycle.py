@@ -15,7 +15,9 @@ from aitrader.settings import Settings
 from aitrader.util import iso, parse_dt, utcnow
 
 log = logging.getLogger(__name__)
-BOT_TIMEFRAMES = ("15m", "1h")  # bot candles = 15m (config/trade.json); 1h via informative
+# bot candles = 15m (config/trade.json); higher timeframes are computed on their own candles
+# and merged without look-ahead (informative pairs): 1h research and the 2h–12h autopilot
+BOT_TIMEFRAMES = ("15m", "1h", "2h", "4h", "6h", "12h")
 
 BOOT_PAIRS = ["BTC/USDT:USDT", "ETH/USDT:USDT", "SOL/USDT:USDT", "XRP/USDT:USDT",
               "DOGE/USDT:USDT", "BNB/USDT:USDT", "ADA/USDT:USDT", "LINK/USDT:USDT"]
@@ -237,7 +239,10 @@ class Lifecycle:
             self.reg.set_stage(cand["id"], "incubation", "validated by research gates → forward test")
             n_inc += 1
         n_exp = len(self.reg.strategies(("exploration",)))
-        for cand in self.reg.strategies(("exploratory",)):
+        # autopilot strategies (passed the Strategy Lab checks AND the walk-forward) go first
+        exploratory = sorted(self.reg.strategies(("exploratory",)),
+                             key=lambda c: (not self.autopilot(c), -(c.get("score") or 0)))
+        for cand in exploratory:
             if not self.tradable_tf(cand) or self._family_full(cand["family"]):
                 continue
             if n_exp >= lc.max_exploration and not self._displace_placeholder(cand):
@@ -261,8 +266,9 @@ class Lifecycle:
 
     @staticmethod
     def tradable_tf(st: dict) -> bool:
-        """One demo bot runs on 15m candles and also hosts 1h strategies (computed on hourly
-        candles, merged without look-ahead), so both research timeframes can trade."""
+        """One demo bot runs on 15m candles and also hosts strategies of higher timeframes
+        (1h research, 2h–12h autopilot), each computed on its own candles and merged without
+        look-ahead, so every research timeframe can trade."""
         return Lifecycle.strategy_tf(st) in BOT_TIMEFRAMES
 
     def _family_full(self, family: str, cap: int | None = None) -> bool:
@@ -271,11 +277,19 @@ class Lifecycle:
         return sum(1 for r in self.reg.strategies(DEPLOYED)
                    if r["family"] == family and not str(r["id"]).startswith(("boot-", "rnd-"))) >= cap
 
+    @staticmethod
+    def autopilot(st: dict) -> bool:
+        return bool((st.get("oos") or {}).get("autopilot"))
+
     def _displace_placeholder(self, cand: dict) -> bool:
         """Research-backed candidates replace unvalidated placeholders (bootstrap defaults,
-        random explorers) unless the placeholder has already shown a live edge."""
+        random explorers) unless the placeholder has already shown a live edge. An autopilot
+        candidate also replaces ordinary exploration sleeves (near-misses, generic exploratory
+        finds) that have not earned their place live – the demo trades the best it has."""
+        mine = self.autopilot(cand)
         for r in sorted(self.reg.strategies(("exploration",)), key=lambda x: x.get("stage_since") or ""):
-            if not (str(r["id"]).startswith("boot-") or str(r["id"]).startswith("rnd-")):
+            placeholder = str(r["id"]).startswith("boot-") or str(r["id"]).startswith("rnd-")
+            if not (placeholder or (mine and not self.autopilot(r))):
                 continue
             live = r.get("live") or {}
             if live.get("trades", 0) >= 10 and live.get("profit_factor", 0) >= 1.1:

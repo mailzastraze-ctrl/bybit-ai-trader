@@ -106,8 +106,36 @@ def _card(kind: str, st: dict, res: dict | None = None) -> dict:
             "claimed": (st.get("oos") or {}).get("claimed"), "updated": st.get("updated") or st.get("created")}
 
 
+VERDICT_RU = {"validated": "прошла строгие ворота", "exploratory": "допущена на демо с малым риском",
+              "rejected": "не прошла (реальные издержки)"}
+
+
+def autopilot_checks(x: dict) -> dict:
+    """The Strategy Lab autopilot's seven checks in plain Russian (all passed, with values)."""
+    a, b, wf, mc, co = x.get("A") or {}, x.get("B") or {}, x.get("wf") or {}, x.get("mc") or {}, x.get("coins") or {}
+    return {
+        "tpm": a.get("tpm"), "years": a.get("years"), "holdout_from": x.get("holdout_from"), "wf_from": x.get("wf_from"),
+        "checks": [
+            ["Стабильность ~3 года", f"{a.get('trades')} сделок ({a.get('tpm')}/мес), PF {a.get('pf')}, каждый год в плюсе, "
+                                      f"ровность {x.get('r2')}, просадка {a.get('dd')}%"],
+            ["Соседние параметры", f"{round((x.get('robust') or 0) * 100)}% соседних настроек тоже прибыльны"],
+            ["Walk-forward", f"подбор без последнего года выбрал настройку, давшую на этом годе {wf.get('net')}% "
+                             f"({wf.get('trades')} сделок, PF {wf.get('pf')})"],
+            ["Последние 3 месяца", f"{b.get('net')}% ({b.get('trades')} сделок) — этот период не видел ни один подбор"],
+            ["Монте-Карло", f"просадка в 95% сценариев ≤ {mc.get('dd95')}%, вероятность убытка {mc.get('ploss')}%"],
+            ["Другие монеты", f"держится на {co.get('pass')} из {co.get('tested')} монет топа"],
+            ["Не случайность", "результат выше того, что тот же поиск находит на перемешанной истории "
+                               f"(оценка доли случайных среди принятых ≤ {x.get('luck_share', 0.2)})"],
+        ]}
+
+
 def build(reg: Registry, limit: int = 120) -> dict:
     cards, seen_exp = [], set()
+    tested_screen = {}
+    for r in reg.q("SELECT spec, result FROM experiments WHERE status='done' ORDER BY finished DESC LIMIT 400"):
+        spec, res = r.get("spec") or {}, r.get("result") or {}
+        if isinstance(spec, dict) and spec.get("screen") and isinstance(res, dict):
+            tested_screen.setdefault(spec["screen"], res.get("verdict"))
     exp = {r["id"]: r for r in reg.q("SELECT id, result FROM experiments WHERE status='done'")}
     for st in reg.q("SELECT * FROM strategies WHERE stage != 'retired' OR updated >= date('now','-7 day') "
                     "ORDER BY updated DESC LIMIT ?", (limit,)):
@@ -133,7 +161,8 @@ def build(reg: Registry, limit: int = 120) -> dict:
             continue
         from aitrader.research.screen import to_params
         params = to_params(x) or {}
-        b = x.get("B") or {}
+        auto = x.get("mode") == "swing"
+        b = (x.get("A") if auto else x.get("B")) or {}   # autopilot: the ~3-year record; pooled: the holdout
         card = _card("screen", {"id": x["id"], "family": fam, "params": params, "pairs": x.get("pairs") or [x.get("pair")],
                                 "stage": "exploratory",
                                 "updated": sc.get("ts"), "oos": {"timeframe": x.get("timeframe")}},
@@ -143,8 +172,20 @@ def build(reg: Registry, limit: int = 120) -> dict:
                               "last90_return": (x.get("last90") or 0) / 100},
                       "timeframe": x.get("timeframe"),
                       "curve": [[str(t)[:10] if isinstance(t, str) else t, v] for t, v in (x.get("curve") or [])]})
-        card["status"] = "Скринер: выжила на невиданных данных"
+        if auto:
+            card["autopilot"] = autopilot_checks(x)
+            card["status"] = "Автопоиск: прошла все проверки → строгая проверка во freqtrade"
+            tested = tested_screen.get(x["id"])
+            if tested:
+                card["status"] = f"Автопоиск → строгая проверка: {VERDICT_RU.get(tested, tested)}"
+        else:
+            card["status"] = "Скринер: выжила на невиданных данных"
         cards.append(card)
     order = {"trading": 0, "candidate": 1, "screen": 2, "rejected": 3}
-    cards.sort(key=lambda c: (order.get(c["kind"], 9), -(c["oos"].get("profit_factor") or 0)))
-    return {"cards": cards, "counts": {k: sum(1 for c in cards if c["kind"] == k) for k in order}}
+    cards.sort(key=lambda c: (order.get(c["kind"], 9), not c.get("autopilot"), -(c["oos"].get("profit_factor") or 0)))
+    counts = {k: sum(1 for c in cards if c["kind"] == k) for k in order}
+    # bad strategies are not shown – only how many were weeded out
+    cards = [c for c in cards if c["kind"] != "rejected"]
+    auto = {k: sc.get(k) for k in ("created", "evaluated", "swing_tested", "swing_passed_checks", "swing_decoy_survivors",
+                                   "swing_survivors", "swing_coins_covered")}
+    return {"cards": cards, "counts": counts, "autopilot": auto}

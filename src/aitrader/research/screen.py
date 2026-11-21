@@ -21,7 +21,15 @@ from aitrader.settings import Settings
 from aitrader.util import utcnow
 
 log = logging.getLogger(__name__)
-HISTORY_DAYS = {"1h": 760, "15m": 400}
+HISTORY_DAYS = {"1h": 760, "15m": 400, "2h": 1200, "4h": 1200, "6h": 1200, "12h": 1200}
+SWING_TIMEFRAMES = ("2h", "4h", "6h", "12h")   # the autopilot: ~3 years + the last 3 months
+SWING_TOP = 15                                 # top coins by volume for the autopilot
+TF_MIN = {"15m": 15, "1h": 60, "2h": 120, "4h": 240, "6h": 360, "12h": 720, "1d": 1440}
+
+
+def min_bars(tf: str) -> int:
+    """Shortest usable series: 2000 bars intraday; ~900 days on the swing timeframes."""
+    return int(900 * 1440 / TF_MIN[tf]) if tf in SWING_TIMEFRAMES else 2000
 
 
 def series_name(pair: str, tf: str) -> str:
@@ -52,7 +60,7 @@ def export_candles(s: Settings, pairs: list[str], out: Path, timeframes=("1h", "
                 continue
             df = pd.read_feather(f)
             df = df[df["date"] >= pd.Timestamp(start)]
-            if len(df) < 2000:
+            if len(df) < min_bars(tf):
                 continue
             (out / f"{series_name(p, tf)}.json").write_text(json.dumps({
                 "t": ((df["date"] - pd.Timestamp(0, tz="UTC")) // pd.Timedelta("1ms")).astype("int64").tolist(),
@@ -106,18 +114,23 @@ def survivor_id(sv: dict) -> str:
     return "scr-" + hashlib.sha1(key.encode()).hexdigest()[:10]
 
 
-def to_specs(screen: dict, job: int = 0, jobs: int = 1, per_job: int = 8, epochs: int = 1) -> list[dict]:
-    """Survivors for this runner (round-robin, best first) as fixed-configuration specs."""
+def to_specs(screen: dict, job: int = 0, jobs: int = 1, per_job: int = 8, epochs: int = 1,
+             skip: set | None = None) -> list[dict]:
+    """Survivors for this runner (round-robin, best first) as fixed-configuration specs;
+    survivors in `skip` (already walk-forward tested recently) are left out."""
     out = []
-    for i, sv in enumerate((screen or {}).get("survivors") or []):
+    fresh = [sv for sv in (screen or {}).get("survivors") or [] if survivor_id(sv) not in (skip or set())]
+    for i, sv in enumerate(fresh):
         if i % max(jobs, 1) != job:
             continue
         params = to_params(sv)
         if params is None:
             continue
-        out.append({"family": sv["family"], "pairs": list(sv.get("pairs") or [sv["pair"]])[:8], "sides": ["long", "short"],
+        cap = SWING_TOP if sv.get("mode") == "swing" else 8   # an autopilot strategy trades every coin it passed on
+        out.append({"family": sv["family"], "pairs": list(sv.get("pairs") or [sv["pair"]])[:cap], "sides": ["long", "short"],
                     "fixed_params": params, "timeframe": sv.get("timeframe") or "1h", "screen": survivor_id(sv),
-                    "screen_holdout": {k: sv.get(k) for k in ("B", "r2", "last90", "strategy", "name")},
+                    "screen_holdout": {k: sv.get(k) for k in ("B", "r2", "last90", "strategy", "name", "mode", "A", "wf", "mc",
+                                                              "robust", "coins", "luck_share")},
                     "space_overrides": {}, "used_learnings": [], "epochs": epochs, "seed": 1})
         if len(out) >= per_job:
             break
@@ -127,7 +140,17 @@ def to_specs(screen: dict, job: int = 0, jobs: int = 1, per_job: int = 8, epochs
 def summary(screen: dict, top: int = 30) -> dict:
     sv = (screen or {}).get("survivors") or []
     return {k: screen.get(k) for k in ("created", "evaluated", "series", "seconds", "rules", "engine", "holdout_tests",
-                                       "fdr_q", "expected_false", "mode", "tasks")} | {
+                                       "fdr_q", "expected_false", "mode", "tasks", "swing_tested", "swing_survivors",
+                                       "swing_passed_checks", "swing_decoy_survivors", "swing_decoys", "swing_coins_covered")} | {
         "n_survivors": len(sv),
         "top": [{"id": survivor_id(x), **{k: x.get(k) for k in ("name", "family", "pair", "timeframe", "params", "exits",
-                                                                 "A", "B", "r2", "last90", "curve", "strategy", "p", "pairs", "pooled")}} for x in sv[:top]]}
+                                                                 "A", "B", "r2", "last90", "curve", "strategy", "p", "pairs", "pooled",
+                                                                 "mode", "wf", "mc", "robust", "coins", "luck_share", "significant",
+                                                                 "holdout_from", "wf_from")}} for x in sv[:top]]}
+
+
+def warmup_days(tf: str, candles: int = 720) -> int:
+    """Days of history before a backtest window so `startup_candle_count` candles of `tf`
+    exist (the strategies' indicator warm-up); at least the 35 days used for 1h."""
+    import math
+    return max(35, math.ceil(candles * TF_MIN.get(tf, 60) / 1440) + 5)

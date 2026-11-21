@@ -149,7 +149,8 @@ function renderPositions() {
 }
 
 // ---------------------------------------------------------------------------- стратегии (карточки)
-const KIND = {trading: "Торгуют на демо", candidate: "Кандидаты", screen: "Нашёл скринер", rejected: "Отсеяны"};
+const KIND = {trading: "Торгуют на демо", candidate: "Кандидаты", screen: "Автопоиск"};
+const CHECK_SHORT = ["3 года", "соседи", "walk-fwd", "3 мес.", "Монте-Карло", "монеты", "не случайность"];
 const curvePts = (curve) => (curve || []).map(([t, v]) => ({t: typeof t === "number" ? t : new Date(t).getTime(), v: +v})).filter((p) => isFinite(p.t) && isFinite(p.v));
 function spark(curve) {
   const pts = curvePts(curve);
@@ -161,8 +162,19 @@ function spark(curve) {
   return `<svg class="spark" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" width="100%"><path d="${d}" fill="none" stroke="${col}" stroke-width="1.8" vector-effect="non-scaling-stroke"/></svg>`;
 }
 const met = (l, v, k = "") => `<div><span>${l}</span><b class="num ${k}">${v}</b></div>`;
+function renderAutopilot() {
+  const a = S.cards?.autopilot || {}, n = S.cards?.counts || {};
+  const off = n.rejected ? ` Отсеяно строгой проверкой и не показано: ${n.rejected}.` : "";
+  $("#autopilot").innerHTML = a.swing_tested == null
+    ? `<b>Автопоиск Strategy Lab</b> запустится со следующим прогоном лаборатории: топ-15 монет, таймфреймы 2h–12h, ~3 года + последние 3 месяца. Сюда попадут только стратегии, прошедшие все проверки.${off}`
+    : `<b>Автопоиск Strategy Lab</b> · ${ago(a.created)}: перебрано <b class="num">${nf(a.evaluated || 0, 0)}</b> вариантов на топ-монетах (2h–12h). ` +
+      `Все 7 проверок прошли <b class="num">${a.swing_passed_checks ?? 0}</b>; для сравнения, на перемешанной истории (где закономерностей нет) тот же поиск «находит» <b class="num">${a.swing_decoy_survivors ?? 0}</b>. ` +
+      `Принято (лучше случайности): <b class="num">${a.swing_survivors ?? 0}</b>, они покрывают <b class="num">${a.swing_coins_covered ?? 0}</b> монет. ` +
+      `Принятые идут в строгую проверку с реальными издержками, затем торгуют на демо по всем монетам, где прошли.${off}`;
+}
 function renderCards() {
   if (S.tab !== "strategies") return;
+  renderAutopilot();
   const cs = S.cards?.cards || [], counts = S.cards?.counts || {};
   $("#filters").innerHTML = [["all", `Все · ${cs.length}`], ...Object.entries(KIND).map(([k, l]) => [k, `${l} · ${counts[k] || 0}`])]
     .map(([k, l]) => `<button data-f="${k}" class="${S.filter === k ? "on" : ""}">${esc(l)}</button>`).join("");
@@ -171,6 +183,14 @@ function renderCards() {
   if (!list.length) { $("#cards").innerHTML = `<div class="card empty">${S.filter === "screen" ? "Скринер запустится с ближайшим прогоном лаборатории и покажет здесь выживших." : "Пока пусто."}</div>`; return; }
   $("#cards").innerHTML = list.map((c) => {
     const o = c.oos || {};
+    const ap = c.autopilot;
+    if (ap) return `<div class="scard auto" data-i="${cs.indexOf(c)}">
+      <div class="top"><div><div class="nm">${esc(c.title)}</div><div class="sub">${esc(c.pairs.slice(0, 5).map(pair).join(", "))}${c.pairs.length > 5 ? " +" + (c.pairs.length - 5) : ""} · ${esc(c.timeframe)}</div></div>${pill("автопоиск", "good")}</div>
+      ${spark(c.curve)}
+      <div class="mets">${met("Сделок/мес", ap.tpm ?? "—")}${met("PF 3 года", o.profit_factor ?? "—", (o.profit_factor || 0) >= 1 ? "pos" : "neg")}${met("За 3 года", o.total_return != null ? pct(o.total_return, 0) : "—", cls(o.total_return))}${met("3 мес.", o.last90_return != null ? pct(o.last90_return, 1) : "—", cls(o.last90_return))}</div>
+      <div class="checks">${CHECK_SHORT.map((k) => pill("✓ " + k, "good")).join("")}</div>
+      <div class="sub">${esc(c.status)}</div>
+    </div>`;
     return `<div class="scard" data-i="${cs.indexOf(c)}">
       <div class="top"><div><div class="nm">${esc(c.title)}</div><div class="sub">${esc(c.pairs.slice(0, 4).map(pair).join(", "))}${c.pairs.length > 4 ? " +" + (c.pairs.length - 4) : ""} · ${esc(c.timeframe)}${c.external ? " · ваша" : ""}</div></div>${stagePill(c.kind === "screen" ? "exploratory" : c.stage)}</div>
       <div class="idea">${esc(c.idea)}</div>
@@ -181,7 +201,27 @@ function renderCards() {
   }).join("");
   document.querySelectorAll(".scard").forEach((el) => el.onclick = () => openCard(cs[+el.dataset.i]));
 }
+function openAutopilot(c) {
+  const ap = c.autopilot, o = c.oos || {};
+  $("#dbody").innerHTML = `<h3>${esc(c.title)}</h3><div class="dim">${esc(c.pairs.map(pair).join(", "))} · ${esc(c.timeframe)} · ${pill("автопоиск", "good")} ${esc(c.status)}</div>
+    <div class="box"><b>Суть стратегии.</b> ${esc(c.idea)}<br><b>Выходы и риск:</b> ${esc(c.exits)}; без плеча, на демо — малый риск на сделку.</div>
+    <h2 style="margin:14px 0 6px">Капитал: ~3 года + последние 3 месяца</h2><div id="dChart" style="height:240px"></div>
+    <div class="dim" style="font-size:12px;margin-top:4px">Серым — последний год (walk-forward) и последние 3 месяца: их подбор параметров не видел.</div>
+    <h2 style="margin:14px 0 6px">Все проверки пройдены</h2>${ap.checks.map(([k, v]) => `<div class="chk"><i>✓</i><b>${esc(k)}</b><span>${esc(v)}</span></div>`).join("")}
+    <h2 style="margin:14px 0 6px">Параметры входа</h2><div class="kv2">${Object.entries(c.params || {}).map(([k, v]) => `<div><span>${esc(k)}</span><b class="num">${esc(v)}</b></div>`).join("")}</div>
+    <p class="howto">Что дальше: стратегия проходит строгую проверку во freqtrade (реальные комиссии и фандинг, 4 невиданных окна по 90 дней), затем торгует на демо по всем монетам из списка и проходит форвард-тест. Реальные деньги — только по вашему решению после всех проверок готовности.</p>`;
+  $("#drawer").classList.add("open");
+  lineChart($("#dChart"), curvePts(c.curve), (v) => pct(v - 1, 0), fmtDate, "Нет данных графика.");
+  const svg = $("#dChart svg");
+  if (svg && ap.wf_from) {  // shade the periods no search had seen
+    const pts = curvePts(c.curve), t0 = pts[0].t, t1 = pts.at(-1).t, W = +svg.getAttribute("width"), H = +svg.getAttribute("height");
+    const X = (t) => 70 + (t - t0) / Math.max(t1 - t0, 1) * (W - 82);
+    const mk = (a, op) => `<rect x="${X(a)}" y="10" width="${Math.max(0, X(t1) - X(a))}" height="${H - 36}" fill="#8f8e86" opacity="${op}" pointer-events="none"/>`;
+    svg.insertAdjacentHTML("afterbegin", mk(ap.wf_from, 0.08) + mk(ap.holdout_from, 0.12));
+  }
+}
 function openCard(c) {
+  if (c.autopilot) return openAutopilot(c);
   const o = c.oos || {}, cl = c.claimed;
   $("#dbody").innerHTML = `<h3>${esc(c.title)}</h3><div class="dim">${esc(c.pairs.map(pair).join(", "))} · ${esc(c.timeframe)} · ${stagePill(c.kind === "screen" ? "exploratory" : c.stage)} ${esc(c.status)}</div>
     <div class="box"><b>Суть стратегии.</b> ${esc(c.idea)}<br><b>Выходы и риск:</b> ${esc(c.exits)}; без плеча, риск на сделку на демо 0,1% капитала.</div>
@@ -310,6 +350,7 @@ const RU_EVENTS = [
   [/^lab: universe refreshed on (\S+) — (\d+) pairs$/, (m) => `список монет обновлён (${m[1]}) — ${m[2]} монет`],
   [/^lab: batch (\S+) imported — (\d+) experiments, (\d+) new candidates.*$/, (m) => `сводка прогона ${m[1]}: ${m[2]} опытов, новых кандидатов: ${m[3]}`],
   [/^lab: forward test of (\d+) frozen strategies on unseen Bybit data — (\d+) forward trades$/, (m) => `форвард-тест: ${m[1]} стратегий проверено на новых данных — ${m[2]} сделок`],
+  [/^autopilot: (\d+) configurations passed all seven checks, (\d+) beat the shuffled-history decoys \(decoys alone pass ([\d.]+)\), covering (\d+) coins.*$/, (m) => `автопоиск: ${m[1]} стратегий прошли 7 проверок, ${m[2]} оказались лучше случайности (на перемешанной истории проходит ${m[3]}), покрывают ${m[4]} монет → строгая проверка`],
   [/^screener: ([\d,]+) strategy combinations tested on (\d+) .* — (\d+) stayed.*$/, (m) => `скринер: проверено ${m[1].replace(/,/g, " ")} вариантов на ${m[2]} рядах — выжило ${m[3]} → строгая проверка`],
   [/^manifest v(\d+): (\d+) sleeves.*?(\d+) pairs.*$/, (m) => `торговый план v${m[1]}: ${m[2]} стратегий, ${m[3]} монет`],
   [/^(\S+) (long|short): stop moved to (\S+) — profit locked \+?\$?(\S+)$/, (m) => `${m[1]} ${m[2] === "long" ? "лонг" : "шорт"}: стоп перенесён на ${m[3]} — зафиксировано +${m[4]} $`],

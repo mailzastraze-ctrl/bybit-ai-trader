@@ -56,7 +56,7 @@ class Lifecycle:
     max_incubation: int = 8
     max_exploration: int = 24
     max_family_sleeves: int = 6    # deployed sleeves per strategy family
-    max_pairs_per_sleeve: int = 8
+    max_pairs_per_sleeve: int = 15  # an autopilot strategy trades every top coin it passed on
     max_sleeves_per_pair: int = 4  # independent strategies that may trade the same pair
     max_whitelist: int = 45        # pairs the bot follows (Hobby plan memory)
     leverage: float = 1.0  # owner's rule: no leverage (fees scale with position size, not leverage)

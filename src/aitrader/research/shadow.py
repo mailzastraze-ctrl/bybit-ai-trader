@@ -67,7 +67,8 @@ def run(s: Settings, entries: list[dict], out, workers: int = 4, ft: FreqtradeRu
     for tf in sorted({e.get("timeframe") or s.research.timeframe for e in entries}):
         group = [e for e in entries if (e.get("timeframe") or s.research.timeframe) == tf]
         pairs = sorted({p for e in group for p in e["pairs"]} | {MARKET_PAIR})  # BTC: market-relative families
-        start = min(parse_dt(e["freeze"]) for e in group) - timedelta(days=35)  # + indicator warm-up
+        from aitrader.research.screen import warmup_days
+        start = min(parse_dt(e["freeze"]) for e in group) - timedelta(days=warmup_days(tf))  # + indicator warm-up
         dl = Job(root / f"_download-{tf}")
         cfg = ft.write_config(dl, "config.json", research_config(s, pairs, timeframe=tf))
         ft.download(dl, cfg, pairs, f"{start:%Y%m%d}-", timeframe=tf)

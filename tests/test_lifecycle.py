@@ -367,3 +367,22 @@ def test_research_candidates_displace_bootstrap_placeholders(env):
     _strategy(reg, "cand3", "exploratory", ["DOT/USDT:USDT"], score=0.9)
     life.evaluate(10_000)
     assert reg.one("SELECT stage FROM strategies WHERE id='cand3'")["stage"] == "exploratory"
+
+
+def test_autopilot_strategies_take_the_demo_lane_first(env):
+    """Strategies found by the Strategy Lab autopilot replace ordinary exploration sleeves
+    (near-misses) that have not earned their place live; a proven sleeve keeps its slot."""
+    s, reg = env
+    s.lifecycle.max_exploration = 2
+    life = Lifecycle(s, reg)
+    _strategy(reg, "near", "exploration", ["SOL/USDT:USDT"], score=0.3, family="macd_cross")
+    _strategy(reg, "proven", "exploration", ["XRP/USDT:USDT"], score=0.2, family="adx_di")
+    reg.update("strategies", "proven", {"live": {"trades": 14, "profit_factor": 1.4}})
+    _strategy(reg, "plain", "exploratory", ["DOT/USDT:USDT"], score=0.9, family="supertrend")
+    _strategy(reg, "auto", "exploratory", [f"C{i}/USDT:USDT" for i in range(15)], score=0.4, family="ema_cross")
+    reg.update("strategies", "auto", {"oos": {"autopilot": True, "timeframe": "6h"}})
+    life._fill_slots()
+    st = {r["id"]: r["stage"] for r in reg.strategies()}
+    assert st["auto"] == "exploration" and st["near"] == "retired" and st["proven"] == "exploration"
+    assert st["plain"] == "exploratory"  # an ordinary candidate does not push out others
+    assert Lifecycle.tradable_tf({"oos": {"timeframe": "12h"}}) and not Lifecycle.tradable_tf({"oos": {"timeframe": "1d"}})

@@ -146,7 +146,20 @@ def build_state(s: Settings, reg: Registry) -> dict:
         "universe": reg.kv_get("universe"),
         "shadow": forward.book(reg),
         "external_tests": external_tests(reg),
+        "screen_tested": screen_tested(reg),
     }
+
+
+def screen_tested(reg: Registry, days: int = 21) -> list[str]:
+    """Screener survivors already through the walk-forward recently: runners skip them, so
+    a stable survivor is not re-tested every run while new ones wait."""
+    since = iso(utcnow() - timedelta(days=days))
+    out = set()
+    for r in reg.q("SELECT spec FROM experiments WHERE status IN ('done','running') AND created >= ?", (since,)):
+        sid = (r.get("spec") or {}).get("screen") if isinstance(r.get("spec"), dict) else None
+        if sid:
+            out.add(sid)
+    return sorted(out)
 
 
 def external_tests(reg: Registry) -> list[dict]:
@@ -227,6 +240,11 @@ def apply_import(s: Settings, reg: Registry, data: dict) -> dict:
         reg.event("research", f"screener: {sc.get('evaluated', 0):,} strategy combinations tested on "
                   f"{sc.get('series', 0)} coin/timeframe series — {sc.get('n_survivors', 0)} stayed profitable with a "
                   "steady curve on the unseen last 40% → walk-forward", data={"lab": True})
+        if sc.get("swing_tested") is not None:
+            reg.event("research", f"autopilot: {sc.get('swing_passed_checks', 0)} configurations passed all seven checks, "
+                      f"{sc.get('swing_survivors', 0)} beat the shuffled-history decoys "
+                      f"(decoys alone pass {sc.get('swing_decoy_survivors', 0)}), covering {sc.get('swing_coins_covered', 0)} coins "
+                      "→ walk-forward", data={"lab": True})
     if not data.get("experiments_full") and not data.get("candidates"):
         return {"experiments": 0, "candidates": 0, "forward": fw}
     n_exp = 0

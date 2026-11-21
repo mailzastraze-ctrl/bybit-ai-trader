@@ -178,8 +178,22 @@ def test_strategy_cards_explain_every_strategy_in_russian(env):
                                                 "r2": 0.8, "last90": 4.0, "curve": [[1700000000000, 1.0], [1700100000000, 1.1]]}]})
     out = cards.build(reg)
     kinds = {c["kind"] for c in out["cards"]}
-    assert {"rejected", "screen"} <= kinds
+    assert "screen" in kinds and "rejected" not in kinds and out["counts"]["rejected"] >= 1  # weeded out: counted, not shown
     scr = next(c for c in out["cards"] if c["kind"] == "screen")
     assert "200 свечей" in scr["idea"] and "3.5σ" in scr["idea"] and scr["exits"].startswith("стоп 3×ATR")
     for fam in FAMILIES:  # every family has a plain-language explanation
         assert cards.idea(fam, FAMILIES[fam].defaults())
+    # an autopilot survivor: the ~3-year record on the card and all seven checks explained
+    reg.kv_set("screen", {"ts": iso(), "swing_tested": 40, "swing_passed_checks": 9, "swing_decoy_survivors": 3.5,
+                          "swing_survivors": 2, "swing_coins_covered": 11, "top": [{
+                              "id": "scr-2", "strategy": "ema_cross", "family": "ema_cross", "mode": "swing", "pair": "BTC/USDT:USDT",
+                              "pairs": ["BTC/USDT:USDT", "ETH/USDT:USDT"], "timeframe": "6h", "params": {"fast": 47, "slow": 76, "trend": 0},
+                              "exits": {"sl": 2, "tp": 2, "tr": 0}, "A": {"trades": 39, "pf": 2.66, "net": 192.5, "dd": 14.2, "tpm": 1.1, "years": 3.0},
+                              "B": {"trades": 1, "pf": 99, "net": 5.6}, "wf": {"trades": 12, "pf": 1.8, "net": 21.0},
+                              "mc": {"dd95": 22.0, "ploss": 1.0}, "coins": {"tested": 15, "pass": 2}, "robust": 0.8, "r2": 0.9,
+                              "last90": 5.6, "luck_share": 0.1, "holdout_from": 1700000000000, "wf_from": 1690000000000,
+                              "curve": [[1600000000000, 1.0], [1700100000000, 2.9]]}]})
+    out = cards.build(reg)
+    ap = next(c for c in out["cards"] if c.get("autopilot"))
+    assert ap["oos"]["profit_factor"] == 2.66 and ap["oos"]["total_return"] == 1.925 and len(ap["autopilot"]["checks"]) == 7
+    assert out["autopilot"]["swing_survivors"] == 2 and ap["pairs"] == ["BTC/USDT:USDT", "ETH/USDT:USDT"]

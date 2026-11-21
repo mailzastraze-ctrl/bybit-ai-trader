@@ -94,3 +94,57 @@ def test_pooled_screener_one_config_across_coins(tmp_path):
     assert sv["pooled"] and len(sv["pairs"]) >= 4 and sv["B"]["breadth"] >= 0.55 and sv["B"]["trades"] >= 90
     spec = screen.to_specs(res, 0, 1)[0]
     assert spec["pairs"] == sv["pairs"][:8] and spec["fixed_params"]
+
+
+def _swing_series(data, n_coins, tf_min, days, seed, trend):
+    rng = np.random.default_rng(seed)
+    n = int(days * 1440 / tf_min)
+    common = np.repeat(rng.choice([-1, 1], size=n // max(1, int(45 * 1440 / tf_min)) + 2), int(45 * 1440 / tf_min))[:n]
+    for i in range(n_coins):
+        r = trend * common * 0.0016 * (tf_min / 360) + rng.normal(0, 0.012 * np.sqrt(tf_min / 360), n)
+        c = 100 * np.exp(np.cumsum(r))
+        o = np.r_[c[0], c[:-1]]
+        tf = {240: "4h", 360: "6h", 720: "12h"}[tf_min]
+        (data / f"C{i}_USDT_USDT__{tf}.json").write_text(json.dumps({
+            "t": (1_600_000_000_000 + np.arange(n) * tf_min * 60_000).tolist(), "o": o.tolist(),
+            "h": (np.maximum(o, c) * 1.003).tolist(), "l": (np.minimum(o, c) * 0.997).tolist(), "c": c.tolist(), "v": [1] * n}))
+
+
+@pytest.mark.skipif(shutil.which("node") is None, reason="node not installed")
+def test_swing_autopilot_rejects_pure_noise(tmp_path):
+    """Random walks have no edge: whatever passes the seven checks by luck must not beat the
+    shuffled-history decoys (the search would otherwise 'find' perfect strategies in noise)."""
+    data = tmp_path / "candles"
+    data.mkdir()
+    _swing_series(data, 6, 720, 1200, 5, trend=0.0)
+    out = tmp_path / "screen-results.json"
+    subprocess.run(["node", str(ROOT / "screener" / "screen.js"), "--mode", "swing", "--data", str(data), "--out", str(out),
+                    "--swing-combos", "150", "--top", "3", "--workers", "2"], check=True, timeout=600)
+    res = json.loads(out.read_text())
+    assert res["swing_tested"] > 0 and res["swing_survivors"] == 0 and res["survivors"] == []
+
+
+@pytest.mark.skipif(shutil.which("node") is None, reason="node not installed")
+def test_swing_autopilot_keeps_a_planted_trend_and_lists_its_coins(tmp_path):
+    data = tmp_path / "candles"
+    data.mkdir()
+    _swing_series(data, 6, 720, 1200, 9, trend=1.0)
+    out = tmp_path / "screen-results.json"
+    subprocess.run(["node", str(ROOT / "screener" / "screen.js"), "--mode", "swing", "--data", str(data), "--out", str(out),
+                    "--swing-combos", "150", "--top", "3", "--workers", "2"], check=True, timeout=600)
+    res = json.loads(out.read_text())
+    assert res["survivors"], "a trend shared by all coins must beat the decoys"
+    sv = res["survivors"][0]
+    assert sv["mode"] == "swing" and sv["timeframe"] == "12h" and sv["robust"] >= 0.7 and sv["wf"]["net"] > 0
+    assert sv["B"]["net"] >= 0 and sv["mc"]["dd95"] <= 35 and 0.5 <= sv["A"]["tpm"] <= 12 and sv["pairs"][0] == sv["pair"]
+    assert len(sv["pairs"]) == sv["coins"]["pass"] >= 2
+    specs = screen.to_specs(res, 0, 1)
+    assert specs[0]["timeframe"] == "12h" and specs[0]["pairs"] == sv["pairs"] and specs[0]["screen_holdout"]["mode"] == "swing"
+    assert screen.to_specs(res, 0, 1, skip={screen.survivor_id(x) for x in res["survivors"]}) == []
+    top = screen.summary(res)["top"][0]
+    assert top["wf"] and top["coins"] and top["holdout_from"]
+
+
+def test_warmup_covers_the_indicator_history_of_each_timeframe():
+    assert screen.warmup_days("1h") == 35 and screen.warmup_days("6h") >= 180 and screen.warmup_days("12h") >= 360
+    assert screen.min_bars("6h") == 3600 and screen.min_bars("1h") == 2000

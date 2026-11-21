@@ -134,6 +134,13 @@ body.t-office main{display:none}
 .cards{display:grid;grid-template-columns:repeat(auto-fill,minmax(340px,1fr));gap:12px}
 .scard{background:var(--card);border:1px solid var(--line);border-radius:var(--r);padding:14px;cursor:pointer;display:flex;flex-direction:column;gap:8px;transition:border-color .15s}
 .scard:hover{border-color:var(--blue)}
+.scard.auto{border-color:color-mix(in srgb,var(--good) 45%,var(--line))}
+.autopilot{background:var(--card);border:1px solid var(--line);border-radius:var(--r);padding:12px 14px;margin-bottom:12px;font-size:13px;color:var(--text2);line-height:1.5}
+.autopilot b{color:var(--text)}
+.checks{display:flex;flex-wrap:wrap;gap:4px}
+.checks .pill{font-size:10.5px;padding:0 6px}
+.chk{display:grid;grid-template-columns:22px 170px 1fr;gap:6px;padding:6px 0;border-bottom:1px solid var(--line);font-size:13px}
+.chk i{color:var(--good);font-style:normal}
 .scard .top{display:flex;justify-content:space-between;gap:8px;align-items:flex-start}
 .scard .nm{font-weight:600;font-size:14px}
 .scard .sub{color:var(--muted);font-size:12px}
@@ -202,6 +209,7 @@ body.t-office main{display:none}
 
   <!-- ======================= СТРАТЕГИИ ======================= -->
   <section class="c12" data-tab="strategies">
+    <div class="autopilot" id="autopilot"></div>
     <div class="filters" id="filters"></div>
     <div class="cards" id="cards"></div>
   </section>

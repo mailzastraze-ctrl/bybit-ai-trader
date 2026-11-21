@@ -1,6 +1,6 @@
 # PROJECT_STATUS
 
-_Last updated: 2026-11-21 09:50 CET_
+_Last updated: 2026-11-21 11:40 CET_
 
 ## Summary
 The system is **deployed and running autonomously on Bybit Demo**. It never trades real money: `demo_trading` is hard-required.
@@ -26,6 +26,33 @@ Links and rules:
 | 7 | Web terminal | ✅ live | **Control room** (primary, desktop + phone): capital curve, positions with protection state, forward-test verdict, 4 live lab runners, results with fold squares, bandit, gates, lifecycle, goals, readiness, log, learnings, closed trades. **3D HQ v3** at `/hq`: real data on every screen (live 1h candles with entry/stop/target, live GitHub hyperopt epochs, fold results, gates, bandit, market map, goals). Company mission board, stand-up meetings built from real numbers, GitHub-lab cloud with data beam, expressive characters. Rendered headlessly on every UI change (`hq-preview` workflow, screenshots in `docs/preview/`, fails on JS errors) |
 | — | Cloud, independent of your PC | ✅ / ⚠️ | Railway **trial** credit runs out in about 15 days. Hobby is needed for indefinite operation |
 | — | GitHub + PROJECT_STATUS | ✅ | CI green with the real Freqtrade image; 113 tests |
+
+## Strategy Lab autopilot (2026-11-21, owner's request)
+The owner's goal: the company should find what his Strategy Lab found by hand (stable strategies with rare, accurate trades over 3 years plus the last 3 months, e.g. EMA cross on BTC 6h), automatically and without the Lab's many tabs, and trade the best ones on at least 15 coins.
+
+**Autopilot** = `screener/screen.js --mode swing`, running in the lab's `screen` job next to the pooled 15m/1h mode:
+- **Data:** top 15 coins by volume, 2h / 4h / 6h / 12h, about 3.3 years.
+- **Search:** the owner's `engine.js` (10 rules × random parameters × exits) on everything except the last 90 days.
+- **Seven automatic checks.** The Lab's tabs became filters, and failures are never shown:
+  1. Stability: 0.5–12 trades/month and at least 20 trades, PF ≥ 1.4, every third of the period profitable, R² ≥ 0.75, max DD ≤ 25%.
+  2. Robustness: at least 70% of neighbouring parameter sets are profitable.
+  3. Walk-forward: the same search, re-run without the last year, must pick a configuration that is profitable on that year.
+  4. Last 3 months: unseen by every search, at least one trade and not losing.
+  5. Monte Carlo: 95th-percentile drawdown ≤ 35% and P(loss) ≤ 10%.
+  6. Other coins: the coins where the configuration also holds join its trading list, up to all 15.
+  7. Not luck: see the decoy control below.
+- **Decoy control (why the seven checks alone are not enough).** We ran the same search on pure random walks. It "found" 42–62 configurations that passed all seven checks, with Sharpe above 2, PF up to 4.5 and several coins each. That is the multiple-testing effect behind the many "working" strategies seen when searching by hand.
+  - The search therefore also runs on decoys: the same coins with daily return blocks shuffled in time. One permutation is shared by all coins, so correlations survive and real predictability is destroyed.
+  - A survivor is accepted only above the score at which decoys would make up at most 20% of the accepted list (target–decoy false-discovery control).
+  - Tests: random walks → 0 accepted; a planted shared trend → accepted with all checks passing.
+- **Downstream (nothing weakened):**
+  - Accepted strategies go first to the freqtrade walk-forward with real fees and funding (tested on up to 15 coins), then to the gates and verdict.
+  - Exploratory and validated strategies trade on demo across every coin they passed on, then go through the forward test. Production still requires forward evidence.
+  - Autopilot strategies take the demo lane first. They replace ordinary near-miss exploration sleeves that have no live edge.
+  - `max_pairs_per_sleeve` was raised from 8 to 15. Strategies already tested in the last 21 days are not re-tested.
+- **Bot:** sleeves on 2h–12h run on the 15m bot via informative pairs (signal on the first 15m candle after the higher candle closes, no look-ahead). Backtest and forward-test warm-up scales with the timeframe (720 candles).
+- **UI:** the "Стратегии" tab shows an autopilot summary (variants tried, how many passed all seven checks, how many decoys pass, how many accepted, coins covered). Cards show the 3-year record and trades per month. The drawer has a chart with the unseen periods shaded and all seven checks with their values. Rejected strategies are counted, not shown.
+- **Honest expectation:** if the market offers fewer real edges than hand searching suggested, the autopilot accepts few or none and says so. It does not force 15 coins with lucky strategies.
 
 ## Overnight review and fixes (2026-11-21 morning)
 **Research lab:** 4 runs completed overnight, ~113 walk-forward experiments.

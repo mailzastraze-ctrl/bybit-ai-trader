@@ -7,7 +7,10 @@ name: research-lab
 #   run ×4 – four parallel runners (4 vCPU each), each a budgeted stream of walk-forward
 #            experiments opening with a different strategy family; live progress → HQ
 #   screen – stage 1: owner's Strategy Lab engine (Node) screens thousands of combinations,
-#            survivors (steady + profitable on the unseen last 40%) go to the runners first
+#            survivors (steady + profitable on the unseen last 40%) go to the runners first;
+#            autopilot (swing): top 15 coins on 2h–12h, ~3 years + last 3 months, seven checks
+#            (stability, robustness, walk-forward, last 3 months, Monte Carlo, other coins) and
+#            target–decoy control; accepted strategies trade every coin they passed on
 #   shadow – forward test: every frozen strategy on Bybit candles after its freeze time
 #   merge  – Deflated Sharpe over EVERY trial (90-day ledger + all four runners), compact
 #            results → server import + research/ commit, registry backup, next run
@@ -118,7 +121,7 @@ jobs:
         with:
           name: lab-plan
           path: work/batch
-      - name: Bybit candles (15m + 1h) for the screener
+      - name: Bybit candles for the screener (15m + 1h; top 15 coins on 2h–12h, ~3.3 years)
         run: |
           chmod -R 777 work
           docker run --rm -v "$PWD/work:/data" -e RESEARCH_EXCHANGE \
@@ -133,7 +136,9 @@ jobs:
             work/batch/universe.json
           key: mkt-all-${{ github.run_id }}
       - name: Mass screening (owner's engine)
-        run: node screener/screen.js --mode pooled --data work/batch/candles --out work/batch/screen-results.json --combos 400 --top 5 --workers $(nproc)
+        # pooled: one config across all coins (15m/1h). swing: the autopilot – rare, accurate trades
+        # on 2h–12h, seven automatic checks + target–decoy control against lucky survivors
+        run: node screener/screen.js --mode pooled,swing --data work/batch/candles --out work/batch/screen-results.json --combos 400 --top 5 --workers $(nproc)
       - uses: actions/upload-artifact@v4
         with:
           name: lab-screen

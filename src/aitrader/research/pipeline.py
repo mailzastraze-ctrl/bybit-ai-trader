@@ -102,7 +102,8 @@ class Pipeline:
 
         # 1) data -----------------------------------------------------------
         self._progress(eid, "download")
-        data_start = folds[0].train_start - timedelta(days=35)  # + 720-candle indicator warm-up
+        from aitrader.research.screen import warmup_days
+        data_start = folds[0].train_start - timedelta(days=warmup_days(tf))  # + 720-candle indicator warm-up
         data_pairs = sorted(set(pairs) | ({MARKET_PAIR} if fam.name in NEEDS_MARKET else set()))
         if tf == rs.timeframe:
             self.ft.download(job, base_cfg, data_pairs, f"{data_start:%Y%m%d}-")
