@@ -23,6 +23,26 @@ from aitrader.util import parse_dt, utcnow
 S = get_settings()
 STATIC = Path(__file__).parent / "static"
 app = FastAPI(title="aitrader terminal", docs_url=None, redoc_url=None, openapi_url=None)
+
+
+class _ApiGZip:
+    """gzip for the JSON API and the lab relay (Railway bills egress; JSON shrinks ~5–10×).
+    Static assets (already-compressed models/images, cached by the browser) and the registry
+    backup (already gzip, fetched with plain curl) pass through untouched."""
+
+    def __init__(self, app_):
+        from starlette.middleware.gzip import GZipMiddleware
+        self.plain = app_
+        self.gzip = GZipMiddleware(app_, minimum_size=1024)
+
+    async def __call__(self, scope, receive, send):
+        path = scope.get("path", "") if scope.get("type") == "http" else ""
+        if path.startswith(("/api/", "/relay/")) and path != "/api/lab/backup":
+            return await self.gzip(scope, receive, send)
+        return await self.plain(scope, receive, send)
+
+
+app.add_middleware(_ApiGZip)
 security = HTTPBasic()
 app.mount("/static", StaticFiles(directory=STATIC), name="static")
 _reg: Registry | None = None

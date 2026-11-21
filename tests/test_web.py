@@ -47,3 +47,20 @@ def test_auth_and_endpoints(client):
     assert client.get("/api/candles", params={"pair": "BTC/USDT:USDT"}, auth=a).json()["candles"] == []
     assert client.post("/api/control/pause_research", auth=a).json()["ok"]
     assert client.get("/api/research", auth=a).json()["paused"] is True
+
+
+def test_api_json_is_gzipped_static_is_not(client):
+    """Railway bills egress: the JSON API (polled by the control room and the 3D office) and
+    the lab relay are gzip-compressed; static assets and the registry backup are left alone."""
+    import aitrader.web.app as webapp
+    from aitrader.registry import Registry
+    from aitrader.util import iso
+    reg = Registry(webapp.S.registry_path)
+    for i in range(400):  # enough events for a response well above the 1 KB threshold
+        reg.event("test", f"event {i} " + "x" * 50)
+    a = ("admin", "pw")
+    r = client.get("/api/events?limit=300", auth=a, headers={"Accept-Encoding": "gzip"})
+    assert r.status_code == 200 and r.headers.get("content-encoding") == "gzip" and len(r.json()) > 0
+    r = client.get("/static/control.js", headers={"Accept-Encoding": "gzip"})
+    assert r.status_code == 200 and r.headers.get("content-encoding") is None
+    assert iso()  # registry + app share the test data dir
