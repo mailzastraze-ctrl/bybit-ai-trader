@@ -162,10 +162,13 @@ def _group(rows: list[dict], btc: pd.Series | None = None) -> dict:
            "mean_bp": round(sum(rets) / len(rets) * 1e4, 2) if rets else None,
            "t_daily": _t(daily), "days_with_trades": len(daily)}
     if btc is not None and len(daily) >= 5:
-        y = pd.Series(daily, index=pd.to_datetime([d for d, _ in ordered], utc=True))
-        ab = EV.alpha_beta(y, btc)
-        out["beta"], out["alpha_t"] = ab["beta"], ab["alpha_t"]
-        out["alpha_bp"] = round(ab["alpha"] * 1e4, 2) if ab["alpha"] is not None else None
+        try:  # reporting only – never let it break the forward import
+            y = pd.Series(daily, index=pd.to_datetime([d for d, _ in ordered], utc=True))
+            ab = EV.alpha_beta(y, btc)
+            out["beta"], out["alpha_t"] = ab["beta"], ab["alpha_t"]
+            out["alpha_bp"] = round(ab["alpha"] * 1e4, 2) if ab["alpha"] is not None else None
+        except Exception:  # noqa: BLE001
+            out["beta"] = out["alpha_t"] = out["alpha_bp"] = None
     return out
 
 

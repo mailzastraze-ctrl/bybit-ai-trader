@@ -323,3 +323,17 @@ def test_btc_daily_candles_are_fetched_into_the_registry(env):
     closes = reg.kv_get("btc_daily")
     assert len(closes) == 4 and list(closes) == sorted(closes)  # today's open candle excluded
     assert closes[min(closes)] == 104.0
+
+
+def test_broken_trade_data_never_breaks_the_manager_loop(env):
+    s, reg = env
+    reg.kv_set("btc_daily", btc_closes(start=(utcnow() - timedelta(days=60)).strftime("%Y-%m-%d"), days=60))
+    _incubating(reg, "odd")
+    reg.upsert("live_trades", {"trade_id": 1, "sleeve_id": "odd", "pair": "BTC/USDT:USDT", "is_short": 0,
+                               "open_date": "garbage", "close_date": "not-a-date", "open_rate": 100, "close_rate": 101,
+                               "profit_ratio": 0.01, "profit_abs": 10.0, "exit_reason": "x", "max_rate": 0, "min_rate": 0,
+                               "leverage": 1.0, "stake_amount": 1.0, "raw": {}}, key="trade_id")
+    Lifecycle(s, reg).evaluate(10_000)  # must not raise
+    st = reg.one("SELECT stage, live FROM strategies WHERE id='odd'")
+    assert st["stage"] == "incubation" and st["live"]["alpha"]["alpha"] is None
+    readiness.evaluate(reg, 10_000)  # must not raise either

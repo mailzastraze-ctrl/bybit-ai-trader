@@ -98,10 +98,13 @@ def evaluate(reg: Registry, equity: float | None = None) -> dict:
     life.reg = reg
     diverging = [s["id"] for s in prod if Lifecycle.diverges(life, s)]
     n = st.get("trades", 0)
-    daily = EV.daily_returns(evidence, equity, real_pnl, end=utcnow())
-    t_daily = round(EV.newey_west_t(daily.to_numpy()), 2) if len(daily) else 0.0
-    btc = EV.btc_returns(reg.kv_get("btc_daily"))
-    ab = EV.alpha_beta(daily, btc, min_days=REQ["min_days"]) if len(daily) and len(btc) else {"alpha_t": None}
+    try:  # a failure here fails the two checks (advisory gate), never the manager loop
+        daily = EV.daily_returns(evidence, equity, real_pnl, end=utcnow())
+        t_daily = round(EV.newey_west_t(daily.to_numpy()), 2) if len(daily) else 0.0
+        btc = EV.btc_returns(reg.kv_get("btc_daily"))
+        ab = EV.alpha_beta(daily, btc, min_days=REQ["min_days"]) if len(daily) and len(btc) else {"alpha_t": None}
+    except Exception:  # noqa: BLE001
+        daily, t_daily, btc, ab = pd.Series(dtype=float), 0.0, pd.Series(dtype=float), {"alpha_t": None}
     alpha_val = (f"t {ab['alpha_t']}, β {ab['beta']}" if ab.get("alpha_t") is not None
                  else ("нет данных BTC" if not len(btc) else f"{len(daily)} дн."))
     st["t_daily"], st["days"] = t_daily, len(daily)

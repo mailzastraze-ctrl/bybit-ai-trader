@@ -157,11 +157,15 @@ class Lifecycle:
         """Beta to BTC and the alpha left after it, on calendar-day realistic returns.
         A short sleeve in a falling market earns money without any skill; alpha says how much
         of the result the market does not explain."""
+        empty = {"days": 0, "alpha": None, "beta": None, "alpha_t": None, "alpha_ann": None}
         if not trades or btc is None or not len(btc):
-            return {"days": 0, "alpha": None, "beta": None, "alpha_t": None, "alpha_ann": None,
-                    "note": "нет данных BTC" if trades else "нет сделок"}
-        daily = EV.daily_returns(trades, equity, real_pnl, end=utcnow())
-        return EV.alpha_beta(daily, btc)
+            return empty | {"note": "нет данных BTC" if trades else "нет сделок"}
+        try:  # analytics must never break the manager loop; unmeasurable alpha only makes promotion wait
+            daily = EV.daily_returns(trades, equity, real_pnl, end=utcnow())
+            return EV.alpha_beta(daily, btc)
+        except Exception as e:  # noqa: BLE001
+            log.warning("alpha for %d trades failed: %s", len(trades), e)
+            return empty | {"note": "ошибка расчёта"}
 
     @staticmethod
     def alpha_state(live: dict) -> str:
