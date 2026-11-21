@@ -50,18 +50,27 @@ from aitrader import evidence as EV
 from aitrader.registry import Registry
 from aitrader.util import iso, parse_dt, utcnow
 
-BOOK_LIMIT = 120
+BOOK_LIMIT = 160
 BOOK_MAX_AGE_DAYS = 60
+# Research candidates (validated/exploratory, best score first) and strategies with a promising
+# forward record keep their place for their whole 60-day book life, so their forward evidence
+# accumulates. Before 2026-11-21 the book was simply the newest 120 experiments: ~2 lab runs,
+# so every strategy was forward-tested for only a few hours and then dropped out.
+BOOK_KEEP = 100
 RULES = {"version": 2, "early_trades": 100, "early_days": 7, "final_trades": 200, "final_days": 90,
          "pf_works": 1.15, "t_works": EV.T_FLOOR, "t_rule": "anytime-valid (normal mixture, ρ = 90 days, α = 5 %)"}
 PROMOTE = {"trades": 20, "pf": 1.3}
 
 
 # ---------------------------------------------------------------------------- server: the book
-def book(reg: Registry, limit: int = BOOK_LIMIT, max_age_days: int = BOOK_MAX_AGE_DAYS) -> list[dict]:
-    """Frozen strategies for the lab to forward-test (newest experiments first)."""
+def book(reg: Registry, limit: int = BOOK_LIMIT, max_age_days: int = BOOK_MAX_AGE_DAYS,
+         keep: int = BOOK_KEEP) -> list[dict]:
+    """Frozen strategies for the lab to forward-test: the research candidates and the
+    forward-promising strategies first (they stay for their whole book life, so their forward
+    record grows), then the newest experiments (a first look at every new hypothesis, weak
+    ones included – the test is whether the research ranking predicts the future)."""
     since = iso(utcnow() - timedelta(days=max_age_days))
-    out = []
+    exps = []
     benchmarks = {st["id"] for st in reg.strategies() if (st.get("oos") or {}).get("benchmark")}
     for r in reg.q("SELECT id, family, spec, result, finished FROM experiments WHERE status='done' "
                    "AND finished >= ? ORDER BY finished DESC", (since,)):
@@ -76,14 +85,18 @@ def book(reg: Registry, limit: int = BOOK_LIMIT, max_age_days: int = BOOK_MAX_AG
         if not pairs:
             continue
         oos = res.get("oos") or {}
-        out.append({"id": r["id"], "family": r["family"], "params": res["params"], "pairs": pairs,
-                    "sides": spec.get("sides", ["long", "short"]), "freeze": r["finished"],
-                    "score": float(res.get("score") or 0.0), "verdict": res.get("verdict"),
-                    "bt_pf": oos.get("profit_factor"), "bt_trades": oos.get("trades"),
-                    "variant": res.get("variant") or r["family"],
-                    "timeframe": res.get("timeframe") or spec.get("timeframe") or "1h"})
-        if len(out) >= limit:
-            break
+        exps.append({"id": r["id"], "family": r["family"], "params": res["params"], "pairs": pairs,
+                     "sides": spec.get("sides", ["long", "short"]), "freeze": r["finished"],
+                     "score": float(res.get("score") or 0.0), "verdict": res.get("verdict"),
+                     "bt_pf": oos.get("profit_factor"), "bt_trades": oos.get("trades"),
+                     "variant": res.get("variant") or r["family"],
+                     "timeframe": res.get("timeframe") or spec.get("timeframe") or "1h"})
+    promising = {b["id"] for b in ((reg.kv_get("forward") or {}).get("best") or [])
+                 if (b.get("p_pos") or 0) >= 0.8 and (b.get("trades") or 0) >= 10}
+    kept = sorted((e for e in exps if e["verdict"] in ("validated", "exploratory") or e["id"] in promising),
+                  key=lambda e: (e["id"] not in promising, -e["score"]))[:min(keep, limit)]
+    kept_ids = {e["id"] for e in kept}
+    out = kept + [e for e in exps if e["id"] not in kept_ids][:max(limit - len(kept), 0)]
     # candidates imported as strategies (e.g. offline batches) whose experiment isn't stored here
     seen = {e["id"] for e in out}
     for st in reg.strategies():  # pre-registered benchmarks stay in the book for good
@@ -142,6 +155,34 @@ def _spearman(a: list[float], b: list[float]) -> float | None:
     va = math.sqrt(sum((x - ma) ** 2 for x in ra))
     vb = math.sqrt(sum((y - mb) ** 2 for y in rb))
     return round(cov / (va * vb), 3) if va > 0 and vb > 0 else None
+
+
+def _daily(rows: list[dict]) -> dict[str, float]:
+    """Equal-weight daily return of a group (days on which any member closed a trade)."""
+    per: dict[tuple, float] = defaultdict(float)
+    for r in rows:
+        for ts, x in r.get("trades", []):
+            per[(r["id"], ts[:10])] += x
+    days: dict[str, float] = defaultdict(float)
+    for (_sid, d), x in per.items():
+        days[d] += x
+    n = max(len(rows), 1)
+    return {d: v / n for d, v in sorted(days.items())}
+
+
+def versus(top: list[dict], bench: list[dict], min_days: int = 10) -> dict | None:
+    """Interim signal for an observer: does the research's top quartile beat the fixed
+    benchmark over the same days? Paired daily difference (a day without trades counts as 0),
+    its t and P(top better) under a normal approximation. Not a verdict – a direction with
+    its uncertainty."""
+    a, b = _daily(top), _daily(bench)
+    days = sorted(set(a) | set(b))
+    if len(days) < min_days:
+        return None
+    diff = [a.get(d, 0.0) - b.get(d, 0.0) for d in days]
+    t = _t(diff)
+    return {"days": len(days), "t": t, "p_top_better": round(0.5 * (1 + math.erf(t / math.sqrt(2))), 3),
+            "top_pct": round(sum(a.values()) * 100, 3), "bench_pct": round(sum(b.values()) * 100, 3)}
 
 
 def _group(rows: list[dict], btc: pd.Series | None = None) -> dict:
@@ -208,6 +249,7 @@ def summarize(results: list[dict], now=None, btc: pd.Series | None = None) -> di
     fwd_days = round((now - min(freezes)).total_seconds() / 86400, 1) if freezes else 0.0
     g_top, g_rest, g_all = _group(top, btc), _group(rest), _group(rows)
     g_bench = _group(bench, btc) if bench else None
+    vs = versus(top, bench) if bench else None
     t_need = EV.anytime_t_boundary(g_top["days_with_trades"])
     ev = [(float(r.get("score") or 0.0), sum(t[1] for t in r.get("trades", [])))
           for r in rows if len(r.get("trades", [])) >= 5]
@@ -240,7 +282,8 @@ def summarize(results: list[dict], now=None, btc: pd.Series | None = None) -> di
         text += (f" Benchmark (fixed TSMOM): {g_bench['trades']} trades, PF {g_bench['pf']}, "
                  f"{g_bench['pnl_pct']}%; top quartile {g_top['pnl_pct']}%.")
     return {"ts": iso(now), "verdict": verdict, "text": text, "rules": R, "t_needed": t_need, "forward_days": fwd_days,
-            "top": g_top, "rest": g_rest, "all": g_all, "benchmark": g_bench, "families": fam, "rank_corr": rho,
+            "top": g_top, "rest": g_rest, "all": g_all, "benchmark": g_bench, "vs_benchmark": vs, "families": fam,
+            "rank_corr": rho,
             "n_strategies": len(rows), "best": board[:15], "worst": board[-5:][::-1] if len(board) > 15 else []}
 
 

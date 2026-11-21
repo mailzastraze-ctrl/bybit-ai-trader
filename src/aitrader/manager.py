@@ -6,7 +6,7 @@ from __future__ import annotations
 import time
 from datetime import timedelta
 
-from aitrader import context, memguard, readiness
+from aitrader import context, memguard, readiness, storage
 from aitrader.ftclient import FtClient
 from aitrader.learner import Learner
 from aitrader.lifecycle import Lifecycle
@@ -49,8 +49,10 @@ def kill_switch(reg: Registry, equity: float, limit: float, cooldown_h: float) -
     return False
 
 
-def housekeeping(reg: Registry) -> None:
-    """Keep the registry small: old events/equity rows go, VACUUM weekly."""
+def housekeeping(reg: Registry, s=None) -> None:
+    """Keep the registry and the volume small: old events/equity rows go, rejected research
+    detail is slimmed, rotated logs are trimmed (aitrader.storage), VACUUM weekly or after a
+    big slim."""
     now = utcnow()
     last = parse_dt(reg.kv_get("housekeeping_ts"))
     if last and (now - last).total_seconds() < 86400:
@@ -58,8 +60,14 @@ def housekeeping(reg: Registry) -> None:
     with reg.conn() as c:
         c.execute("DELETE FROM events WHERE ts < ?", (iso(now - timedelta(days=30)),))
         c.execute("DELETE FROM equity WHERE ts < ?", (iso(now - timedelta(days=365))[:16],))
+    slimmed = 0
+    if s is not None:
+        try:  # maintenance must never break the manager loop
+            slimmed = storage.maintain(reg, s.data_dir, s.user_data / "logs").get("slimmed", 0)
+        except Exception as e:  # noqa: BLE001
+            log.warning("storage maintenance failed: %s", e)
     last_vac = parse_dt(reg.kv_get("vacuum_ts"))
-    if last_vac is None or (now - last_vac).days >= 7:
+    if last_vac is None or (now - last_vac).days >= 7 or slimmed >= 300:
         with reg.conn() as c:
             c.execute("VACUUM")
         reg.kv_set("vacuum_ts", iso(now))
@@ -78,7 +86,7 @@ def main() -> None:
     # make sure the bot has a manifest + pairlist before it starts trading
     life.write(life.build_manifest([], set(scanner.excluded_pairs()), False), [])
     reg.event("manager", "manager started")
-    last_learn = last_ready = last_ctx = 0.0
+    last_learn = last_ready = last_ctx = last_disk = 0.0
     while True:
         t0 = time.time()
         detail: dict = {}
@@ -120,7 +128,13 @@ def main() -> None:
             if time.time() - last_ready > 600:
                 readiness.update(reg, equity if equity > 0 else None)
                 last_ready = time.time()
-            housekeeping(reg)
+            housekeeping(reg, s)
+            if time.time() - last_disk > 900:  # disk usage for the control room (cheap)
+                last_disk = time.time()
+                try:
+                    reg.kv_set("disk", {**(reg.kv_get("disk") or {}), **storage.disk_status(s.data_dir)})
+                except OSError:
+                    pass
             memguard.release()
             h = memguard.headroom_mb()
             if h is not None:

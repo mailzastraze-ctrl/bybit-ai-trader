@@ -18,7 +18,8 @@ a side dropped after 10 is mostly reacting to luck. Thresholds:
   * pair exclusion: ≥ 15 trades, PF < 0.7 and a one-sided t ≤ −2 on realistic returns;
   * family exit/holding patterns: ≥ 30 trades (≥ 12 losing trades with an MFE);
   * long/short asymmetry: ≥ 20 trades per side and a Welch t ≥ 2 for the difference;
-  * A/B pruning: ≥ 8 experiments with and without the learning.
+  * A/B pruning: ≥ 8 experiments with and without the learning;
+  * research-gate patterns: the 8 most recent experiments of a family (was 4).
 Learnings remain hypotheses: live exclusions expire, search-space changes are A/B-tested.
 """
 
@@ -38,7 +39,7 @@ from aitrader.util import iso, utcnow
 
 log = logging.getLogger(__name__)
 EVIDENCE = {"pair_trades": 15, "pair_pf": 0.7, "pair_t": -2.0, "family_trades": 30, "family_mfe": 12,
-            "side_trades": 20, "side_t": 2.0, "ab_min": 8}
+            "side_trades": 20, "side_t": 2.0, "ab_min": 8, "research_min": 8}
 
 
 def _t1(x: np.ndarray) -> float:
@@ -198,9 +199,9 @@ class Learner:
             if isinstance(r.get("result"), dict):
                 by_fam.setdefault(r["family"], []).append(r)
         for fam, rs in by_fam.items():
-            recent = rs[:8]
-            if len(recent) < 4:
-                continue
+            recent = rs[:EVIDENCE["research_min"]]
+            if len(recent) < EVIDENCE["research_min"]:
+                continue  # a gate failing in 2 of 4 experiments is not a pattern
             fails: dict[str, int] = {}
             for r in recent:
                 for g, v in (r["result"].get("gates") or {}).items():

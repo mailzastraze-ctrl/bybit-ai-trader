@@ -18,6 +18,8 @@ from aitrader.registry import Registry
 from aitrader.settings import Settings
 from aitrader.util import iso
 
+HIGHER_TF = {"tsmom": ("4h", 0.5)}  # family → (timeframe, share of its new experiments)
+
 
 def ucb_pick(stats: dict[str, tuple[int, float]], c: float = 0.6, rng: random.Random | None = None) -> str:
     """stats: family -> (n_experiments, mean_reward). Untried families first."""
@@ -161,6 +163,13 @@ class Generator:
             "seed": self.rng.randint(1, 10_000),
             "timeframe": "15m" if family in MULTI_TF and self.rng.random() < 0.5 else self.s.research.timeframe,
         }
+        # Where the evidence points, look further: time-series momentum is the one effect the
+        # lab, the screener and the literature agree on, and its documented horizons (2–12 weeks)
+        # lie beyond 1h bars (lookback ≤ 504 bars = 21 days). Half of its experiments run on 4h,
+        # where the same lookback range spans 12–84 days.
+        tf_hi = HIGHER_TF.get(family)
+        if tf_hi and self.rng.random() < tf_hi[1]:
+            spec["timeframe"] = tf_hi[0]
         # Market-context genes (trading hours, weekends, US macro releases) are searched in
         # about a third of new experiments; elsewhere they stay off, so the usual search keeps
         # its size and speed. The bandit, walk-forward and decoys judge the difference.
