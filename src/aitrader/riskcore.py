@@ -30,7 +30,10 @@ class EntryContext:
         return self.entry + d if self.is_short else self.entry - d
 
     def take_profit(self, p: dict) -> float:
-        d = self.sl_distance(p) * float(p["tp_rr"])
+        rr = float(p["tp_rr"])
+        if int(p.get("exit_mode") or 0) == 1:
+            rr = float(p.get("lab_tp") or 0.0) or 1e6  # Strategy Lab: none when 0
+        d = self.sl_distance(p) * rr
         return self.entry - d if self.is_short else self.entry + d
 
     def r_multiple(self, price: float, p: dict) -> float:
@@ -67,6 +70,14 @@ class EntryContext:
         def tighten(level: float) -> None:
             nonlocal stop
             stop = min(stop, level) if self.is_short else max(stop, level)
+
+        if int(p.get("exit_mode") or 0) == 1:
+            # Strategy Lab exits (owner's engine): ATR stop, chandelier trail from the entry on
+            # the current ATR; nothing else moves the stop
+            k = float(p.get("lab_trail") or 0.0)
+            if k > 0:
+                tighten(best_price - sgn * k * float(cur_atr or self.atr))
+            return stop
 
         be = p.get("be_rr")
         if be is not None and r_best >= float(be):

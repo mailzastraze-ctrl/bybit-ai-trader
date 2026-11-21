@@ -13,7 +13,7 @@ import math
 import random
 
 from aitrader.families import FAMILIES, MULTI_TF
-from aitrader.families.base import CONTEXT_GENES, EXIT_GENES
+from aitrader.families.base import CONTEXT_GENES, EXIT_GENES, LAB_EXIT
 from aitrader.registry import Registry
 from aitrader.settings import Settings
 from aitrader.util import iso
@@ -108,13 +108,14 @@ class Generator:
         params = fam.normalize(cand.get("params"))
         over = {}
         for p in fam.params:
-            if p.name in ("htf_trend", "vol_regime", "session", "no_weekend", "event_guard", "event_lock", "vol_shock"):
+            if p.name in ("htf_trend", "vol_regime", "session", "no_weekend", "event_guard", "event_lock", "vol_shock",
+                          "exit_mode", "lab_tp", "lab_trail"):
                 over[p.name] = [params[p.name], params[p.name]]  # keep the structural genes
                 continue
             span = (p.high - p.low) * width
             over[p.name] = [max(p.low, params[p.name] - span), min(p.high, params[p.name] + span)]
         merged = {**over, **spec.get("space_overrides", {})}
-        for g in ("htf_trend", "vol_regime", "tp_lock") + CONTEXT_GENES + EXIT_GENES:  # a refinement keeps its structure
+        for g in ("htf_trend", "vol_regime", "tp_lock") + CONTEXT_GENES + EXIT_GENES + LAB_EXIT:  # a refinement keeps its structure
             merged[g] = over[g]
         spec["space_overrides"] = merged
         own = [p for p in (cand.get("pairs") or []) if p in universe]
@@ -163,6 +164,8 @@ class Generator:
         # Market-context genes (trading hours, weekends, US macro releases) are searched in
         # about a third of new experiments; elsewhere they stay off, so the usual search keeps
         # its size and speed. The bandit, walk-forward and decoys judge the difference.
+        for g in LAB_EXIT:  # Strategy Lab exits belong to imported configurations only
+            overrides.setdefault(g, [0, 0])
         if self.rng.random() >= 0.35:
             for g in CONTEXT_GENES:
                 overrides.setdefault(g, [0, 0])

@@ -98,19 +98,19 @@ def to_params(sv: dict) -> dict | None:
     if fam is None or entry is None:
         return None
     x = sv.get("exits") or {}
-    exits = {"sl_atr": float(x.get("sl", 2.0)),
-             "tp_rr": float(x["tp"]) if x.get("tp") else 5.0,          # no take-profit ≈ far target
-             "trail_rr": 0.5 if x.get("tr") else 3.0,                    # trail from the start, or late
-             "trail_atr": float(x["tr"]) if x.get("tr") else 4.0,
-             "max_hold": 500, "be_rr": 2.0, "lock_rr": 3.0, "lock_frac": 0.0, "conv_w": 0.0,
-             "htf_trend": 0, "vol_regime": 0}
+    # exactly the engine's exits: ATR stop, optional R take profit, optional chandelier trail
+    # from the entry on the current ATR – no break-even, no ratchet, no time exit to speak of
+    exits = {"exit_mode": 1, "sl_atr": float(x.get("sl", 2.0)), "lab_tp": float(x.get("tp") or 0.0),
+             "lab_trail": float(x.get("tr") or 0.0), "max_hold": 500, "conv_w": 0.0, "htf_trend": 0, "vol_regime": 0}
     return fam.normalize({**entry, **exits})
 
 
 def survivor_id(sv: dict) -> str:
     import hashlib
+    # "x2": configurations are traded with the engine's own exits (exit_mode 1) since 2026-11-21,
+    # so everything tested with the earlier approximation gets a fresh walk-forward
     key = json.dumps([sv.get("strategy"), sv.get("pairs") or sv.get("pair"), sv.get("timeframe"), sv.get("params"),
-                      sv.get("exits")], sort_keys=True)
+                      sv.get("exits"), "x2"], sort_keys=True)
     return "scr-" + hashlib.sha1(key.encode()).hexdigest()[:10]
 
 

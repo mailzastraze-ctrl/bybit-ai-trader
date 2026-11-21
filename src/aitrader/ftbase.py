@@ -325,7 +325,8 @@ class AIBase(IStrategy):
 
     def _stop(self, pair: str, trade: Trade, ctx: EntryContext, p: dict, current_time: datetime) -> float:
         best = trade.min_rate if trade.is_short else trade.max_rate
-        cur_atr = self._cur_atr(pair, trade, current_time) if int(p.get("vol_shock") or 0) else None
+        lab_trail = int(p.get("exit_mode") or 0) == 1 and float(p.get("lab_trail") or 0) > 0
+        cur_atr = self._cur_atr(pair, trade, current_time) if (int(p.get("vol_shock") or 0) or lab_trail) else None
         stop = ctx.managed_stop(p, float(best or trade.open_rate), now=current_time, cur_atr=cur_atr)
         shock = self._market_shock(current_time)
         # live portfolio guard: BTC lurched against this side – a profitable position is moved to

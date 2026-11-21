@@ -30,7 +30,7 @@ def test_every_screened_strategy_maps_onto_a_twin_family():
         out = screen.to_params(sv)
         assert out is not None, sid
         assert out == FAMILIES[fam_of[sid]].normalize(out)  # inside the family's ranges
-        assert out["sl_atr"] == 2.5 and out["tp_rr"] == 5.0 and out["trail_atr"] == 3.0 and out["trail_rr"] == 0.5
+        assert out["exit_mode"] == 1 and out["sl_atr"] == 2.5 and out["lab_tp"] == 0 and out["lab_trail"] == 3.0
     assert screen.to_params({"strategy": "macd", "family": "macd_cross", "params": ENGINE_PARAMS["macd"]})["macd_gap"] == 14
 
 
@@ -148,3 +148,67 @@ def test_swing_autopilot_keeps_a_planted_trend_and_lists_its_coins(tmp_path):
 def test_warmup_covers_the_indicator_history_of_each_timeframe():
     assert screen.warmup_days("1h") == 35 and screen.warmup_days("6h") >= 180 and screen.warmup_days("12h") >= 360
     assert screen.min_bars("6h") == 3600 and screen.min_bars("1h") == 2000
+
+
+TWIN_CASES = [  # engine rule, its parameters (incl. symmetric levels), as the screener tries them
+    ("ema_cross", {"fast": 9, "slow": 40, "trend": 0}), ("ema_cross", {"fast": 12, "slow": 50, "trend": 200}),
+    ("macd", {"fast": 8, "slow": 30, "signal": 7, "zero": 0}), ("macd", {"fast": 12, "slow": 26, "signal": 9, "zero": 1}),
+    ("rsi_revert", {"len": 10, "lower": 30, "upper": 70, "exitL": 55, "exitS": 45, "trend": 0}),
+    ("rsi_revert", {"len": 5, "lower": 40, "upper": 60, "exitL": 55, "exitS": 45, "trend": 50}),
+    ("supertrend", {"len": 10, "mult": 3}), ("adx_di", {"len": 14, "thr": 20}), ("hma_trend", {"len": 40}),
+    ("stoch", {"k": 14, "smooth": 3, "dl": 3, "lo": 20, "hi": 80}), ("bb_revert", {"len": 20, "mult": 2}),
+    ("donchian", {"entry": 20, "exit": 10}), ("zscore", {"len": 60, "entry": 2.0, "exit": 0.5}),
+]
+
+
+@pytest.mark.skipif(shutil.which("node") is None, reason="node not installed")
+@pytest.mark.parametrize("rule,params", TWIN_CASES)
+def test_twin_signals_match_the_owner_engine_bar_for_bar(tmp_path, rule, params):
+    """A configuration found by the screener must trade exactly what the engine tested: same
+    entries and exits on every bar (after indicator warm-up)."""
+    import pandas as pd
+
+    from aitrader.families import FAMILIES
+    n = 1500
+    rng = np.random.default_rng(21)
+    c = 100 * np.exp(np.cumsum(rng.normal(0, 0.012, n) + 0.0012 * np.sin(np.arange(n) / 60)))
+    o = np.r_[c[0], c[:-1]]
+    h, low = np.maximum(o, c) * (1 + np.abs(rng.normal(0, 0.004, n))), np.minimum(o, c) * (1 - np.abs(rng.normal(0, 0.004, n)))
+    f = tmp_path / "c.json"
+    f.write_text(json.dumps({"t": list(range(n)), "o": o.tolist(), "h": h.tolist(), "l": low.tolist(), "c": c.tolist(), "v": [1] * n}))
+    out = subprocess.run(["node", str(ROOT / "screener" / "parity.js"), str(f), rule, json.dumps(params)],
+                         check=True, capture_output=True, text=True, timeout=60)
+    eng = json.loads(out.stdout)
+    sv = {"strategy": rule, "family": {"macd": "macd_cross", "hma_trend": "hull_turn", "stoch": "stoch_cross",
+                                       "donchian": "turtle", "zscore": "zscore_revert"}.get(rule, rule),
+          "params": params, "exits": {"sl": 2, "tp": 0, "tr": 0}}
+    p = screen.to_params(sv)
+    df = pd.DataFrame({"date": pd.date_range("2024-01-01", periods=n, freq="1h", tz="UTC"), "open": o, "high": h,
+                       "low": low, "close": c, "volume": 1.0})
+    ours = FAMILIES[sv["family"]].populate(df, p)
+    warm = 450
+    assert sum(eng["le"][warm:]) + sum(eng["se"][warm:]) > 3, f"{rule}: the sample produced no entries"
+    for key, col in (("le", "long_sig"), ("se", "short_sig"), ("lx", "exit_long_sig"), ("sx", "exit_short_sig")):
+        a = np.array(eng[key][warm:], dtype=bool)
+        b = ours[col].fillna(False).to_numpy(dtype=bool)[warm:]
+        mism = np.flatnonzero(a != b)
+        assert len(mism) == 0, f"{rule} {key}: {len(mism)} bars differ, first at {warm + mism[0]} (engine {a[mism[0]]})"
+
+
+def test_strategy_lab_exits_match_the_engine():
+    """exit_mode 1 = the engine's exits: ATR stop, chandelier trail on the current ATR from the
+    entry, R take profit or none – no break-even, no ratchet."""
+    from aitrader.riskcore import EntryContext
+    p = screen.to_params({"strategy": "ema_cross", "family": "ema_cross", "params": {"fast": 9, "slow": 40, "trend": 0},
+                          "exits": {"sl": 2.5, "tp": 0, "tr": 3}})
+    assert p["exit_mode"] == 1 and p["lab_tp"] == 0 and p["lab_trail"] == 3
+    ctx = EntryContext(entry=100.0, atr=1.0, is_short=False)
+    assert ctx.managed_stop(p, 100.0) == pytest.approx(97.5)                    # initial stop: tighter of sl/trail
+    assert ctx.managed_stop(p, 101.0, cur_atr=1.0) == pytest.approx(98.0)       # trail = best − 3 × current ATR
+    assert ctx.managed_stop(p, 103.0, cur_atr=2.0) == pytest.approx(97.5)       # wider ATR: trail below the stop
+    assert ctx.managed_stop(p, 110.0, cur_atr=1.0) == pytest.approx(107.0)      # no break-even jump, no ratchet
+    assert not ctx.tp_hit(1000.0, p)                                            # no take profit
+    q = {**p, "lab_tp": 2.0, "lab_trail": 0.0}
+    assert ctx.managed_stop(q, 110.0) == pytest.approx(97.5) and ctx.tp_hit(105.0, q) and not ctx.tp_hit(104.9, q)
+    s = EntryContext(entry=100.0, atr=1.0, is_short=True)
+    assert s.managed_stop(p, 95.0, cur_atr=1.0) == pytest.approx(98.0)

@@ -1,6 +1,6 @@
 # PROJECT_STATUS
 
-_Last updated: 2026-11-21 14:40 CET_
+_Last updated: 2026-11-21 17:10 CET_
 
 ## Summary
 The system is **deployed and running autonomously on Bybit Demo**. It never trades real money: `demo_trading` is hard-required.
@@ -26,6 +26,20 @@ Links and rules:
 | 7 | Web terminal | ✅ live | **Control room** (primary, desktop + phone): capital curve, positions with protection state, forward-test verdict, 4 live lab runners, results with fold squares, bandit, gates, lifecycle, goals, readiness, log, learnings, closed trades. **3D HQ v3** at `/hq`: real data on every screen (live 1h candles with entry/stop/target, live GitHub hyperopt epochs, fold results, gates, bandit, market map, goals). Company mission board, stand-up meetings built from real numbers, GitHub-lab cloud with data beam, expressive characters. Rendered headlessly on every UI change (`hq-preview` workflow, screenshots in `docs/preview/`, fails on JS errors) |
 | — | Cloud, independent of your PC | ✅ / ⚠️ | Railway **trial** credit runs out in about 15 days. Hobby is needed for indefinite operation |
 | — | GitHub + PROJECT_STATUS | ✅ | CI green with the real Freqtrade image; 113 tests |
+
+## Engine ↔ bot parity (2026-11-21, owner's request: "полностью и чётко")
+**Problem found:** of the first 32 autopilot strategies tested in freqtrade, 24 collapsed (PF 0.15–0.86) on the coins where the engine showed PF ≥ 1.4. The signals were fine; the exits were not the engine's.
+- Example: an engine "trail 3×ATR from entry" became our ratchet with `trail_rr` 0.5, which jumps the stop to the entry price at +0.5 R.
+- An engine "no exit rule" became trailing after 3 R plus break-even at 2 R.
+
+**Fix:**
+- New exit mode `exit_mode = 1` ("Strategy Lab exits") in `riskcore.managed_stop`, used by every screener/autopilot configuration (`screen.to_params`): ATR stop, optional R take profit (`lab_tp`, 0 = none), optional chandelier trail from the entry on the current ATR (`lab_trail`). No break-even, no ratchet. It is the same in backtests and live.
+- It is never part of the generated search: `LAB_EXIT` is pinned to 0, and refinements keep it.
+- The z-score twin now uses the population σ, as the engine does.
+- **Bar-for-bar parity test:** `screener/parity.js` + `tests/test_screen.py::test_twin_signals_match_the_owner_engine_bar_for_bar` cover all 10 engine rules (13 cases). Entries and exits are identical on every bar after warm-up.
+- **Exit-mode test:** `test_strategy_lab_exits_match_the_engine`.
+- Survivor ids are versioned (`x2`), so every configuration tested with the old approximation gets a fresh walk-forward with the exact exits.
+- **Remaining, deliberate difference:** a take profit fills at the touch candle's close in freqtrade backtests, while the engine fills it at the level. This is conservative and close to live behaviour: live waits at the level for 90 s, then crosses.
 
 ## Position management like a careful trader (2026-11-21, owner's request)
 **Live protection (protective direction only):**

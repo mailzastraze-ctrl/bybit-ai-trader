@@ -67,6 +67,11 @@ def idea(family: str, p: dict) -> str:
 
 
 def exits_text(p: dict) -> str:
+    if int(p.get("exit_mode") or 0) == 1:  # exactly as in the owner's Strategy Lab
+        tp, tr = float(p.get("lab_tp") or 0), float(p.get("lab_trail") or 0)
+        parts = [f"стоп {_f(p.get('sl_atr'))}×ATR", f"тейк {_f(tp)}R" if tp > 0 else "без тейка",
+                 f"трейлинг {_f(tr)}×ATR от входа" if tr > 0 else "без трейлинга", "выход по обратному сигналу"]
+        return ", ".join(parts) + " (как в Strategy Lab)"
     tp = float(p.get("tp_rr", 5) or 5)
     tr_rr, tr_atr = float(p.get("trail_rr", 3) or 3), p.get("trail_atr")
     parts = [f"стоп {_f(p.get('sl_atr'))}×ATR", "без тейка" if tp >= 5 else f"тейк {_f(tp)}R",

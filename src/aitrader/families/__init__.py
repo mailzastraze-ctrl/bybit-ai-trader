@@ -243,7 +243,7 @@ def _zscore_revert(df: pd.DataFrame, p: dict) -> pd.DataFrame:
     (Owner's Strategy Lab idea, now searched across the whole universe and timeframes.)"""
     n = int(p["window"])
     mean = df["close"].rolling(n, min_periods=n).mean()
-    sd = df["close"].rolling(n, min_periods=n).std().replace(0, np.nan)
+    sd = df["close"].rolling(n, min_periods=n).std(ddof=0).replace(0, np.nan)  # population σ, as the engine
     z = (df["close"] - mean) / sd
     k, x = p["z_entry"], p["z_exit"]
     return pd.DataFrame(
