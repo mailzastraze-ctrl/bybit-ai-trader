@@ -179,8 +179,8 @@ def _tsmom(df: pd.DataFrame, p: dict) -> pd.DataFrame:
 TSMOM = Family(
     name="tsmom",
     title="Time-series momentum (vol-scaled)",
-    description="Trades the sign of the multi-day return measured in volatility units (3–21 day lookbacks), "
-                "re-entering on short-term confirmation; exits when momentum fades.",
+    description="Trades the sign of the multi-day return measured in volatility units (3–21 day lookbacks on 1h, "
+                "12–84 days on 4h), re-entering on short-term confirmation; exits when momentum fades.",
     entry_params=(
         Param("lookback", "int", 72, 504, 240, "buy"),
         Param("vol_len", "int", 72, 336, 168, "buy"),

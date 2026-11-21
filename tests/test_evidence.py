@@ -337,3 +337,109 @@ def test_broken_trade_data_never_breaks_the_manager_loop(env):
     st = reg.one("SELECT stage, live FROM strategies WHERE id='odd'")
     assert st["stage"] == "incubation" and st["live"]["alpha"]["alpha"] is None
     readiness.evaluate(reg, 10_000)  # must not raise either
+
+
+# ------------------------------------------------------------------ 7. forward book keeps candidates (longitudinal)
+def test_forward_book_keeps_candidates_and_promising_strategies_for_their_whole_life(env):
+    _, reg = env
+    now = utcnow()
+
+    def exp(eid, hours_ago, verdict, score):
+        fin = iso(now - timedelta(hours=hours_ago))
+        reg.upsert("experiments", {"id": eid, "created": fin, "family": "tsmom", "status": "done", "finished": fin,
+                                   "spec": {"family": "tsmom", "pairs": ["BTC/USDT:USDT"]},
+                                   "result": {"params": {"lookback": 200}, "pairs": ["BTC/USDT:USDT"], "score": score,
+                                              "verdict": verdict, "oos": {"profit_factor": 1.2, "trades": 40}}})
+    for i in range(20):  # candidates from two weeks ago
+        exp(f"xc{i:03d}", 300 + i, "exploratory", 1.0 + i / 100)
+    exp("xpromise", 400, "rejected", 0.0)  # rejected in research, but doing well forward
+    for i in range(300):  # a flood of newer, rejected experiments
+        exp(f"xr{i:03d}", i, "rejected", 0.0)
+    reg.kv_set("forward", {"best": [{"id": "xpromise", "p_pos": 0.93, "trades": 25}]})
+    b = forward.book(reg)
+    ids = [e["id"] for e in b]
+    assert len(b) == forward.BOOK_LIMIT
+    assert all(f"xc{i:03d}" in ids for i in range(20)) and "xpromise" in ids
+    assert ids[0] == "xpromise" and ids[1] == "xc019"  # promising first, then candidates by score
+    assert "xr000" in ids and "xr299" not in ids  # the rest of the room goes to the newest experiments
+
+
+def test_versus_benchmark_gives_direction_with_uncertainty():
+    now = utcnow()
+    days = [iso(now - timedelta(days=d))[:16] for d in range(30)]
+    rng = np.random.default_rng(8)
+    top = [{"id": f"t{i}", "trades": [[d, float(rng.normal(0.003, 0.002))] for d in days]} for i in range(4)]
+    bench = [{"id": "b", "trades": [[d, float(rng.normal(0.0, 0.002))] for d in days]}]
+    v = forward.versus(top, bench)
+    assert v["days"] == 30 and v["p_top_better"] > 0.95 and v["top_pct"] > v["bench_pct"]
+    assert forward.versus(top, [{"id": "b", "trades": [[days[0], 0.001]]}], min_days=40) is None
+
+
+# ------------------------------------------------------------------ 8. TSMOM is also searched on 4h
+def test_tsmom_is_searched_on_4h_half_of_the_time(env):
+    from aitrader.research.generator import Generator
+    s, reg = env
+    g = Generator(s, reg, seed=3)
+    tfs = [g.next_spec(["BTC/USDT:USDT", "ETH/USDT:USDT"], family="tsmom")["timeframe"] for _ in range(200)]
+    assert set(tfs) == {"1h", "4h"} and 70 < tfs.count("4h") < 130
+    others = {g.next_spec(["BTC/USDT:USDT"], family="trend_ema")["timeframe"] for _ in range(50)}
+    assert "4h" not in others
+
+
+# ------------------------------------------------------------------ 9. storage: weeks without filling the volume
+def test_storage_slims_old_rejected_research_and_trims_logs(env, tmp_path):
+    from aitrader import storage
+    from aitrader.manager import housekeeping
+    s, reg = env
+    old, new = iso(utcnow() - timedelta(days=5)), iso(utcnow() - timedelta(hours=5))
+    fat = {"params": {"a": 1}, "pairs": ["BTC/USDT:USDT"], "score": 0.0, "verdict": "rejected",
+           "oos": {"daily_sharpe": -0.05, "trades": 30, "profit_factor": 0.8}, "gates": {"trades": {"pass": True}},
+           "curve": [[i, 1.0] for i in range(400)], "pair_stats": {"BTC": {"pnl": 1}}, "exit_reasons": {"x": 3},
+           "folds": [{"fold": 0, "test": "a-b", "params": {"a": 1}, "oos": {"total_return": 0.01, "trades": 9}}]}
+    for eid, fin, verdict in (("xold", old, "rejected"), ("xnew", new, "rejected"), ("xcand", old, "exploratory")):
+        reg.upsert("experiments", {"id": eid, "created": fin, "family": "tsmom", "status": "done", "finished": fin,
+                                   "spec": {"family": "tsmom"}, "result": {**fat, "verdict": verdict}})
+    logs = tmp_path / "logs"
+    logs.mkdir()
+    for name in ("freqtrade.log", "freqtrade.log.1", "freqtrade.log.2", "freqtrade.log.3", "freqtrade.log.10"):
+        (logs / name).write_text("x")
+    st = storage.maintain(reg, tmp_path, logs)
+    assert st["slimmed"] == 1 and st["logs_removed"] == 2 and st["total_mb"] > 0 and reg.kv_get("disk")["free_mb"] >= 0
+    assert sorted(p.name for p in logs.iterdir()) == ["freqtrade.log", "freqtrade.log.1", "freqtrade.log.2"]
+    res = {r["id"]: r["result"] for r in reg.q("SELECT id, result FROM experiments")}
+    assert res["xold"]["slim"] and "curve" not in res["xold"] and res["xold"]["oos"]["daily_sharpe"] == -0.05
+    assert res["xold"]["folds"] == [{"fold": 0, "test": "a-b", "oos": {"total_return": 0.01}}]  # persistence + cards
+    assert "curve" in res["xnew"] and "curve" in res["xcand"]  # recent and candidate results stay whole
+    # everything later readers need still works on slimmed rows
+    from aitrader import lab
+    assert lab.build_state(s, reg)["family_stats"]["tsmom"][0] == 3
+    housekeeping(reg, s)  # the manager path runs it without raising
+
+
+def test_storage_slims_harder_when_the_disk_is_almost_full(env, tmp_path, monkeypatch):
+    from aitrader import storage
+    _, reg = env
+    fin = iso(utcnow() - timedelta(hours=30))
+    reg.upsert("experiments", {"id": "x1", "created": fin, "family": "tsmom", "status": "done", "finished": fin,
+                               "spec": {}, "result": {"verdict": "rejected", "curve": [1, 2], "oos": {}}})
+    monkeypatch.setattr(storage.shutil, "disk_usage", lambda p: type("U", (), {"total": 1000, "used": 900, "free": 100})())
+    st = storage.maintain(reg, tmp_path, None)
+    assert st["low"] and st["slimmed"] == 1
+    assert any("disk almost full" in e["message"] for e in reg.q("SELECT message FROM events"))
+
+
+def test_learner_needs_eight_recent_experiments_for_a_research_pattern(env):
+    s, reg = env
+    def exp(i):
+        fin = iso(utcnow() - timedelta(hours=i))
+        reg.upsert("experiments", {"id": f"xg{i}", "created": fin, "family": "turtle", "status": "done", "finished": fin,
+                                   "spec": {"family": "turtle"},
+                                   "result": {"score": 0, "verdict": "rejected", "gates": {"max_drawdown": {"pass": False}}}})
+    for i in range(5):
+        exp(i)
+    Learner(s, reg).learn_from_research()
+    assert not reg.q("SELECT * FROM learnings WHERE scope='research'")
+    for i in range(5, 9):
+        exp(i)
+    Learner(s, reg).learn_from_research()
+    assert reg.q("SELECT * FROM learnings WHERE scope='research'")

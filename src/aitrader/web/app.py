@@ -107,6 +107,7 @@ def overview() -> dict:
         "closed_count": len(closed),
         "closed_pnl": round(sum(float(r["profit_abs"] or 0) for r in closed), 2),
         "events": reg().q("SELECT * FROM events ORDER BY id DESC LIMIT 12"),
+        "disk": reg().kv_get("disk"),
     }
 
 

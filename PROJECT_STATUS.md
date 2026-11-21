@@ -1,6 +1,6 @@
 # PROJECT_STATUS
 
-_Last updated: 2026-11-21 18:30 CET_
+_Last updated: 2026-11-21 19:30 CET_
 
 ## Summary
 The system is **deployed and running autonomously on Bybit Demo**. It never trades real money: `demo_trading` is hard-required.
@@ -27,9 +27,24 @@ Links and rules:
 | — | Cloud, independent of your PC | ✅ / ⚠️ | Railway **trial** credit runs out in about 15 days. Hobby is needed for indefinite operation |
 | — | GitHub + PROJECT_STATUS | ✅ | CI green with the real Freqtrade image; 113 tests |
 
+## Learning loop + unattended running (2026-11-21, 19:30; owner: "observe 3–5 days / 2–3 weeks without changes")
+Assessment before the changes: lab chain healthy (a successful run every 2.5–3 h since 11-20 22:27; cron runs cancel themselves while a chain runs, by design), service healthy (≈0.6 of 8 GB RAM, CPU idle, self-test ok), the old `daily_sharpe` failures already fixed (last run 62/62). Weak spots for weeks without changes, now closed:
+1. **Disk.** The volume was 500 MB with 230 MB used and ~20 MB/day growth (registry research detail never pruned; Freqtrade's rotating log keeps up to 110 MB) → full in ~13 days. Now: **volume 2 GB** (owner approved; resized 2026-11-21 17:05 UTC, ~2 min restart, all 8 open positions picked up), plus `storage.py` in the daily housekeeping: rejected experiments older than 3 days lose their equity curve / per-pair / exit tables / per-fold params (verdict, gates, score, params, pairs, OOS/stress/MC summaries and fold returns stay; candidates are never slimmed), only 2 rotated Freqtrade logs are kept, VACUUM after a big slim, disk usage in kv `disk` → control room warns below 20 % free and the housekeeping slims harder (after 1 day).
+2. **Forward test could not accumulate.** The book was the newest 120 experiments, i.e. ~2 lab runs: each strategy was forward-tested for a few hours and dropped out (hence "118 frozen strategies, 1 forward trade"; `fw-` promotion at 20 forward trades almost never fired). Now (`BOOK_LIMIT` 160, `BOOK_KEEP` 100): research candidates (validated/exploratory, best score first) and strategies with a promising forward record (p_pos ≥ 0.8, ≥ 10 trades) keep their place for their whole 60-day book life, the rest of the room goes to the newest experiments, the benchmark is always in. Forward evidence now grows per strategy, so `fw-` promotions, refinements of forward-proven strategies and the leaderboard can work.
+3. **TSMOM horizons.** The effect everything points to was only searched on 1h (lookback ≤ 21 days). Now half of new TSMOM experiments run on **4h** (lookback 12–84 days, the documented 2–12 week horizon); refinements keep the candidate's timeframe.
+4. **Interim signal for the observer:** `/api/forward.vs_benchmark` and the control room show the top quartile vs the benchmark over the same days with P(research better). A direction with its uncertainty, not a verdict.
+5. **Learner:** research-gate patterns need the 8 most recent experiments of a family (was 4).
+Deliberately not changed: production still needs alpha > 0 (point estimate). A t ≥ 1 requirement would need Sharpe ≈ 3.5 within a 30-day incubation and block genuine edges; production on demo only changes position size, the significance test belongs to the real-money gate (alpha t ≥ 2).
+
+### What to watch (no changes needed)
+- **Every day or two:** control room "Требует внимания" is empty or only shows macro events; bot up; lab "last import" < 10 h; disk warning absent.
+- **Day 3–5:** forward book shows growing trades per strategy (leaderboard entries with 20+ trades); first `fw-…` strategies may appear in "Стратегии"; TSMOM 4h experiments in the lab list; the benchmark row has trades. Demo P&L itself says little yet.
+- **Week 2–3:** `vs_benchmark` above ~90 % for several days in a row = research beats plain trend; around 50 % = the search adds nothing over the benchmark; leaderboard leaders with p_pos > 0.9 and 50+ trades are the real candidates. The verdict stays "early read" until 90 days by design.
+- **Red flags:** lab import older than 24 h, manager heartbeat "error", disk warning that persists a day, kill-switch.
+
 ## Evidence discipline (2026-11-21 evening, owner's request: "найти прибыльную стратегию, демо — тренировка")
 Review: `claude/METHOD_REVIEW.md` and `claude/ROADMAP.md` (project docs); this is phase 0 of the roadmap.
-Principle: **fast to explore, fast to protect, slow to trust.** Exploration on demo stays as wide as before (up to 24 sleeves at 0.1 % risk, the 118-strategy shadow book); what changed is how evidence is judged before anything is declared real or gets more risk. New module `evidence.py` (pure statistics, `tests/test_evidence.py`, 18 tests).
+Principle: **fast to explore, fast to protect, slow to trust.** Exploration on demo stays as wide as before (up to 24 sleeves at 0.1 % risk, the 118-strategy shadow book); what changed is how evidence is judged before anything is declared real or gets more risk. New module `evidence.py` (pure statistics, `tests/test_evidence.py`).
 
 1. **Clean out-of-sample only (data leak closed).** The freqtrade walk-forward tests on the last 360 days, but the swing screener chooses its configurations on everything except the last 90 days (and the pooled screener filters on its last 40 %). For screener survivors and hand-found external configs those windows were already seen. New gate `clean_oos` (`validation.clean_oos(spec)`): for them the walk-forward is a **replication** with real fees and funding – it can reject, never validate. Their only clean evidence is the forward test. This also removes the effect of the Deflated Sharpe trial count ignoring the screener's 10⁶ combinations (they can no longer reach `validated`; the screener's multiplicity is controlled by the decoys).
 2. **Forward verdict v2** (amended while the book had 1 completed forward trade; stricter only): decision after **≥ 90 days** (was 14), and "works" needs the daily t to reach an **anytime-valid threshold** (normal-mixture boundary: 3.26 at 90 daily observations, 2.79 at a year) because the verdict is recomputed after every lab run. Simulated on pure noise checked daily for a year: v1 declared "works" in >12 % of paths, v2 in ≤ 5 %. Before 90 days results are an early read only.

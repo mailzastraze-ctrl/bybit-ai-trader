@@ -90,6 +90,8 @@ function renderBrief() {
   if (!ov.bot_up && S.ov) att.push(["crit", "Бот не отвечает. Менеджер перезапустит его сам; если это длится больше 10 минут — напишите мне."]);
   if (ov.kill_switch) att.push(["crit", `Сработал аварийный стоп: ${esc(ov.kill_switch.reason || "просадка счёта")}. Новые входы закрыты до остывания.`]);
   else if (ov.entries_paused) att.push(["warn", "Новые входы на паузе (риск-контроль). Открытые позиции защищены стопами."]);
+  const dk = ov.disk || {};
+  if (dk.free_pct != null && dk.free_pct < 0.2) att.push([dk.free_pct < 0.08 ? "crit" : "warn", `Диск сервера почти заполнен: свободно ${dk.free_mb} МБ из ${dk.total_mb}. Система сама чистит старые данные исследований; если предупреждение держится сутки — напишите мне.`]);
   const imp = rs.lab?.last_import ? Date.now() - new Date(rs.lab.last_import).getTime() : null;
   if (imp != null && imp > 10 * 3600e3) att.push(["warn", `Лаборатория не присылала результаты ${span(imp)}. Прогоны перезапускаются сами по расписанию.`]);
   for (const d of ctx.delistings || []) att.push(["warn", `Bybit объявил делистинг ${esc(pair(d.pair))} — новые входы по этой монете закрыты автоматически.`]);
@@ -394,6 +396,7 @@ function renderForward() {
     <div class="bar" style="margin-bottom:12px"><i style="width:${Math.min(100, n / need * 100)}%"></i></div>
     <table><thead><tr><th>Группа (по оценке на истории)</th><th class="r">Стратегий</th><th class="r">Сделок на новых данных</th><th class="r">Доходность</th><th class="r">PF</th><th class="r">t по дням</th></tr></thead>
     <tbody>${row("Лучшая четверть — те, что лаборатория считает лучшими", t)}${row("Все остальные (контрольная группа)", rest)}${f.benchmark ? row("Эталон: простой тренд (TSMOM), параметры зафиксированы заранее", f.benchmark) : ""}</tbody></table>
+    ${f.vs_benchmark ? `<p style="margin:8px 0 0;font-size:12.5px">Лучшая четверть против эталона за ${f.vs_benchmark.days} дн.: ${nf(f.vs_benchmark.top_pct, 2)}% против ${nf(f.vs_benchmark.bench_pct, 2)}%, вероятность, что исследования лучше эталона, — <b class="num">${Math.round(f.vs_benchmark.p_top_better * 100)}%</b>. Это направление, а не вердикт: устойчивым считается значение выше 90% несколько недель подряд.</p>` : ""}
     ${t.alpha_t != null ? `<p class="dim" style="margin:8px 0 0;font-size:12px">Без учёта движения рынка: бета к BTC <b class="num">${t.beta}</b>, альфа <b class="num">${t.alpha_bp} bp/день</b> (t ${t.alpha_t}). Прибыль, которую объясняет рынок, — не заслуга стратегии.</p>` : ""}
     <p class="dim" style="margin:10px 0 0;font-size:12px">${f.book_size ?? 0} замороженных стратегий каждый прогон проверяются на свечах Bybit только после момента заморозки, с комиссиями и проскальзыванием. Правило решения записано заранее: «работает» = у лучшей четверти ≥ ${need} сделок за ≥ ${f.rules?.final_days ?? 90} дней, PF ≥ ${f.rules?.pf_works ?? 1.15} и t по дням ≥ ${f.t_needed ?? f.rules?.t_works ?? 2} (порог учитывает, что результат проверяется после каждого прогона: без этого «работает» выпадало бы случайно). ${pers}</p>`;
 }
