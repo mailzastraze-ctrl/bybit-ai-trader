@@ -502,6 +502,16 @@ class AIBase(IStrategy):
         if sum(1 for t in trades if bool(t.is_short) == short) >= max_side:
             logger.info("portfolio limit: %s %s skipped (%d %s positions already open)", side, pair, max_side, side)
             return False
+        # The weak cannot crowd out the strong: unproven exploration sleeves share a sub-budget
+        # (positions and open risk), so proven strategies always find room for their entries.
+        new_sleeve = self.sleeve_by_tag(pair, entry_tag)
+        explore = [t for t in trades if self._trade_stage(t) == "exploration"]
+        if new_sleeve is not None and new_sleeve.stage == "exploration":
+            max_ex = int(cfg.get("max_explore_trades", 24))
+            if len(explore) >= max_ex:
+                logger.info("portfolio limit: %s %s skipped (%d exploration positions open, cap %d – room kept for "
+                            "proven strategies)", side, pair, len(explore), max_ex)
+                return False
         equity = float(self.wallets.get_total_stake_amount()) if self.wallets else 0.0
         if equity > 0:
             open_risk = 0.0
@@ -525,7 +535,24 @@ class AIBase(IStrategy):
                 logger.info("portfolio limit: %s %s skipped (%s risk %.2f%% of equity, cap %.1f%% per side)", side, pair,
                             side, 100 * side_risk / equity, 100 * max_side_risk)
                 return False
+            if new_sleeve is not None and new_sleeve.stage == "exploration":
+                max_ex_risk = float(cfg.get("max_explore_risk", max_risk * 0.375))
+                ex_risk = sum(max(((t.stop_loss - t.open_rate) / t.open_rate if t.is_short else (t.open_rate - t.stop_loss) / t.open_rate), 0.0)
+                              * float(t.stake_amount or 0) * float(t.leverage or 1)
+                              for t in explore if t.open_rate and t.stop_loss)
+                if ex_risk + new_risk > max_ex_risk * equity:
+                    logger.info("portfolio limit: %s %s skipped (exploration risk %.2f%% of equity, cap %.1f%% – room "
+                                "kept for proven strategies)", side, pair, 100 * ex_risk / equity, 100 * max_ex_risk)
+                    return False
         return True
+
+    def _trade_stage(self, trade) -> str | None:
+        """Lifecycle stage of the sleeve that owns an open trade (None if unknown/closing)."""
+        try:
+            sl = self.sleeve_for_trade(trade)
+        except Exception:  # noqa: BLE001 – a lookup problem must never block or break entries
+            return None
+        return getattr(sl, "stage", None)
 
     # ------------------------------------------------------------------ sizing
     def custom_stake_amount(self, pair: str, current_time: datetime, current_rate: float,

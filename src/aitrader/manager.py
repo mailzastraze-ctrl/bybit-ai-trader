@@ -49,6 +49,28 @@ def kill_switch(reg: Registry, equity: float, limit: float, cooldown_h: float) -
     return False
 
 
+def daily_stop(reg: Registry, equity: float, limit: float) -> bool:
+    """Pause new entries for the rest of the UTC day once equity is `limit` below the day's
+    first reading: a bad day stays a bad day. Open positions keep their stops and exits."""
+    day = utcnow().strftime("%Y-%m-%d")
+    d = reg.kv_get("day_open") or {}
+    if d.get("day") != day or not d.get("equity"):
+        d = {"day": day, "equity": equity, "hit": False}
+        reg.kv_set("day_open", d)
+    loss = (d["equity"] - equity) / d["equity"] if d["equity"] else 0.0
+    if not d.get("hit"):
+        # two consecutive readings (one manager cycle apart): one glitchy balance read must not pause a day
+        d["low"] = int(d.get("low", 0)) + 1 if loss >= limit else 0
+        d["hit"] = d["low"] >= 2
+        reg.kv_set("day_open", d)
+    if d.get("hit") and not d.get("announced"):
+        d["announced"] = True
+        reg.kv_set("day_open", d)
+        reg.event("risk", f"DAILY LOSS LIMIT: equity {equity:.0f} is {loss:.1%} below today's first reading "
+                  f"{d['equity']:.0f} – new entries paused until 00:00 UTC", "error")
+    return bool(d.get("hit"))
+
+
 def housekeeping(reg: Registry, s=None) -> None:
     """Keep the registry and the volume small: old events/equity rows go, rejected research
     detail is slimmed, rotated logs are trimmed (aitrader.storage), VACUUM weekly or after a
@@ -105,6 +127,8 @@ def main() -> None:
                 detail.update(equity=round(equity, 2), open_trades=len(open_trades))
             paused = kill_switch(reg, equity, s.lifecycle.account_kill_dd,
                                  s.lifecycle.kill_cooldown_hours) if equity > 0 else False
+            if equity > 0 and daily_stop(reg, equity, s.lifecycle.daily_loss_limit):
+                paused = True
             life.evaluate(equity)
             if time.time() - last_learn > 6 * 3600:
                 learner.analyze_live()

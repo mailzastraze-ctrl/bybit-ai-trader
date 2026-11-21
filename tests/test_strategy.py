@@ -325,3 +325,30 @@ def test_take_profit_waits_at_target_side_risk_cap_and_market_shock_guard(portfo
     portfolio.config["runmode"] = "backtest"
     portfolio._shock_at = None
     assert portfolio._stop("ETH/USDT:USDT", tr, EntryContext(entry=100.0, atr=1.0, is_short=True), dict(p), t0) == pytest.approx(102.0)
+
+
+def test_exploration_cannot_crowd_out_proven_strategies(tmp_path, monkeypatch):
+    """Unproven exploration sleeves share a sub-budget (positions and open risk): a proven
+    strategy always finds room, even when exploration signalled first."""
+    from AIPortfolio import AIPortfolio
+    from freqtrade.persistence import Trade
+    m = Manifest(sleeves=[Sleeve(id="ex", family="trend_ema", params={}, pairs=["ETH/USDT:USDT", "SOL/USDT:USDT"],
+                                 stage="exploration", risk=0.001),
+                          Sleeve(id="pro", family="tsmom", params={}, pairs=["BTC/USDT:USDT"], stage="production", risk=0.0075)])
+    path = tmp_path / "manifest.json"
+    m.save(path)
+    st = AIPortfolio({"aitrader": {"manifest_path": str(path), "max_open_risk": 0.08, "max_side_risk": 0.04,
+                                   "max_same_side": 25, "max_explore_trades": 3, "max_explore_risk": 0.03},
+                      "runmode": "live", "exchange": {"demo_trading": True}})
+    st.bot_start()
+    st.wallets = FakeWallets()
+    mk = lambda pair: SimpleNamespace(pair=pair, enter_tag="ex", is_short=True, open_rate=100.0,  # noqa: E731
+                                      stop_loss=101.0, stake_amount=100.0, leverage=1.0)  # 0.01 % risk each
+    monkeypatch.setattr(Trade, "get_open_trades", staticmethod(lambda: [mk("ETH/USDT:USDT")] * 3), raising=False)
+    assert st.confirm_trade_entry("SOL/USDT:USDT", "limit", 1, 100, "GTC", None, "ex", "short") is False  # 3 of 3
+    assert st.confirm_trade_entry("BTC/USDT:USDT", "limit", 1, 100, "GTC", None, "pro", "short") is True  # room kept
+    st.config["aitrader"]["max_explore_trades"] = 24
+    st.config["aitrader"]["max_explore_risk"] = 0.0002  # risk sub-cap below one more exploration trade
+    assert st.confirm_trade_entry("SOL/USDT:USDT", "limit", 1, 100, "GTC", None, "ex", "short") is False
+    st.config["aitrader"]["max_explore_risk"] = 0.03
+    assert st.confirm_trade_entry("SOL/USDT:USDT", "limit", 1, 100, "GTC", None, "ex", "short") is True

@@ -84,7 +84,7 @@ class Generator:
         production/incubation strategy on its pairs with fresh data."""
         from aitrader.util import parse_dt, utcnow
         now = utcnow()
-        for st in self.reg.q("SELECT id, family, pairs, stage_since FROM strategies "
+        for st in self.reg.q("SELECT id, family, pairs, stage_since, oos FROM strategies "
                              "WHERE stage IN ('production','incubation','eligible') ORDER BY score DESC"):
             since = parse_dt(st.get("stage_since"))
             last = parse_dt((self.reg.kv_get("revalidated") or {}).get(st["id"]))
@@ -95,6 +95,7 @@ class Generator:
             own = [p for p in (st.get("pairs") or []) if p in universe]
             spec["pairs"] = (own + [p for p in spec["pairs"] if p not in own])[: max(len(own), self.s.research.pairs_per_experiment)]
             spec["revalidates"] = st["id"]
+            spec["timeframe"] = (st.get("oos") or {}).get("timeframe") or "1h"  # re-test on its own candles
             marks = self.reg.kv_get("revalidated") or {}
             marks[st["id"]] = iso()
             self.reg.kv_set("revalidated", marks)

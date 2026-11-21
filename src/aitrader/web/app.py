@@ -30,10 +30,10 @@ class _ApiGZip:
     Static assets (already-compressed models/images, cached by the browser) and the registry
     backup (already gzip, fetched with plain curl) pass through untouched."""
 
-    def __init__(self, app_):
+    def __init__(self, app):  # noqa: A002 – Starlette passes the wrapped app as `app`
         from starlette.middleware.gzip import GZipMiddleware
-        self.plain = app_
-        self.gzip = GZipMiddleware(app_, minimum_size=1024)
+        self.plain = app
+        self.gzip = GZipMiddleware(app, minimum_size=1024)
 
     async def __call__(self, scope, receive, send):
         path = scope.get("path", "") if scope.get("type") == "http" else ""

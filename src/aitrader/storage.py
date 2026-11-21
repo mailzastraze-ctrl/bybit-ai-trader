@@ -49,10 +49,14 @@ def slim_result(res: dict) -> dict:
 def slim_experiments(reg: Registry, days: float = SLIM_AFTER_DAYS, now=None) -> int:
     """Slim rejected experiment results finished more than `days` ago. Returns rows changed."""
     cutoff = iso((now or utcnow()) - timedelta(days=days))
+    # experiments behind a live strategy (e.g. a near-miss now trading on demo) keep their card chart
+    alive = {r["experiment_id"] for r in reg.q("SELECT experiment_id FROM strategies WHERE stage != 'retired'")
+             if r.get("experiment_id")}
     n = 0
     for r in reg.q("SELECT id, result FROM experiments WHERE status='done' AND finished < ?", (cutoff,)):
         res = r.get("result")
-        if not isinstance(res, dict) or res.get("slim") or res.get("verdict") in ("validated", "exploratory"):
+        if not isinstance(res, dict) or res.get("slim") or res.get("verdict") in ("validated", "exploratory") \
+                or r["id"] in alive:
             continue
         reg.update("experiments", r["id"], {"result": slim_result(res)})
         n += 1

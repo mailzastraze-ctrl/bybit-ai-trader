@@ -1,6 +1,6 @@
 # PROJECT_STATUS
 
-_Last updated: 2026-11-21 20:00 CET_
+_Last updated: 2026-11-21 21:00 CET_
 
 ## Summary
 The system is **deployed and running autonomously on Bybit Demo**. It never trades real money: `demo_trading` is hard-required.
@@ -26,6 +26,19 @@ Links and rules:
 | 7 | Web terminal | ✅ live | **Control room** (primary, desktop + phone): capital curve, positions with protection state, forward-test verdict, 4 live lab runners, results with fold squares, bandit, gates, lifecycle, goals, readiness, log, learnings, closed trades. **3D HQ v3** at `/hq`: real data on every screen (live 1h candles with entry/stop/target, live GitHub hyperopt epochs, fold results, gates, bandit, market map, goals). Company mission board, stand-up meetings built from real numbers, GitHub-lab cloud with data beam, expressive characters. Rendered headlessly on every UI change (`hq-preview` workflow, screenshots in `docs/preview/`, fails on JS errors) |
 | — | Cloud, independent of your PC | ✅ / ⚠️ | Railway **trial** credit runs out in about 15 days. Hobby is needed for indefinite operation |
 | — | GitHub + PROJECT_STATUS | ✅ | CI green with the real Freqtrade image; 113 tests |
+
+## Final week: proven strategies trade together, rotation, honesty gaps (2026-11-21, 21:00; owner's request)
+**Rotation by evidence** (`lifecycle._displace_for`, `evidence_rank`): the waiting queue is ranked by evidence – forward-proven (`fw-…` or ≥ 20 forward trades with PF ≥ 1.3) › autopilot › research candidate › near-miss/placeholder, then score. A full exploration lane makes room for a stronger candidate by moving out a placeholder, a sleeve with < 3 trades after 7 days, or (for an autopilot candidate) an ordinary sleeve with < 10 trades. Sleeves that earned their place live (≥ 10 trades, PF ≥ 1.1) are never moved; a rotated research candidate goes back to the queue (it did not fail), a rotated near-miss retires.
+**All proven strategies trade at the same time, each on its own coins:**
+- slots for proven stages 20/20 (were 6 production / 8 incubation); a family may have many proven variants on *different* coins (max 2 per coin); the 12-per-family cap applies to unproven exploration only;
+- `proven_scale`: per-trade risk of proven sleeves is scaled so that with half of their coins in a trade the open risk stays within 5 % of equity (1.0 with a handful of sleeves, shrinks only when many have proven themselves) – nobody is shut out because others entered first;
+- the bot keeps room for them: exploration (unproven) may hold at most 24 positions and 3 % open risk (`max_explore_trades`, `max_explore_risk`), within the account's 40 trades / 8 % / 4 % per side.
+**Honesty / safety gaps closed:**
+- research gate `market_alpha`: *validated* needs OOS alpha over BTC with Newey–West t ≥ 1 (from the BTC 1h candles in the lab data; not applied when missing; exploration unaffected);
+- validated needs ≥ 40 OOS trades (was 25);
+- **daily loss limit**: −3 % vs the UTC day's first equity reading, confirmed by two consecutive readings, pauses new entries until 00:00 UTC (the 25 % kill-switch stays);
+- bugs found in review: local-mode revalidation could re-test on a random timeframe (now its own); disk slimming could drop the chart of a rejected experiment that trades as a near-miss (now kept); the gzip middleware's constructor is Starlette-version-proof; Freqtrade re-places missing exchange stops every 60 s (`stoploss_on_exchange_interval`), so no separate orphan check is needed.
+Not done (needs data or an owner decision): survivorship-free universe, market-neutral sleeves, correlation-aware sizing of the whole book (tested: Sharpe +0.15…0.21, planned before real money), Telegram alerts (needs a bot token), private repo.
 
 ## Railway cost: egress (2026-11-21, 20:00; owner: "Railway eats my usage")
 Usage so far: egress $0.33 > memory $0.18 > CPU $0.04 > volume ~0. HTTP logs show three egress sources: open control-room/3D-office tabs polling large JSON every 10–15 s, the lab's freqtrade subprocesses each re-fetching Bybit `instruments-info` (~0.5 MB) through the relay, and none of it compressed.

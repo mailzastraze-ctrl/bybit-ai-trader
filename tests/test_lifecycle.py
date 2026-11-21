@@ -387,6 +387,8 @@ def test_autopilot_strategies_take_the_demo_lane_first(env):
     s.lifecycle.max_exploration = 2
     life = Lifecycle(s, reg)
     _strategy(reg, "near", "exploration", ["SOL/USDT:USDT"], score=0.3, family="macd_cross")
+    reg.update("strategies", "near", {"history": [{"ts": iso(), "to": "exploration",
+                                                   "reason": "always-on exploration: near-miss (positive OOS, failed a strict gate)"}]})
     _strategy(reg, "proven", "exploration", ["XRP/USDT:USDT"], score=0.2, family="adx_di")
     reg.update("strategies", "proven", {"live": {"trades": 14, "profit_factor": 1.4}})
     _strategy(reg, "plain", "exploratory", ["DOT/USDT:USDT"], score=0.9, family="supertrend")

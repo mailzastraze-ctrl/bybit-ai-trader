@@ -71,7 +71,7 @@ def cmd_run(out: Path, job: int, n: int, universe_file: Path) -> None:
 
 LEDGER_WINDOW_DAYS = 90
 RESULT_KEYS = ("oos", "stress", "mc", "wfe", "robust_frac", "fold_pos", "perturb_pf_median", "params", "pairs", "timeframe", "curve",
-               "variant", "pair_stats", "exit_reasons", "epoch_sharpe_std", "clean_oos")
+               "variant", "pair_stats", "exit_reasons", "epoch_sharpe_std", "clean_oos", "market")
 
 
 def ledger_trials(ledger: dict | None, now=None) -> list[float]:
@@ -123,7 +123,9 @@ def merge(dirs: list[Path], batch_id: str, ledger: dict | None = None) -> dict:
                                 oos.get("skew", 0.0), oos.get("kurtosis", 3.0))
         verdict, gates = evaluate_gates(s.gates, {"oos": oos, "stress": r["stress"], "wfe": r["wfe"],
                                                   "robust_frac": r["robust_frac"], "mc": r["mc"], "dsr": dsr,
-                                                  "fold_pos": r.get("fold_pos"), "clean_oos": clean_oos(e["spec"])})
+                                                  "fold_pos": r.get("fold_pos"), "clean_oos": clean_oos(e["spec"]),
+                                                  "alpha": (r.get("market") or {}).get("alpha"),
+                                                  "alpha_t": (r.get("market") or {}).get("alpha_t")})
         e["batch_verdict"], e["batch_dsr"], e["batch_gates"] = verdict, round(dsr, 4), gates
         if verdict != "rejected" and r.get("pairs"):
             candidates.append({
