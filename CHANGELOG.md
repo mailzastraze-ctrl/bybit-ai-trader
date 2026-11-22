@@ -2,6 +2,8 @@
 
 History of the system, newest first. `PROJECT_STATUS.md` holds only the current state.
 
+## 2026-11-23 (audit A2) — a working limit entry is not a position without an exchange stop
+The `HEALTH` check flagged a trade without a stop order on the exchange 180 s after `open_date`. A maker entry can wait up to 12 minutes (`unfilledtimeout`), and Freqtrade places the exchange stop once the entry has filled, so a slow fill could raise a false red flag (and a false push to the owner during his absence). Now a trade whose entry order is still working with nothing filled is not counted until 15 minutes (then it is reported as stuck), and the 180-s grace runs from the fill (`open_fill_date`, else the entry order's fill time, else `open_date` as before). Monitoring only. Any filled amount is a position: a partially filled entry is checked from its first fill (ChatGPT's review of 23.11). Tests: `tests/test_health.py::test_a_working_limit_entry_is_not_a_position_without_stop`, `::test_a_partially_filled_entry_without_stop_is_never_hidden`.
 ## 2026-11-22 (audit) — account caps count a new entry at its sized risk
 `confirm_trade_entry` added a new trade at its sleeve's nominal risk, but `custom_stake_amount` sizes it up to 1.5× by conviction and may round a small stake up to the exchange minimum (another ≤ 1.5×). Near the 8 % / 4 % / 3 % caps one entry could pass them by up to ~0.1–0.2 % of equity. The new entry now counts at the larger of its nominal risk and its sized risk (order amount × stop distance), so the caps only get stricter. Open trades are unaffected. Tests: `tests/test_audit_risk.py`.
 ## 2026-11-22 (audit) — forward verdict counts observed days, not calendar age
