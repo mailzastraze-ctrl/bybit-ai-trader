@@ -200,7 +200,16 @@ function sleeveOf(tag) { return (S.ov?.manifest?.sleeves || []).find((s) => s.id
 function renderPositions() {
   if (S.tab !== "overview" && S.tab !== "trades") return;
   const open = S.ov?.open_trades || [];
-  $("#posSub").textContent = open.length ? `${open.length} открыто · стоп у каждой позиции` : "";
+  const ex = S.ov?.exposure || {};
+  const bets = open.length && ex.eff_bets != null ? ` · ≈${ex.eff_bets.toLocaleString("ru-RU", {maximumFractionDigits: 1})} независимых ставок` +
+    (ex.one_side_share != null ? `, ${Math.round(ex.one_side_share * 100)}% риска в одну сторону` : "") : "";
+  $("#posSub").textContent = open.length ? `${open.length} открыто · стоп у каждой позиции${bets}` : "";
+  const sg = S.ov?.signals, MR = {pair_busy: "монета занята другой стратегией", same_candle: "два сигнала на одной свече", paused: "пауза",
+    side_count: "лимит позиций в одну сторону", explore_count: "лимит позиций разведки", open_risk: "лимит общего риска",
+    side_risk: "лимит риска на сторону", explore_risk: "лимит риска разведки", not_entered: "не вошёл (лимит бота/размер)"};
+  if ($("#sigLine")) $("#sigLine").textContent = sg && sg.signals ? `Сигналы за 7 дней: ${sg.signals}, исполнено ${sg.executed} (${Math.round(100 * sg.executed / sg.signals)}%)` +
+    (Object.keys(sg.missed || {}).length ? ". Пропущены: " + Object.entries(sg.missed).sort((a, b) => b[1] - a[1]).map(([k, v]) => `${MR[k] || k} — ${v}`).join(", ") : "") + "."
+    : (S.ov?.signals_since ? "" : "Журнал сигналов начат — первые цифры появятся с первыми сигналами стратегий.");
   if (!open.length) { $("#positions").innerHTML = `<div class="empty">Открытых позиций нет. ${(S.ov?.manifest?.sleeves || []).filter((s) => s.stage !== "closing").length} стратегий ждут своих условий входа.</div>`; return; }
   $("#positions").innerHTML = `<table><thead><tr><th>Монета</th><th>Стратегия</th><th class="r">P&L</th><th>Защита</th><th class="r">В сделке</th></tr></thead><tbody>${open.map((t) => {
     const sl = sleeveOf(t.enter_tag), short = !!t.is_short, entry = +t.open_rate, stop = +t.stop_loss_abs, amt = +t.amount || 0;

@@ -130,6 +130,17 @@ class Pipeline:
             self.ft.download(job, base_cfg, data_pairs, f"{data_start:%Y%m%d}-")
         else:
             self.ft.download(job, base_cfg, data_pairs, f"{data_start:%Y%m%d}-", timeframe=tf)
+        if long_rep:
+            # older candles than the cache holds, then fit the quarters to what really exists
+            try:
+                self.ft.download(job, base_cfg, data_pairs, f"{data_start:%Y%m%d}-", timeframe=tf, prepend=True)
+            except Exception as e:  # noqa: BLE001 – older history is a bonus; fit_folds copes without it
+                log.warning("%s: prepending older candles failed: %s", eid, str(e)[:200])
+            first = earliest_candle(self.s, pairs, tf)
+            n = fit_folds(first, warmup_days(tf), rs.replication_train_days, rs.replication_folds)
+            if n < len(folds):
+                log.info("%s: history from %s fits %d of %d replication quarters", eid, first, n, len(folds))
+                folds = walk_forward_folds(utcnow(), rs.replication_train_days, 90 * n, n)
         if fam.name in NEEDS_OI:  # open-interest history (Bybit only; the family is silent without it)
             from aitrader import oi as oimod
             oimod.download(self.s.market_data_dir, pairs, tf, data_start, rs.relay, rs.relay_token)
@@ -288,11 +299,40 @@ class Pipeline:
                        data={"strategy": sid, "experiment": eid})
 
 
-def pair_file(settings: Settings, pair: str):
+def pair_file(settings: Settings, pair: str, tf: str | None = None):
     base = pair
     for ch in ["/", " ", ".", "@", "$", "+", ":"]:
         base = base.replace(ch, "_")
-    return settings.market_data_dir / "futures" / f"{base}-{settings.research.timeframe}-futures.feather"
+    return settings.market_data_dir / "futures" / f"{base}-{tf or settings.research.timeframe}-futures.feather"
+
+
+def earliest_candle(settings: Settings, pairs: list[str], tf: str):
+    """First candle of the pair with the longest local history (None if nothing is there)."""
+    import pandas as pd
+    firsts = []
+    for p in pairs:
+        f = pair_file(settings, p, tf)
+        if not f.exists():
+            continue
+        try:
+            d = pd.read_feather(f, columns=["date"])["date"]
+        except Exception:  # noqa: BLE001 – unreadable file: treat as missing
+            continue
+        if len(d):
+            firsts.append(pd.Timestamp(d.min()).to_pydatetime())
+    return min(firsts) if firsts else None
+
+
+def fit_folds(first, warmup: int, train: int, want: int, now=None, quarter: int = 90) -> int:
+    """How many 90-day replication quarters fit after `first` + warm-up + training (4..want)."""
+    if first is None:
+        return 4
+    now = now or utcnow()
+    if first.tzinfo is None:
+        from datetime import UTC
+        first = first.replace(tzinfo=UTC)
+    room = (now - first).days - warmup - train - 2
+    return max(4, min(want, room // quarter))
 
 
 def pairs_with_history(settings: Settings, pairs: list[str], min_days: int) -> list[str]:

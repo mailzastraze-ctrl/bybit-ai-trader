@@ -71,7 +71,7 @@ def cmd_run(out: Path, job: int, n: int, universe_file: Path) -> None:
 
 LEDGER_WINDOW_DAYS = 90
 RESULT_KEYS = ("oos", "stress", "mc", "wfe", "robust_frac", "fold_pos", "perturb_pf_median", "params", "pairs", "timeframe", "curve",
-               "variant", "pair_stats", "exit_reasons", "epoch_sharpe_std", "clean_oos", "market")
+               "variant", "pair_stats", "exit_reasons", "epoch_sharpe_std", "clean_oos", "market", "replication", "parity")
 
 
 def ledger_trials(ledger: dict | None, now=None) -> list[float]:

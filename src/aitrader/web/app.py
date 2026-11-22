@@ -129,6 +129,9 @@ def overview() -> dict:
         "events": reg().q("SELECT * FROM events ORDER BY id DESC LIMIT 12"),
         "disk": reg().kv_get("disk"),
         "parity": reg().kv_get("parity"),
+        "signals": (reg().kv_get("signals") or {}).get("total"),
+        "signals_since": (reg().kv_get("signals") or {}).get("since"),
+        "exposure": reg().kv_get("exposure"),
     }
 
 

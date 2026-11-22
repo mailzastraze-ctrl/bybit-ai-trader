@@ -117,6 +117,9 @@ const api = (u) => fetch(u, {credentials: "same-origin"}).then((r) => { if (!r.o
 const LIVE = ["production", "eligible", "incubation", "exploration", "closing"], WAIT = ["validated", "exploratory"];
 const RS = {stop_loss: "стоп", stoploss_on_exchange: "стоп на бирже", managed_stop: "защитный стоп", take_profit: "тейк-профит",
             exit_signal: "сигнал выхода", time_exit: "по времени", custom_exit: "фиксация прибыли", force_exit: "вручную"};
+const MISSED = {pair_busy: "монета занята", same_candle: "два сигнала на свече", paused: "пауза", side_count: "лимит стороны",
+                explore_count: "лимит разведки", open_risk: "лимит риска", side_risk: "риск стороны", explore_risk: "риск разведки",
+                not_entered: "не вошёл"};
 let VIEW = "live", ALL = {strategies: [], groups: {}}, SEL = null, DET = null, PAIR = null;
 
 // ------------------------------------------------------------------ list
@@ -244,7 +247,10 @@ function renderDetail(pairs) {
         ...(rs.parity ? [["движок → бот", `PF ${nf(rs.parity.engine_pf, 2)} → ${nf(rs.parity.bot_pf, 2)} ${rs.parity.ok ? "✅" : "❌ не совпадает"}`]] : [])])}
       ${box("Форвард-тест (данные после заморозки)", [["сделок", r.forward.trades || 0], ["profit factor", pf(r.forward.pf)], ["итог", r.forward.pnl_pct == null ? "—" : sg(r.forward.pnl_pct, 2, "%")],
         ["доля прибыльных", r.forward.win_rate == null ? "—" : nf(r.forward.win_rate * 100, 0) + "%"], ["вероятность, что в плюсе", r.forward.p_pos == null ? "—" : nf(r.forward.p_pos * 100, 0) + "%"]])}
-      ${box("Демо-счёт (настоящие сделки)", [["сделок", r.demo.trades || 0], ["profit factor", pf(r.demo.pf)], ["прибыль с поправкой", r.demo.trades ? sg(r.demo.pnl, 2, " $") : "—"],
+      ${box("Демо-счёт (настоящие сделки)", [
+        ["сигналов за 7 дней", r.signals ? `${r.signals.signals}, исполнено ${r.signals.executed}` + (Object.keys(r.signals.missed || {}).length
+          ? ` (пропущено: ${Object.entries(r.signals.missed).map(([k, v]) => `${MISSED[k] || k} ${v}`).join(", ")})` : "") : "—"],
+        ["сделок", r.demo.trades || 0], ["profit factor", pf(r.demo.pf)], ["прибыль с поправкой", r.demo.trades ? sg(r.demo.pnl, 2, " $") : "—"],
         ["доля прибыльных", r.demo.win_rate == null ? "—" : nf(r.demo.win_rate * 100, 0) + "%"],
         ["альфа к BTC", r.demo.alpha_ann == null ? "—" : `${sg(r.demo.alpha_ann * 100, 1, "%/год")} (β ${nf(r.demo.beta, 2)})`]])}
     </div>
