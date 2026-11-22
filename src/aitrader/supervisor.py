@@ -37,6 +37,13 @@ def persistent_secret(path, env_name: str) -> str:
     return val
 
 
+def take_exchange_keys() -> tuple[str, str]:
+    """The Bybit keys go to the trading bot only. They are removed from this process's
+    environment, so the web server, the manager, research workers and the self-test (all
+    started with a copy of it) never hold them (audit 22.11, C9)."""
+    return os.environ.pop("BYBIT_API_KEY", ""), os.environ.pop("BYBIT_API_SECRET", "")
+
+
 def _oom_adj(score: int):
     """Raise a child's OOM score so the kernel kills research before the trading bot
     when the container hits its memory limit (raising is always permitted)."""
@@ -108,7 +115,7 @@ def main() -> None:
     if not s.manifest_path.exists():
         life.write(life.build_manifest([], set(), False), [])
 
-    key, secret = os.environ.get("BYBIT_API_KEY", ""), os.environ.get("BYBIT_API_SECRET", "")
+    key, secret = take_exchange_keys()
     py = sys.executable
     procs: list[Proc] = []
     if key and secret:

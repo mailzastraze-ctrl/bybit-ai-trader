@@ -2,6 +2,9 @@
 
 History of the system, newest first. `PROJECT_STATUS.md` holds only the current state.
 
+## 2026-11-22 (audit) — the Bybit keys reach the trading bot only
+The supervisor read `BYBIT_API_KEY` / `BYBIT_API_SECRET` but left them in its environment, and every child (the public web server, the manager, research workers, the self-test) was started with a copy of it. No endpoint exposed them, but the internet-facing process held exchange keys it never uses. The supervisor now removes them from its environment and passes them only to Freqtrade (`FREQTRADE__EXCHANGE__KEY/SECRET`, also on its restarts). Trading is unchanged. The OIDC lab endpoints were checked as well: RS256 against GitHub's keys, audience `aitrader-lab`, issuer, `exp`/`iat` required, this repository, `refs/heads/main` only, and no `pull_request_target` workflow; nothing to change. Tests: `tests/test_audit_secrets.py`.
+
 ## 2026-11-22 (evening) — demo always in the market: TSMOM core, active/precise lanes, no daily stop on demo
 These are the owner's decisions; they change what trades on demo, not the evidence. The forward book still judges every configuration separately.
 
