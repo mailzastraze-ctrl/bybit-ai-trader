@@ -13,7 +13,7 @@ from aitrader.realism import real_pnl
 from aitrader.research.ftrunner import FreqtradeRunner, Job, research_config
 from aitrader.research.results import load_backtest, strategy_stats
 from aitrader.settings import Settings
-from aitrader.util import parse_dt, utcnow, write_json_atomic
+from aitrader.util import iso, parse_dt, utcnow, write_json_atomic
 
 log = logging.getLogger(__name__)
 BALANCE = 10_000.0          # research dry-run wallet; returns are reported as a share of it
@@ -34,6 +34,7 @@ def test_one(s: Settings, ft: FreqtradeRunner, root, e: dict) -> dict:
     freeze = parse_dt(e["freeze"])
     base = {k: e.get(k) for k in ("id", "kind", "family", "variant", "score", "freeze", "pairs", "bt_pf", "verdict",
                                   "timeframe", "external", "benchmark", "hypothesis")}
+    base["tested_until"] = iso(utcnow())  # data end of this run: the record is observed up to here
     if freeze is None or utcnow() - freeze < timedelta(hours=MIN_FORWARD_H):
         return base | {"ok": True, "trades": []}
     job = Job(root / e["id"])

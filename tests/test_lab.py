@@ -202,7 +202,7 @@ def test_fold_consistency_gate():
     from aitrader.settings import Gates
     oos = {"trades": 80, "profit_factor": 1.5, "sharpe": 1.4, "max_drawdown": 0.05, "total_return": 0.2}
     m = {"oos": oos, "stress": {"profit_factor": 1.3}, "wfe": 0.8, "robust_frac": 1.0, "mc": {"prob_profit": 0.95},
-         "dsr": 0.95}
+         "dsr": 0.95, "alpha": 0.002, "alpha_t": 2.5}
     assert evaluate_gates(Gates(), m)[0] == "validated"  # old results without fold data
     v, g = evaluate_gates(Gates(), {**m, "fold_pos": 0.5})  # only 2 of 4 slices profitable
     assert v == "exploratory" and g["fold_consistency"]["pass"] is False

@@ -75,7 +75,7 @@ def _m(trades=40, pf=1.4, sharpe=1.2, dd=0.1, wfe=0.6, spf=1.2, rob=0.8, mc=0.9,
     oos = {"trades": trades, "profit_factor": pf, "sharpe": sharpe, "max_drawdown": dd,
            "total_return": ret}
     return {"oos": oos, "stress": {"profit_factor": spf}, "wfe": wfe, "robust_frac": rob,
-            "mc": {"prob_profit": mc}, "dsr": dsr}
+            "mc": {"prob_profit": mc}, "dsr": dsr, "alpha": 0.002, "alpha_t": 2.5}
 
 
 def test_gates():

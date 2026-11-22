@@ -1,6 +1,6 @@
 # PROJECT_STATUS
 
-_Last updated: 2026-11-22 evening (final patch + janitor, H1 in the shadow). History: `CHANGELOG.md`. Rules for Claude sessions: `CLAUDE.md`._
+_Last updated: 2026-11-22 night (audit fixes, PRs #13–#16). History: `CHANGELOG.md`. Rules for Claude sessions: `CLAUDE.md`._
 
 ## What runs
 - **Railway** (one container, volume `/data`, EU West, Hobby plan): Freqtrade on **Bybit Demo only** (`demo_trading` is hard-required, 1x), the manager (lifecycle, learning, manifest) and the web control room. No research on the server.
@@ -18,7 +18,7 @@ _Last updated: 2026-11-22 evening (final patch + janitor, H1 in the shadow). His
   - rotated by evidence within each half.
 - **Limits:**
   - no daily loss limit on demo (owner);
-  - account limits stay: 8 % open risk, 4 % per side, 1x, exchange stops, 25 % kill-switch.
+  - account limits stay: 8 % open risk, 4 % per side (a new entry counts at its sized risk), 1x, exchange stops, 25 % kill-switch.
 
 ## Where the evidence stands (22.11)
 - 0 validated strategies. "Exploratory" means it may trade at 0.1 % risk; it is not proof of an edge. Most exploratory strategies are refinements or screener finds, and those can no longer validate (`clean_oos`).
@@ -27,7 +27,7 @@ _Last updated: 2026-11-22 evening (final patch + janitor, H1 in the shadow). His
   - ≈ 21.12: is everything working;
   - 19.02.2027: is the search worth its minutes against the fixed TSMOM benchmark;
   - March 2027: does the core work.
-- Before 90 days of forward data everything is an early read.
+- Before 90 *observed* days everything is an early read: the time the top quartile was really re-tested (freeze → last lab run), not the age of the oldest record (`calendar_days`, shown apart). A missing alpha over BTC fails validation.
 - The autopilot's "also works on other coins" did not hold in the 3-year replication (−244 on 1 944 trades). On the coin a configuration was found on, the bot repeats the engine's signals.
 
 ## What to watch (no changes needed)
@@ -68,3 +68,4 @@ _Last updated: 2026-11-22 evening (final patch + janitor, H1 in the shadow). His
 - Backtest take profits fill at the candle close; live waits at the level for 90 s, then crosses.
 - Demo fills are kinder than a real book; a 5 bp/side haircut is applied.
 - The repo is public: anything found is published.
+- Deferred to after the observation period (audit 22.11, project doc `claude/AUDIT_2026-11-22.md`): production gate without clean OOS, coin choice on the same OOS, drawdown from closed trades only, core legs sharing one trade per coin.

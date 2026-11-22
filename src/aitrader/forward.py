@@ -27,6 +27,17 @@ of "works" and a 33 % chance of "not working" – a coin flip, not evidence.
 Daily t-statistic: Q1 trades are pooled into an equal-weight daily return series, so many
 correlated trades on the same day are not counted as independent evidence.
 
+What is tested, and how days are counted (audit 2026-11-22). The question is the quality of the
+*continuous research process*: does the top quartile of what it freezes keep its edge during each
+strategy's book life (60 days after its freeze) on data nobody has seen? It is not a fixed cohort
+followed for 90 days. Each record is observed only from its freeze to `tested_until` (the last lab
+run that re-tested it). "Days" in the rule are *observed* days: the calendar time covered by at
+least one top-quartile strategy under test. A record that left the book still counts for the days
+it was observed and adds nothing afterwards; the calendar age of the oldest freeze is reported
+apart (`calendar_days`) and decides nothing. The daily series weighs equally the strategies under
+test that day (a day under test without trades is a 0, a strategy not yet frozen or no longer
+tested is absent), and the benchmark is compared on the same observed days only.
+
 Objective comparison (does not change the verdict):
   * benchmark – a pre-registered fixed TSMOM configuration (research/external/benchmark-*.json)
     stays in the book permanently and is reported next to Q1: research must beat it;
@@ -42,7 +53,7 @@ from __future__ import annotations
 
 import math
 from collections import defaultdict
-from datetime import timedelta
+from datetime import datetime, timedelta
 
 import pandas as pd
 
@@ -57,6 +68,12 @@ BOOK_MAX_AGE_DAYS = 60
 # accumulates. Before 2026-11-21 the book was simply the newest 120 experiments: ~2 lab runs,
 # so every strategy was forward-tested for only a few hours and then dropped out.
 BOOK_KEEP = 100
+# A strategy is re-tested for its 60-day book life, but its forward record is kept longer: its
+# observed days stay evidence, and the decision needs `final_days` (90) *observed* days of the
+# top quartile – covered by a continuous research process, not by the age of old records (see
+# the docstring). Until 2026-11-22 records were deleted when a strategy left the book, so the
+# 90-day rule could never be reached. Records are dropped this many days after their freeze.
+RECORD_KEEP_DAYS = 120  # longer than the 90-day window, bounded store
 RULES = {"version": 2, "early_trades": 100, "early_days": 7, "final_trades": 200, "final_days": 90,
          "pf_works": 1.15, "t_works": EV.T_FLOOR, "t_rule": "anytime-valid (normal mixture, ρ = 90 days, α = 5 %)"}
 PROMOTE = {"trades": 20, "pf": 1.3}
@@ -166,51 +183,89 @@ def _spearman(a: list[float], b: list[float]) -> float | None:
     return round(cov / (va * vb), 3) if va > 0 and vb > 0 else None
 
 
-def _daily(rows: list[dict]) -> dict[str, float]:
-    """Equal-weight daily return of a group (days on which any member closed a trade)."""
-    per: dict[tuple, float] = defaultdict(float)
+def _window(r: dict, now: datetime) -> tuple[datetime, datetime] | None:
+    """When a record was really observed: its freeze → the last lab run that re-tested it.
+    Records stored before 2026-11-22 carry no `tested_until`: they count up to their last
+    forward trade (never longer than the evidence shows)."""
+    fz = parse_dt(r.get("freeze"))
+    if fz is None:
+        return None
+    end = parse_dt(r.get("tested_until"))
+    if end is None:
+        closes = [parse_dt(t[0]) for t in r.get("trades", []) if t and t[0]]
+        end = max((c for c in closes if c is not None), default=fz)
+    return fz, min(max(end, fz), now)
+
+
+def observed_days(rows: list[dict], now: datetime | None = None) -> float:
+    """Calendar time covered by at least one record under test (union of the windows), in days."""
+    now = now or utcnow()
+    spans = sorted(w for w in (_window(r, now) for r in rows) if w)
+    total, cur_a, cur_b = 0.0, None, None
+    for a, b in spans:
+        if cur_b is None or a > cur_b:
+            if cur_b is not None:
+                total += (cur_b - cur_a).total_seconds()
+            cur_a, cur_b = a, b
+        else:
+            cur_b = max(cur_b, b)
+    if cur_b is not None:
+        total += (cur_b - cur_a).total_seconds()
+    return round(total / 86400, 1)
+
+
+def calendar_days(rows: list[dict], now: datetime | None = None) -> float:
+    now = now or utcnow()
+    fz = [parse_dt(r.get("freeze")) for r in rows if parse_dt(r.get("freeze"))]
+    return round((now - min(fz)).total_seconds() / 86400, 1) if fz else 0.0
+
+
+def _daily_series(rows: list[dict], now: datetime | None = None) -> dict[str, float]:
+    """Equal-weight daily return over the strategies under test that day (0 for a day under test
+    without trades). Days on which no member was under test are absent."""
+    now = now or utcnow()
+    pnl: dict[tuple, float] = defaultdict(float)
+    active: dict[str, set] = defaultdict(set)
     for r in rows:
         for ts, x in r.get("trades", []):
-            per[(r["id"], ts[:10])] += x
-    days: dict[str, float] = defaultdict(float)
-    for (_sid, d), x in per.items():
-        days[d] += x
-    n = max(len(rows), 1)
-    return {d: v / n for d, v in sorted(days.items())}
+            pnl[(r["id"], ts[:10])] += x
+            active[ts[:10]].add(r["id"])
+        w = _window(r, now)
+        if w:
+            d, last = w[0].date(), w[1].date()
+            while d <= last:
+                active[d.isoformat()].add(r["id"])
+                d += timedelta(days=1)
+    return {d: sum(pnl.get((sid, d), 0.0) for sid in ids) / len(ids) for d, ids in sorted(active.items())}
 
 
-def versus(top: list[dict], bench: list[dict], min_days: int = 10) -> dict | None:
+def versus(top: list[dict], bench: list[dict], min_days: int = 10, now: datetime | None = None) -> dict | None:
     """Interim signal for an observer: does the research's top quartile beat the fixed
-    benchmark over the same days? Paired daily difference (a day without trades counts as 0),
-    its t and P(top better) under a normal approximation. Not a verdict – a direction with
-    its uncertainty."""
-    a, b = _daily(top), _daily(bench)
-    days = sorted(set(a) | set(b))
+    benchmark over the same days? Paired daily difference on the days both were under test
+    (a day under test without trades counts as 0), its t and P(top better) under a normal
+    approximation. Not a verdict – a direction with its uncertainty."""
+    a, b = _daily_series(top, now), _daily_series(bench, now)
+    days = sorted(set(a) & set(b))  # the same observed days only
     if len(days) < min_days:
         return None
-    diff = [a.get(d, 0.0) - b.get(d, 0.0) for d in days]
+    diff = [a[d] - b[d] for d in days]
     t = _t(diff)
     return {"days": len(days), "t": t, "p_top_better": round(0.5 * (1 + math.erf(t / math.sqrt(2))), 3),
-            "top_pct": round(sum(a.values()) * 100, 3), "bench_pct": round(sum(b.values()) * 100, 3)}
+            "top_pct": round(sum(a[d] for d in days) * 100, 3), "bench_pct": round(sum(b[d] for d in days) * 100, 3)}
 
 
-def _group(rows: list[dict], btc: pd.Series | None = None) -> dict:
+def _group(rows: list[dict], btc: pd.Series | None = None, now: datetime | None = None) -> dict:
+    now = now or utcnow()
     trades = [t for r in rows for t in r.get("trades", [])]
     rets = [t[1] for t in trades]
-    days: dict[str, list[float]] = defaultdict(list)
-    per_strat_day: dict[tuple, float] = defaultdict(float)
-    for r in rows:
-        for ts, x in r.get("trades", []):
-            per_strat_day[(r["id"], ts[:10])] += x
-    for (_sid, d), x in per_strat_day.items():
-        days[d].append(x)
-    n_strats = max(len(rows), 1)
-    ordered = sorted(days.items())
-    daily = [sum(v) / n_strats for _, v in ordered]  # equal weight across the group
+    series = _daily_series(rows, now)  # equal weight across the members under test that day
+    ordered = list(series.items())
+    daily = [v for _, v in ordered]
     out = {"strategies": len(rows), "trades": len(rets), "pnl_pct": round(sum(rets) * 100, 3),
            "pf": _pf(rets), "win_rate": round(sum(1 for x in rets if x > 0) / len(rets), 3) if rets else None,
            "mean_bp": round(sum(rets) / len(rets) * 1e4, 2) if rets else None,
-           "t_daily": _t(daily), "days_with_trades": len(daily)}
+           "t_daily": _t(daily), "series_days": len(daily),
+           "days_with_trades": len({ts[:10] for ts, _ in trades}), "observed_days": observed_days(rows, now)}
     if btc is not None and len(daily) >= 5:
         try:  # reporting only – never let it break the forward import
             y = pd.Series(daily, index=pd.to_datetime([d for d, _ in ordered], utc=True))
@@ -257,23 +312,24 @@ def summarize(results: list[dict], now=None, btc: pd.Series | None = None) -> di
     rows.sort(key=lambda r: -float(r.get("score") or 0.0))
     q = max(1, len(rows) // 4)
     top, rest = rows[:q], rows[q:]
-    freezes = [parse_dt(r.get("freeze")) for r in rows if parse_dt(r.get("freeze"))]
-    fwd_days = round((now - min(freezes)).total_seconds() / 86400, 1) if freezes else 0.0
-    g_top, g_rest, g_all = _group(top, btc), _group(rest), _group(rows)
-    g_bench = _group(bench, btc) if bench else None
-    vs = versus(top, bench) if bench else None
-    t_need = EV.anytime_t_boundary(g_top["days_with_trades"])
+    cal_days = calendar_days(rows, now)  # age of the oldest freeze: reported, decides nothing
+    g_top, g_rest, g_all = _group(top, btc, now), _group(rest, now=now), _group(rows, now=now)
+    fwd_days = g_top["observed_days"]  # the rule's clock: days the top quartile was really under test
+    g_bench = _group(bench, btc, now) if bench else None
+    vs = versus(top, bench, now=now) if bench else None
+    t_need = EV.anytime_t_boundary(g_top["series_days"])
     ev = [(float(r.get("score") or 0.0), sum(t[1] for t in r.get("trades", [])))
           for r in rows if len(r.get("trades", [])) >= 5]
     rho = _spearman([a for a, _ in ev], [b for _, b in ev])
     n, R = g_top["trades"], RULES
     if n < R["early_trades"] or fwd_days < R["early_days"]:
-        verdict, text = "too_early", (f"Too early: {n} forward trades in the top quartile over {fwd_days} days "
+        verdict, text = "too_early", (f"Too early: {n} forward trades in the top quartile over {fwd_days} observed days "
                                       f"(first read at {R['early_trades']} trades and {R['early_days']} days).")
     elif n < R["final_trades"] or fwd_days < R["final_days"]:
         lean = "positive" if (g_top["pf"] or 0) > 1.0 and g_top["pnl_pct"] > 0 else "negative"
-        verdict, text = f"early_{lean}", (f"Early read ({n} trades, {fwd_days} days): leaning {lean}. "
-                                          f"Decision at {R['final_trades']} trades and {R['final_days']} days.")
+        verdict, text = f"early_{lean}", (f"Early read ({n} trades, {fwd_days} observed days of {cal_days} "
+                                          f"calendar): leaning {lean}. Decision at {R['final_trades']} trades "
+                                          f"and {R['final_days']} observed days.")
     elif (g_top["pf"] or 0) >= R["pf_works"] and g_top["t_daily"] >= t_need:
         verdict, text = "works", (f"Works: top-quartile strategies keep their edge on unseen data "
                                   f"(PF {g_top['pf']} after costs, daily t {g_top['t_daily']} ≥ {t_need}, {n} trades).")
@@ -289,21 +345,22 @@ def summarize(results: list[dict], now=None, btc: pd.Series | None = None) -> di
     for r in rows:
         families[r.get("family") or "?"].append(r)
     fam = {f: {k: g[k] for k in ("strategies", "trades", "pf", "mean_bp", "t_daily")}
-           for f, g in ((f, _group(rs)) for f, rs in families.items()) if g["trades"]}
+           for f, g in ((f, _group(rs, now=now)) for f, rs in families.items()) if g["trades"]}
     if g_bench and g_bench["trades"]:
-        text += (f" Benchmark (fixed TSMOM): {g_bench['trades']} trades, PF {g_bench['pf']}, "
-                 f"{g_bench['pnl_pct']}%; top quartile {g_top['pnl_pct']}%.")
+        text += f" Benchmark (fixed TSMOM): {g_bench['trades']} trades, PF {g_bench['pf']}"
+        text += (f"; on the same {vs['days']} observed days benchmark {vs['bench_pct']}% vs top quartile "
+                 f"{vs['top_pct']}%." if vs else ".")
     hyps = {}
     for name in sorted({r["hypothesis"] for r in hyp}):
         legs = [r for r in hyp if r["hypothesis"] == name]
         if name == "H1":  # its 30-day leg is the benchmark itself
             legs = legs + bench
-        g = _group(legs, btc)
-        hfz = [parse_dt(r.get("freeze")) for r in legs if parse_dt(r.get("freeze")) and not r.get("benchmark")]
+        g = _group(legs, btc, now)
         hyps[name] = {**g, "legs": sorted(r["id"] for r in legs),
-                      "forward_days": round((now - min(hfz)).total_seconds() / 86400, 1) if hfz else 0.0,
-                      "vs_benchmark": versus(legs, bench) if bench else None}
+                      "forward_days": observed_days([r for r in legs if not r.get("benchmark")], now),
+                      "vs_benchmark": versus(legs, bench, now=now) if bench else None}
     return {"ts": iso(now), "verdict": verdict, "text": text, "rules": R, "t_needed": t_need, "forward_days": fwd_days,
+            "calendar_days": cal_days, "days_rule": "observed days of the top quartile (freeze → last re-test)",
             "top": g_top, "rest": g_rest, "all": g_all, "benchmark": g_bench, "vs_benchmark": vs, "families": fam,
             "hypotheses": hyps,
             "rank_corr": rho,
@@ -342,13 +399,21 @@ def apply(reg: Registry, payload: dict) -> dict:
     """Store the lab's forward results, recompute the verdict, promote forward winners."""
     results = payload.get("results") or []
     prev = reg.kv_get("forward_results") or {}
+    now = utcnow()
     for r in results:  # every run re-tests from the freeze time, so the newest result supersedes
         if r.get("ok", True):
+            # observed up to this run (the lab stamps its own test time; the import time otherwise)
+            until = parse_dt(r.get("tested_until"))
+            r["tested_until"] = iso(min(until, now) if until else now)
             prev[r["id"]] = r
     live_ids = {e["id"] for e in book(reg, limit=10_000)}
-    prev = {k: v for k, v in prev.items() if k in live_ids}
+    keep_since = now - timedelta(days=RECORD_KEEP_DAYS)
+    # strategies still in the book, and the records of those that left it (no longer re-tested,
+    # their forward trades up to then stay evidence) until RECORD_KEEP_DAYS after their freeze
+    prev = {k: v for k, v in prev.items()
+            if k in live_ids or ((parse_dt(v.get("freeze")) or keep_since) > keep_since)}
     reg.kv_set("forward_results", prev)
-    summ = summarize(list(prev.values()), btc=EV.btc_returns(reg.kv_get("btc_daily")) if reg.kv_get("btc_daily") else None)
+    summ = summarize(list(prev.values()), now=now, btc=EV.btc_returns(reg.kv_get("btc_daily")) if reg.kv_get("btc_daily") else None)
     summ["persistence"] = persistence(reg)
     summ["errors"] = sum(1 for r in results if not r.get("ok", True))
     old = (reg.kv_get("forward") or {}).get("verdict")

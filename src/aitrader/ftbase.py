@@ -720,7 +720,7 @@ class AIBase(IStrategy):
                 loss_frac = (t.stop_loss - t.open_rate) / t.open_rate if t.is_short else (t.open_rate - t.stop_loss) / t.open_rate
                 open_risk += max(loss_frac, 0.0) * float(t.stake_amount or 0) * float(t.leverage or 1)
             sleeve = self.sleeve_by_tag(pair, entry_tag)
-            new_risk = (sleeve.risk if sleeve else 0.0) * equity
+            new_risk = self._entry_risk(pair, sleeve, amount, equity)
             if open_risk + new_risk > max_risk * equity:
                 logger.info("portfolio limit: %s %s skipped (open risk %.2f%% of equity, cap %.1f%%)", side, pair,
                             100 * open_risk / equity, 100 * max_risk)
@@ -745,6 +745,27 @@ class AIBase(IStrategy):
                     return self._decline(entry_tag, pair, side, "explore_risk")
         self._journal("cfm", entry_tag, pair, side, "accepted")
         return True
+
+    def _entry_risk(self, pair: str, sleeve: Sleeve | None, amount: float, equity: float) -> float:
+        """Money at the initial stop for a new entry, for the account caps: the larger of the
+        sleeve's nominal risk and the risk the order is actually sized to (conviction can scale
+        it up to 1.5× and the exchange minimum by up to another 1.5×; audit 22.11). Never less
+        than the nominal, so the caps can only get stricter."""
+        nominal = (sleeve.risk if sleeve else 0.0) * equity
+        if sleeve is None or not amount:
+            return nominal
+        try:
+            p = get_family(sleeve.family).normalize(sleeve.params)
+            df, _ = self.dp.get_analyzed_dataframe(pair, self.timeframe)
+            if df is None or df.empty:
+                return nominal
+            last = df.iloc[-1]
+            atr = float(last.get(f"at:{sleeve.id}", last.get("atr", float("nan"))))
+            if not atr or atr != atr or atr <= 0:
+                return nominal
+            return max(nominal, float(amount) * float(p["sl_atr"]) * atr)  # notional × stop distance
+        except Exception:  # noqa: BLE001 – a sizing lookup must never let an entry through unchecked
+            return nominal
 
     def _trade_stage(self, trade) -> str | None:
         """Lifecycle stage of the sleeve that owns an open trade (None if unknown/closing)."""

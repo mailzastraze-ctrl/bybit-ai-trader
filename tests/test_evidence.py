@@ -111,7 +111,7 @@ def test_shrinkage_ranks_a_long_steady_record_above_a_lucky_streak():
 def _m(**kw):
     oos = {"trades": 120, "profit_factor": 1.6, "sharpe": 1.4, "max_drawdown": 0.08, "total_return": 0.2}
     return {"oos": oos, "stress": {"profit_factor": 1.3}, "wfe": 0.6, "robust_frac": 0.8,
-            "mc": {"prob_profit": 0.9}, "dsr": 0.99, "fold_pos": 1.0, **kw}
+            "mc": {"prob_profit": 0.9}, "dsr": 0.99, "fold_pos": 1.0, "alpha": 0.002, "alpha_t": 2.5, **kw}
 
 
 def test_screener_and_external_configs_cannot_validate_on_data_they_were_chosen_on():
@@ -512,7 +512,8 @@ def test_validation_needs_oos_alpha_over_btc_but_exploration_does_not():
     assert evaluate_gates(g, _m(alpha=0.002, alpha_t=2.5))[0] == "validated"
     v, gates = evaluate_gates(g, _m(alpha=0.0001, alpha_t=0.3))  # profitable, but the market explains it
     assert v == "exploratory" and not gates["market_alpha"]["pass"]
-    assert "market_alpha" not in evaluate_gates(g, _m())[1]  # no BTC data → gate not applied
+    v, gates = evaluate_gates(g, _m(alpha=None, alpha_t=None))  # no BTC data: a gap, not a pass
+    assert v == "exploratory" and gates["market_alpha"]["pass"] is False
     assert evaluate_gates(g, _m(alpha=-0.001, alpha_t=1.5))[0] == "exploratory"
 
 
