@@ -174,8 +174,8 @@ def report_md(m: dict) -> str:
              f"({sum(c['stage'] == 'validated' for c in m['candidates'])} validated, "
              f"{sum(c['stage'] == 'exploratory' for c in m['candidates'])} exploratory)", "",
              "All metrics are walk-forward out-of-sample, after fees+slippage; stress = doubled costs. "
-             "Exception: screener survivors and external configurations were chosen on data that overlaps the "
-             "test windows, so for them the walk-forward is a replication (gate `clean_oos` fails): it can reject "
+             "Exception: screener survivors, external configurations, refinements and revalidations were chosen on data "
+             "that overlaps the test windows, so for them the walk-forward is a replication (gate `clean_oos` fails): it can reject "
              "but never validate. Imported strategies must still pass forward testing on Bybit Demo before production.", "",
              "| Experiment | Family | TF | Verdict | OOS trades | PF | Sharpe | Max DD | DSR | Failed gates |",
              "|---|---|---|---|---:|---:|---:|---:|---:|---|"]

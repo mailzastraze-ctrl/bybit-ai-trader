@@ -59,6 +59,15 @@ def pair_scores(df: pd.DataFrame) -> dict:
     }
 
 
+def holdout_start(holdout_days: int, now=None):
+    """First day of the walk-forward test windows (`validation.walk_forward_folds`). Regime
+    scores used to choose research pairs must be measured before it: the last ~60 days lie
+    inside the last test window, so choosing pairs on them lets the test result leak into the
+    choice of coins (review 2026-11-22)."""
+    end = (now or utcnow()).replace(hour=0, minute=0, second=0, microsecond=0)
+    return end - timedelta(days=holdout_days)
+
+
 class Scanner:
     def __init__(self, settings: Settings, registry: Registry, runner: FreqtradeRunner | None = None):
         self.s = settings
@@ -91,10 +100,15 @@ class Scanner:
                  len(universe), rs.min_history_days)
 
         now = iso()
+        oos_start = holdout_start(rs.holdout_days)
         for p in universe:
             try:
                 df = pd.read_feather(pair_file(self.s, p))
                 sc = pair_scores(df)
+                if sc:
+                    pre = pair_scores(df[df["date"] < pd.Timestamp(oos_start)])
+                    if pre:
+                        sc["pre_oos"] = {**pre, "until": iso(oos_start)}
             except Exception as e:  # noqa: BLE001
                 log.warning("scoring %s failed: %s", p, e)
                 continue

@@ -385,3 +385,81 @@ def postmortem(reg, ft, now=None) -> dict:
     out = {"ts": iso(now), "trades": keep, "summary": summarize_postmortem(list(keep.values()))}
     reg.kv_set("postmortem", out)
     return out
+
+
+# ---------------------------------------------------------------------------- health line
+STOP_GRACE_S = 180  # a fresh position gets its exchange stop within a minute or two
+
+
+def _has_exchange_stop(t: dict) -> bool:
+    return any(o.get("ft_order_side") == "stoploss" and o.get("status") in ("open", "new", None)
+               for o in t.get("orders") or [])
+
+
+def health(open_trades: list[dict], equity: float | None, now=None) -> dict:
+    """Positions, how many lack a stop order on the exchange (after a short grace period), and
+    the money at risk to the stops as % of equity. Observation only."""
+    now = now or utcnow()
+    bare = []
+    for t in open_trades or []:
+        od = parse_dt(t.get("open_date") or t.get("open_timestamp"))
+        young = od is not None and (now - od).total_seconds() < STOP_GRACE_S
+        if not young and not _has_exchange_stop(t):
+            bare.append(t.get("pair"))
+    risk = sum(_risk(t) for t in open_trades or [])
+    return {"ts": now.strftime("%Y-%m-%dT%H:%M:%SZ"), "positions": len(open_trades or []), "no_exchange_stop": bare,
+            "risk_pct": round(100 * risk / equity, 2) if equity else None}
+
+
+def red_flags(reg, now=None) -> list[str]:
+    """The owner's red flags (PLAN §5) from what the registry already knows."""
+    now = now or utcnow()
+    out = []
+    hb = {h["service"]: h for h in reg.q("SELECT service, status, ts FROM heartbeats")}
+    m = hb.get("manager")
+    if m is None or m.get("status") != "ok":
+        out.append(f"manager {m.get('status') if m else 'missing'}")
+    elif (age := parse_dt(m.get("ts"))) is not None and (now - age).total_seconds() > 900:
+        out.append("manager silent > 15 min")
+    h = reg.kv_get("health") or {}
+    if h.get("no_exchange_stop"):
+        out.append("no exchange stop: " + ",".join(str(p).split("/")[0] for p in h["no_exchange_stop"]))
+    lab = reg.kv_get("lab") or {}
+    li = parse_dt(lab.get("last_import"))
+    if li is None or (now - li).total_seconds() > 24 * 3600:
+        out.append("lab import > 24h")
+    if lab.get("last_batch_total") and lab.get("last_batch_failed", 0) > 0.2 * lab["last_batch_total"]:
+        out.append(f"lab failures {lab['last_batch_failed']}/{lab['last_batch_total']}")
+    d = reg.kv_get("disk") or {}
+    if d.get("free_pct") is not None and d["free_pct"] < 0.2:
+        out.append(f"disk free {d['free_pct']:.0%}")
+    left = (d.get("growth") or {}).get("days_to_full")
+    if left is not None and left < 14:
+        out.append(f"disk full in ~{left:.0f} d")
+    if reg.kv_get("kill_since"):
+        out.append("kill-switch")
+    day = reg.kv_get("day_open") or {}
+    if day.get("hit") and day.get("day") == now.strftime("%Y-%m-%d"):
+        out.append("daily loss limit")
+    p = reg.kv_get("parity") or {}
+    if p.get("alarm") and p.get("like_for_like"):
+        out.append("PARITY ALARM")
+    return out
+
+
+def status_line(reg, now=None) -> str:
+    """Compact health for the supervisor's STATUS log line (readable without passwords)."""
+    now = now or utcnow()
+    h, d, lab, fw = (reg.kv_get(k) or {} for k in ("health", "disk", "lab", "forward"))
+    li = parse_dt(lab.get("last_import"))
+    imp = f"{(now - li).total_seconds() / 3600:.1f}h" if li else "never"
+    g = d.get("growth") or {}
+    disk = (f"{d.get('free_pct', 0):.0%} free" if d.get("free_pct") is not None else "?") + \
+        (f", {g['mb_per_day']:+.0f} MB/d, full in {g['days_to_full']:.0f} d" if g.get("days_to_full") else "")
+    bench = (fw.get("benchmark") or {}).get("trades")
+    vs = (fw.get("vs_benchmark") or {}).get("p_top_better")
+    flags = red_flags(reg, now)
+    return (f"HEALTH positions={h.get('positions', '?')} no_exchange_stop={len(h.get('no_exchange_stop') or [])} "
+            f"risk={h.get('risk_pct', '?')}% import_age={imp} disk=[{disk}] "
+            f"forward=[{fw.get('verdict', '?')}, days {fw.get('forward_days', '?')}, benchmark trades {bench}, "
+            f"P(top>bench) {vs}] flags={flags or 'none'}")

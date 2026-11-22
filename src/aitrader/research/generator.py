@@ -134,7 +134,10 @@ class Generator:
         fam = FAMILIES[family]
         market = {r["pair"]: r["data"] for r in self.reg.q("SELECT pair, data FROM market")}
         key = "trend_score" if fam.affinity == "trend" else "revert_score"
-        ranked = sorted(universe, key=lambda p: -(market.get(p, {}) or {}).get(key, 0.0))
+        # regime measured before the test windows (scanner `pre_oos`); the recent score only as
+        # a fallback for market rows written by an older scanner
+        ranked = sorted(universe, key=lambda p: -(((market.get(p) or {}).get("pre_oos")
+                                                   or market.get(p) or {}).get(key, 0.0)))
 
         learnings = self.active_learnings(family)
         overrides: dict = {}

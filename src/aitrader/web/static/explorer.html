@@ -251,7 +251,11 @@ function renderDetail(pairs) {
         ["альфа к BTC", mk.alpha_ann == null ? "—" : `${sg(mk.alpha_ann * 100, 1, "%/год")} (t ${nf(mk.alpha_t, 1)})`],
         ["чистая проверка", rs.clean_oos === false ? "нет — нужна проверка форвардом" : "да"],
         ...(rs.replication ? [["период проверки", `${Math.round(rs.replication.days / 365 * 10) / 10} года, ${rs.replication.folds} кварталов`]] : []),
-        ...(rs.parity ? [["движок → бот", `PF ${nf(rs.parity.engine_pf, 2)} → ${nf(rs.parity.bot_pf, 2)} ${rs.parity.ok ? "✅" : "❌ не совпадает"}`]] : [])])}
+        ...(rs.parity ? (rs.parity.coin ? [
+          ["движок → бот (" + esc(String(rs.parity.coin).split("/")[0]) + ")", `PF ${nf(rs.parity.engine_pf, 2)} → ${nf(rs.parity.bot_pf, 2)} ${rs.parity.profit_ok ? "✅" : "❌ по деньгам не совпадает"}`],
+          ["сделок там же", `≈${nf(rs.parity.expected_trades, 0)} → ${rs.parity.bot_trades} ${rs.parity.signals_ok ? "✅ сигналы совпадают" : "❌ сигналы расходятся"}`],
+          ["другие монеты", rs.parity.others && rs.parity.others.trades ? `PF ${nf(rs.parity.others.pf, 2)} на ${rs.parity.others.trades} сделках` : "—"]]
+          : [["движок → бот", `PF ${nf(rs.parity.engine_pf, 2)} → ${nf(rs.parity.bot_pf, 2)} (все монеты вместе) ${rs.parity.ok ? "✅" : "❌"}`]]) : [])])}
       ${box("Форвард-тест (данные после заморозки)", [["сделок", r.forward.trades || 0], ["profit factor", pf(r.forward.pf)], ["итог", r.forward.pnl_pct == null ? "—" : sg(r.forward.pnl_pct, 2, "%")],
         ["доля прибыльных", r.forward.win_rate == null ? "—" : nf(r.forward.win_rate * 100, 0) + "%"], ["вероятность, что в плюсе", r.forward.p_pos == null ? "—" : nf(r.forward.p_pos * 100, 0) + "%"]])}
       ${box("Демо-счёт (настоящие сделки)", [
