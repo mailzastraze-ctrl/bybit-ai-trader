@@ -1,6 +1,6 @@
 # PROJECT_STATUS
 
-_Last updated: 2026-11-22 (final patch before 2–3 weeks of observation). History: `CHANGELOG.md`._
+_Last updated: 2026-11-22 evening (final patch + janitor, H1 in the shadow). History: `CHANGELOG.md`. Rules for Claude sessions: `CLAUDE.md`._
 
 ## What runs
 - **Railway** (one container, volume `/data`, EU West, Hobby plan): Freqtrade on **Bybit Demo only** (`demo_trading` is hard-required, 1x), the manager (lifecycle, learning, manifest) and the web control room. No research on the server.
@@ -10,6 +10,7 @@ _Last updated: 2026-11-22 (final patch before 2–3 weeks of observation). Histo
 
 ## Where the evidence stands (22.11)
 - 0 validated strategies. "Exploratory" means it may trade at 0.1 % risk; it is not proof of an edge. Most exploratory strategies are refinements or screener finds, and those can no longer validate (`clean_oos`).
+- Pre-registered hypothesis **H1** (TSMOM 12/30/84 days on 4h; the 30-day leg is the benchmark) runs in the forward book from 22.11. It is shadow only, never traded.
 - The decision rules are written in advance (forward v2, project doc `claude/PLAN.md` §6):
   - ≈ 21.12: is everything working;
   - 19.02.2027: is the search worth its minutes against the fixed TSMOM benchmark;
@@ -34,6 +35,15 @@ _Last updated: 2026-11-22 (final patch before 2–3 weeks of observation). Histo
   - forward book trades per strategy grow; the benchmark has trades;
   - control room "Требует внимания" empty or only macro events;
   - `vs_benchmark` is a direction, not a verdict.
+
+## Runs by itself
+- **Janitor** (`storage.py`):
+  - hourly: logs, temp files, research leftovers, WAL;
+  - daily: old events, slimmed research detail, signal journal, VACUUM;
+  - harder on a low disk.
+- **Lab:** keeps 14 days of batch files in the repo.
+- **`DISK` log line** every hour.
+- **3D office files** (`static/hq*`) do not redeploy the bot.
 
 ## Needs the owner
 1. A Railway usage limit.

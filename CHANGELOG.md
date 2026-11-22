@@ -2,6 +2,28 @@
 
 History of the system, newest first. `PROJECT_STATUS.md` holds only the current state.
 
+## 2026-11-22 (evening) — janitor, H1 in the shadow, 3D office off auto-deploy
+**Janitor: everything that grows now has an owner.** Owner's rule: the system must stay autonomous and delete its own garbage.
+- **Hourly:**
+  - rotated Freqtrade logs (keep 2);
+  - temp files older than 24 h;
+  - half-written atomic files older than 1 h;
+  - in remote research mode, leftovers of research that once ran on the server (jobs, downloaded candles, Freqtrade result folders older than 2 days; the folders themselves stay);
+  - the registry WAL is folded back.
+- **Daily:** events older than 30 days (7 when the disk is < 20 % free). Below 10 % free, also the charts of candidates no live strategy shows; verdicts and parameters stay.
+- **Lab:** keeps 14 days of batch files in the repository. Older ones stay in git history and in the live registry; in the tree they only slowed the server's start-up import and grew the image.
+- **Reporting:** an hourly `DISK` log line: folders, largest files, registry main/WAL/free, table sizes, the container's own disk and `/tmp`, and what the janitor freed so far.
+
+**H1 in the shadow** (`research/hypotheses/`, pre-registered):
+- legs: TSMOM 12 and 84 days on 4h; the 30-day leg is the benchmark. Same construction, nothing optimised, same 15 coins.
+- Forward book only: frozen at first import, never a strategy, never traded, never promoted.
+- Reported apart from the research verdict as `forward.hypotheses.H1`, with H1 vs the benchmark, and as a row in the control room.
+- 7/90 days as first planned fall outside the family's 4h limits (72–504 bars).
+
+**3D office off auto-deploy:**
+- `railway.json` no longer redeploys (and restarts the bot) for `src/aitrader/web/static/hq*`; such changes go live with the next approved deploy. On 22.11 two 3D deploys restarted trading.
+- `CLAUDE.md` gives every Claude session the observation-period rules.
+
 ## 2026-11-22 — final patch before 2–3 weeks of observation (reviewed with ChatGPT)
 Every trade now follows the strategy that opened it, and re-used out-of-sample data can no longer count as independent evidence.
 

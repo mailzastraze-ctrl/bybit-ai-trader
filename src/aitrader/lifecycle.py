@@ -112,6 +112,33 @@ class Lifecycle:
             n += 1
         return n
 
+    def import_hypotheses(self, directory) -> int:
+        """Pre-registered hypotheses (research/hypotheses/*.json, e.g. H1 TSMOM legs): shadow
+        only. They go into the forward book from their first import (the freeze time is kept
+        across restarts) and are never a strategy here – no walk-forward, no demo, no promotion."""
+        import json
+        from pathlib import Path
+        known = self.reg.kv_get("hypotheses") or {}
+        n = 0
+        for f in sorted(Path(directory).glob("*.json")):
+            try:
+                d = json.loads(f.read_text())
+                fam = FAMILIES[d["family"]]
+            except (OSError, json.JSONDecodeError, KeyError):
+                continue
+            if not d.get("shadow_only") or not d.get("id") or d["id"] in known:
+                continue
+            known[d["id"]] = {"id": d["id"], "hypothesis": d.get("hypothesis") or d["id"], "family": fam.name,
+                              "params": fam.normalize(d.get("params")), "pairs": d.get("pairs") or [],
+                              "sides": d.get("sides") or ["long", "short"], "timeframe": d.get("timeframe") or "1h",
+                              "freeze": iso(), "registered": d.get("registered"), "source": d.get("source")}
+            self.reg.event("research", f"{d['id']}: pre-registered hypothesis {known[d['id']]['hypothesis']} enters the "
+                           "forward book (shadow only, never traded)", data={"hypothesis": d["id"]})
+            n += 1
+        if n:
+            self.reg.kv_set("hypotheses", known)
+        return n
+
     def import_batch(self, data: dict, announce: bool = True) -> int:
         """One research batch (GitHub research lab or offline file) → candidates."""
         n = 0

@@ -4,7 +4,6 @@ kill-switch, runs the learning loop and the strategy lifecycle, and rewrites the
 from __future__ import annotations
 
 import time
-from datetime import timedelta
 
 from aitrader import context, memguard, observe, readiness, storage
 from aitrader.ftclient import FtClient
@@ -80,9 +79,10 @@ def housekeeping(reg: Registry, s=None) -> None:
     last = parse_dt(reg.kv_get("housekeeping_ts"))
     if last and (now - last).total_seconds() < 86400:
         return
-    with reg.conn() as c:
-        c.execute("DELETE FROM events WHERE ts < ?", (iso(now - timedelta(days=30)),))
-        c.execute("DELETE FROM equity WHERE ts < ?", (iso(now - timedelta(days=365))[:16],))
+    try:  # old events (30 days; 7 when the disk is low) and equity rows; candidates' charts only on a very low disk
+        storage.prune_registry(reg, (reg.kv_get("disk") or {}).get("free_pct"), now)
+    except Exception as e:  # noqa: BLE001
+        log.warning("registry pruning failed: %s", e)
     slimmed = 0
     if s is not None:
         try:  # maintenance must never break the manager loop
@@ -134,6 +134,7 @@ def main() -> None:
     life.bootstrap()
     life.import_offline_candidates(s.app_dir / "research" / "imports")
     life.import_external(s.app_dir / "research" / "external")
+    life.import_hypotheses(s.app_dir / "research" / "hypotheses")  # shadow only: forward book, never demo
     # make sure the bot has a manifest + pairlist before it starts trading
     startup_manifest(life, s, set(scanner.excluded_pairs()))
     reg.event("manager", "manager started")
@@ -194,6 +195,12 @@ def main() -> None:
                     storage.disk_tick(reg, s.data_dir, s.registry_path)
                 except Exception as e:  # noqa: BLE001 – observation must never break the loop
                     log.info("disk tick failed: %s", e)
+                last_j = parse_dt((reg.kv_get("janitor") or {}).get("ts"))
+                if last_j is None or (utcnow() - last_j).total_seconds() >= 3600:
+                    try:  # hourly: rotated logs, stale temp files, research leftovers, WAL
+                        storage.janitor_hourly(reg, s)
+                    except Exception as e:  # noqa: BLE001
+                        log.warning("janitor failed: %s", e)
                 try:  # observation only: missed signals and how many independent bets are open
                     reg.kv_set("signals", observe.summarize_signals(observe.journal_path(s.state_dir)))
                     if up:
