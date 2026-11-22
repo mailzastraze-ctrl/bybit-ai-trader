@@ -104,11 +104,12 @@ def evaluate_gates(g: Gates, m: dict) -> tuple[str, dict]:
     fp = m.get("fold_pos")
     if fp is not None:  # every walk-forward slice is its own out-of-sample test
         checks["fold_consistency"] = (fp, g.min_fold_consistency, fp >= g.min_fold_consistency)
+    # the OOS profit must not be just the market's move (a short book in a falling year). A
+    # missing alpha (no BTC candles, too few days) fails the gate (audit 22.11): it used to be
+    # skipped, so a data gap could pass as a successful alpha check. Exploration needs no alpha.
     a_t = m.get("alpha_t")
-    if a_t is not None:
-        # the OOS profit must not be just the market's move (a short book in a falling year)
-        ok = a_t >= g.min_alpha_t and (m.get("alpha") or 0.0) > 0
-        checks["market_alpha"] = (a_t, g.min_alpha_t, ok)
+    ok = a_t is not None and a_t >= g.min_alpha_t and (m.get("alpha") or 0.0) > 0
+    checks["market_alpha"] = (a_t if a_t is not None else 0.0, g.min_alpha_t, ok)
     if m.get("clean_oos") is False:
         # the configuration was chosen on data that overlaps these test windows (screener
         # survivors, hand-found external configs): the walk-forward is a replication with real
