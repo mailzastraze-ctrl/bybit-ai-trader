@@ -4,20 +4,54 @@
   "source": "Pre-registered benchmark (2026-11-21): plain time-series momentum, parameters fixed from the literature, not fitted to this data",
   "family": "tsmom",
   "timeframe": "4h",
-  "pairs": ["BTC/USDT:USDT", "ETH/USDT:USDT", "SOL/USDT:USDT", "XRP/USDT:USDT", "DOGE/USDT:USDT",
-            "BNB/USDT:USDT", "ADA/USDT:USDT", "LINK/USDT:USDT", "AVAX/USDT:USDT", "LTC/USDT:USDT",
-            "BCH/USDT:USDT", "DOT/USDT:USDT", "TRX/USDT:USDT", "NEAR/USDT:USDT", "UNI/USDT:USDT"],
-  "sides": ["long", "short"],
+  "pairs": [
+    "BTC/USDT:USDT",
+    "ETH/USDT:USDT",
+    "SOL/USDT:USDT",
+    "XRP/USDT:USDT",
+    "DOGE/USDT:USDT",
+    "BNB/USDT:USDT",
+    "ADA/USDT:USDT",
+    "LINK/USDT:USDT",
+    "AVAX/USDT:USDT",
+    "LTC/USDT:USDT",
+    "BCH/USDT:USDT",
+    "DOT/USDT:USDT",
+    "TRX/USDT:USDT",
+    "NEAR/USDT:USDT",
+    "UNI/USDT:USDT"
+  ],
+  "sides": [
+    "long",
+    "short"
+  ],
   "params": {
-    "lookback": 180, "vol_len": 180, "z_entry": 0.5, "z_exit": 0.0, "confirm_len": 20,
-    "exit_mode": 1, "sl_atr": 4.0, "lab_tp": 0.0, "lab_trail": 0.0, "max_hold": 500, "conv_w": 0.0,
-    "htf_trend": 0, "vol_regime": 0, "session": 0, "no_weekend": 0, "event_guard": 0,
-    "tp_near": 0, "event_lock": 0, "vol_shock": 0
+    "lookback": 180,
+    "vol_len": 180,
+    "z_entry": 0.5,
+    "z_exit": 0.0,
+    "confirm_len": 20,
+    "exit_mode": 1,
+    "sl_atr": 4.0,
+    "lab_tp": 0.0,
+    "lab_trail": 0.0,
+    "max_hold": 500,
+    "conv_w": 0.0,
+    "htf_trend": 0,
+    "vol_regime": 0,
+    "session": 0,
+    "no_weekend": 0,
+    "event_guard": 0,
+    "tp_near": 0,
+    "event_lock": 0,
+    "vol_shock": 0
   },
   "preregistration": {
     "hypothesis": "Crypto perpetuals keep trending at multi-week horizons (time-series momentum): long when the 30-day return in volatility units is above +0.5, short below -0.5, flat when it crosses zero.",
     "why_these_parameters": "30-day lookback and 30-day volatility on 4h candles (180 bars) is the standard monthly TSMOM horizon; entry at half a volatility unit, exit when momentum turns; a wide 4xATR catastrophic stop, no take profit, no break-even or ratchet, no structural genes. Nothing here was optimised.",
-    "role": "The bar every research strategy must beat on the forward test. It is never re-optimised and never removed from the forward book.",
+    "role": "The bar every research strategy must beat on the forward test. It is never re-optimised and never removed from the forward book. Since 2026-11-22 (owner's decision) the same configuration also trades on demo as the core sleeve core-tsmom-4h-30d; the benchmark record stays the forward book's.",
     "decision_rule": "Research is only worth its complexity if the top quartile's forward return beats this benchmark over the same period (reported in /api/forward)."
-  }
+  },
+  "core": true,
+  "core_id": "core-tsmom-4h-30d"
 }

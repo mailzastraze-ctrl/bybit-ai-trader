@@ -59,6 +59,10 @@ class Lifecycle:
     max_production: int = 20
     max_incubation: int = 20
     max_exploration: int = 24
+    # the lane is split by trading frequency (owner, 2026-11-22: test both at once): this share of the
+    # slots for active strategies (15m/1h candles, frequent trades), the rest for precise ones (2h–12h,
+    # rare trades); a lane without enough candidates lends its free slots to the other
+    explore_active_share: float = 0.5
     max_family_sleeves: int = 12   # deployed sleeves per strategy family …
     max_family_per_coin: int = 2   # … and at most this many of one family on the same coin
     proven_risk_budget: float = 0.05  # open risk at stops for proven sleeves if half their coins are in a trade
@@ -78,7 +82,10 @@ class Lifecycle:
     production_retire_pf: float = 0.85
     sleeve_max_dd: float = 0.15  # drawdown of sleeve PnL relative to equity
     account_kill_dd: float = 0.25  # account drawdown that pauses all entries
-    daily_loss_limit: float = 0.03  # loss vs the UTC day's first equity reading that pauses entries until 00:00 UTC
+    # loss vs the UTC day's first equity reading that pauses entries until 00:00 UTC. Off (0) on demo –
+    # owner's decision 2026-11-22: a pause only loses observations there. Must be on (e.g. 0.03) before
+    # real money (claude/PLAN.md, stage D); env DAILY_LOSS_LIMIT.
+    daily_loss_limit: float = 0.0
     kill_cooldown_hours: float = 48.0
 
 
@@ -149,6 +156,7 @@ class Settings:
         lc.risk_production = _f("RISK_PRODUCTION", lc.risk_production)
         lc.risk_incubation = _f("RISK_INCUBATION", lc.risk_incubation)
         lc.risk_exploration = _f("RISK_EXPLORATION", lc.risk_exploration)
+        lc.daily_loss_limit = _f("DAILY_LOSS_LIMIT", lc.daily_loss_limit)
 
     # ---- derived paths -------------------------------------------------
     @property

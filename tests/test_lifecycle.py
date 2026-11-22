@@ -457,3 +457,53 @@ def test_crowded_coin_goes_to_the_strongest_evidence_first(env):
     reg.update("strategies", "owner-x", {"oos": {"owner": True, "external": True, "timeframe": "6h"}})
     man = life.build_manifest([], set(), False)
     assert [sl.id for sl in man.sleeves] == ["owner-x"]  # the owner's system is not crowded out by score
+
+
+def test_demo_core_always_trades_its_coins(env):
+    """Owner's decision 2026-11-22: the pre-registered TSMOM set (benchmark 30 d + H1 12/84 d,
+    4h, 15 coins) always trades on demo at exploration risk – no rotation, first on shared coins."""
+    s, reg = env
+    life = Lifecycle(s, reg)
+    root = Path(__file__).resolve().parents[1] / "research"
+    assert life.import_core(root / "external", root / "hypotheses") == 3
+    _strategy(reg, "weak", "exploration", ["BTC/USDT:USDT", "PEPE/USDT:USDT"], score=0.4)
+    man = life.build_manifest([], {"TRX/USDT:USDT"}, False)
+    core = [x for x in man.sleeves if x.id.startswith("core-")]
+    assert sorted(x.id for x in core) == ["core-tsmom-4h-12d", "core-tsmom-4h-30d", "core-tsmom-4h-84d"]
+    for x in core:
+        assert x.stage == "exploration" and x.timeframe == "4h" and x.risk == s.lifecycle.risk_exploration
+        assert len(x.pairs) == 14 and "TRX/USDT:USDT" not in x.pairs  # excluded (e.g. delisting) coins still respected
+    assert {x.id for x in man.sleeves} >= {"weak"}  # other strategies keep trading
+    first = man.sleeves_for("BTC/USDT:USDT")[0]
+    assert first.id.startswith("core-")  # the core goes first on a shared coin
+    assert set(core[0].pairs) <= set(man.all_pairs())
+    # no strategy rows: never rotated, never retired, never a research candidate
+    assert not reg.q("SELECT id FROM strategies WHERE id LIKE 'core-%'")
+    assert life.import_core(root / "external", root / "hypotheses") == 3  # rebuilt from the files at every start
+
+
+def test_exploration_lane_is_split_between_active_and_precise_strategies(env):
+    """Owner, 2026-11-22: frequent (15m/1h) and rare precise (2h–12h) strategies are tested side
+    by side. Autopilot's slow strategies can no longer fill the whole lane."""
+    s, reg = env
+    s.lifecycle.max_exploration = 4
+    life = Lifecycle(s, reg)
+    for i in range(4):  # a lane full of slow autopilot strategies (the 21–22.11 situation)
+        _strategy(reg, f"slow{i}", "exploration", [f"S{i}/USDT:USDT"], score=1.0 + i, family=f"fam{i}")
+        reg.update("strategies", f"slow{i}", {"oos": {"autopilot": True, "timeframe": "6h"}, "stage_since": iso()})
+    reg.update("strategies", "slow0", {"live": {"trades": 12, "profit_factor": 1.5}})  # earned its place
+    for i in range(3):
+        _strategy(reg, f"fast{i}", "exploratory", [f"F{i}/USDT:USDT"], score=0.5 - i * 0.1, family=f"famf{i}")
+        reg.update("strategies", f"fast{i}", {"oos": {"timeframe": "1h"}})
+    life._fill_slots()
+    st = {r["id"]: r["stage"] for r in reg.strategies()}
+    lanes = [life.lane(r) for r in reg.strategies(("exploration",))]
+    assert lanes.count("active") == 2 and lanes.count("precise") == 2
+    assert st["fast0"] == st["fast1"] == "exploration" and st["fast2"] == "exploratory"  # active share is 2 of 4
+    assert st["slow0"] == "exploration"  # a sleeve with a live edge is never moved
+    assert st["slow1"] == "exploratory" and st["slow2"] == "exploratory" and st["slow3"] == "exploration"
+    # a strong precise candidate cannot push the active lane below its share
+    _strategy(reg, "slow9", "exploratory", ["S9/USDT:USDT"], score=9.0, family="fam9")
+    reg.update("strategies", "slow9", {"oos": {"autopilot": True, "timeframe": "12h"}})
+    life._fill_slots()
+    assert [life.lane(r) for r in reg.strategies(("exploration",))].count("active") == 2

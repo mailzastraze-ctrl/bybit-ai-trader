@@ -463,3 +463,16 @@ def status_line(reg, now=None) -> str:
             f"risk={h.get('risk_pct', '?')}% import_age={imp} disk=[{disk}] "
             f"forward=[{fw.get('verdict', '?')}, days {fw.get('forward_days', '?')}, benchmark trades {bench}, "
             f"P(top>bench) {vs}] flags={flags or 'none'}")
+
+
+def disk_line(reg) -> str:
+    """Hourly DISK log line: what fills the volume and what the janitor freed."""
+    d, j = reg.kv_get("disk") or {}, reg.kv_get("janitor") or {}
+    b = d.get("breakdown") or {}
+    top = ", ".join(f"{k} {v}" for k, v in list((b.get("folders_mb") or {}).items())[:5])
+    big = ", ".join(f"{x['file']} {x['mb']}" for x in (b.get("largest") or [])[:3])
+    tabs = ", ".join(f"{k} {v}" for k, v in list((d.get("tables_mb") or {}).items())[:4])
+    g = d.get("growth") or {}
+    return (f"DISK used={d.get('used_mb')}MB of {d.get('total_mb')}MB growth={g.get('mb_per_day')}MB/d "
+            f"full_in={g.get('days_to_full')}d folders_mb=[{top}] largest_mb=[{big}] registry_mb={b.get('registry')} "
+            f"tables_mb=[{tabs}] container={b.get('container')} janitor_freed_mb={j.get('freed_total_mb', 0)}")

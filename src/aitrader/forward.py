@@ -109,6 +109,15 @@ def book(reg: Registry, limit: int = BOOK_LIMIT, max_age_days: int = BOOK_MAX_AG
                         "bt_trades": oos.get("trades"), "variant": oos.get("variant") or st["family"],
                         "timeframe": oos.get("timeframe") or "1h", "external": True})
             seen.add(st["id"])
+    for h in (reg.kv_get("hypotheses") or {}).values():  # pre-registered hypotheses: shadow only, for good
+        if h.get("id") in seen or not h.get("params"):
+            continue
+        out.append({"id": h["id"], "kind": "hypothesis", "hypothesis": h.get("hypothesis"), "family": h["family"],
+                    "params": h["params"], "pairs": h.get("pairs") or [], "sides": h.get("sides") or ["long", "short"],
+                    "freeze": h["freeze"], "score": 0.0, "verdict": "shadow", "bt_pf": None, "bt_trades": None,
+                    "variant": f"{h.get('hypothesis')} {h['family']} {h.get('timeframe')}", "timeframe": h.get("timeframe") or "1h",
+                    "external": True})
+        seen.add(h["id"])
     for st in reg.q("SELECT id, experiment_id, family, params, pairs, sides, score, stage, oos, created FROM strategies "
                     "WHERE created >= ? AND stage != 'retired' ORDER BY created DESC", (since,)):
         if len(out) >= limit or st["id"] in seen or st.get("experiment_id") in seen or not st.get("params") or not st.get("pairs") \
@@ -223,6 +232,7 @@ def leaderboard(rows: list[dict], min_trades: int = 5) -> list[dict]:
         base[r["id"]] = {"id": r["id"], "variant": r.get("variant"), "family": r.get("family"), "trades": len(xs),
                          "pnl_pct": round(sum(xs) * 100, 3), "pf": _pf(xs), "score": r.get("score"),
                          "freeze": r.get("freeze"), "bt_pf": r.get("bt_pf"), "benchmark": bool(r.get("benchmark")),
+                         "hypothesis": r.get("hypothesis"),
                          "shrunk_bp": None, "lcb_bp": None, "p_pos": None}
         if len(xs) >= min_trades:
             m = sum(xs) / len(xs)
@@ -241,7 +251,9 @@ def summarize(results: list[dict], now=None, btc: pd.Series | None = None) -> di
     now = now or utcnow()
     rows_all = [r for r in results if r.get("ok", True)]
     bench = [r for r in rows_all if r.get("benchmark")]
-    rows = [r for r in rows_all if not r.get("benchmark")]  # the verdict judges the research output only
+    hyp = [r for r in rows_all if r.get("hypothesis")]
+    # the verdict judges the research output only (not the benchmark, not the pre-registered hypotheses)
+    rows = [r for r in rows_all if not r.get("benchmark") and not r.get("hypothesis")]
     rows.sort(key=lambda r: -float(r.get("score") or 0.0))
     q = max(1, len(rows) // 4)
     top, rest = rows[:q], rows[q:]
@@ -281,8 +293,19 @@ def summarize(results: list[dict], now=None, btc: pd.Series | None = None) -> di
     if g_bench and g_bench["trades"]:
         text += (f" Benchmark (fixed TSMOM): {g_bench['trades']} trades, PF {g_bench['pf']}, "
                  f"{g_bench['pnl_pct']}%; top quartile {g_top['pnl_pct']}%.")
+    hyps = {}
+    for name in sorted({r["hypothesis"] for r in hyp}):
+        legs = [r for r in hyp if r["hypothesis"] == name]
+        if name == "H1":  # its 30-day leg is the benchmark itself
+            legs = legs + bench
+        g = _group(legs, btc)
+        hfz = [parse_dt(r.get("freeze")) for r in legs if parse_dt(r.get("freeze")) and not r.get("benchmark")]
+        hyps[name] = {**g, "legs": sorted(r["id"] for r in legs),
+                      "forward_days": round((now - min(hfz)).total_seconds() / 86400, 1) if hfz else 0.0,
+                      "vs_benchmark": versus(legs, bench) if bench else None}
     return {"ts": iso(now), "verdict": verdict, "text": text, "rules": R, "t_needed": t_need, "forward_days": fwd_days,
             "top": g_top, "rest": g_rest, "all": g_all, "benchmark": g_bench, "vs_benchmark": vs, "families": fam,
+            "hypotheses": hyps,
             "rank_corr": rho,
             "n_strategies": len(rows), "best": board[:15], "worst": board[-5:][::-1] if len(board) > 15 else []}
 
@@ -339,8 +362,8 @@ def apply(reg: Registry, payload: dict) -> dict:
 def _promote(reg: Registry, rows: list[dict]) -> int:
     n, now = 0, iso()
     for r in rows:
-        if r.get("kind") == "strategy":
-            continue  # already a strategy with its own lifecycle
+        if r.get("kind") in ("strategy", "hypothesis") or r.get("hypothesis"):
+            continue  # a strategy has its own lifecycle; a pre-registered hypothesis is shadow only
         xs = [t[1] for t in r.get("trades", [])]
         pf = _pf(xs)
         if len(xs) < PROMOTE["trades"] or sum(xs) <= 0 or pf is None or pf < PROMOTE["pf"]:

@@ -2,6 +2,47 @@
 
 History of the system, newest first. `PROJECT_STATUS.md` holds only the current state.
 
+## 2026-11-22 (evening) — demo always in the market: TSMOM core, active/precise lanes, no daily stop on demo
+These are the owner's decisions; they change what trades on demo, not the evidence. The forward book still judges every configuration separately.
+
+**Why.** No entry signal from 21.11 18:00 UTC on (~20 h). All of the last 10 entries were shorts of trend strategies; after the market turned up they had nothing to enter. No limit blocked anything: the daily loss limit, the kill-switch and portfolio refusals never fired.
+
+**Demo core.**
+- The pre-registered TSMOM set on 4h, 15 coins, always in the manifest at exploration risk:
+  - `core-tsmom-4h-30d` (the benchmark's configuration);
+  - `core-tsmom-4h-12d` and `core-tsmom-4h-84d` (the H1 legs).
+- No strategy row, so no rotation or retirement. It goes first on a shared coin; its coins are kept on the whitelist; delisted coins are still excluded.
+- It is in a position whenever a coin's momentum is beyond ±0.5 σ.
+
+**Exploration lane split by trading frequency.**
+- Half the slots go to active strategies (15m/1h, frequent trades), half to precise ones (2h–12h, rare trades).
+- A candidate competes only within its lane. A lane below its share may take the slot of a sleeve from a lane above its share that has not earned its place (≥ 10 trades, PF ≥ 1.1).
+- Until now autopilot rules let the slow 2h–12h finds displace everything else.
+
+**Daily loss limit off on demo** (`daily_loss_limit` 0, env `DAILY_LOSS_LIMIT`). It must be on again before real money (PLAN stage D). The 25 % kill-switch stays as protection against a runaway defect.
+
+## 2026-11-22 (evening) — janitor, H1 in the shadow, 3D office off auto-deploy
+**Janitor: everything that grows now has an owner.** Owner's rule: the system must stay autonomous and delete its own garbage.
+- **Hourly:**
+  - rotated Freqtrade logs (keep 2);
+  - temp files older than 24 h;
+  - half-written atomic files older than 1 h;
+  - in remote research mode, leftovers of research that once ran on the server (jobs, downloaded candles, Freqtrade result folders older than 2 days; the folders themselves stay);
+  - the registry WAL is folded back.
+- **Daily:** events older than 30 days (7 when the disk is < 20 % free). Below 10 % free, also the charts of candidates no live strategy shows; verdicts and parameters stay.
+- **Lab:** keeps 14 days of batch files in the repository. Older ones stay in git history and in the live registry; in the tree they only slowed the server's start-up import and grew the image.
+- **Reporting:** an hourly `DISK` log line: folders, largest files, registry main/WAL/free, table sizes, the container's own disk and `/tmp`, and what the janitor freed so far.
+
+**H1 in the shadow** (`research/hypotheses/`, pre-registered):
+- legs: TSMOM 12 and 84 days on 4h; the 30-day leg is the benchmark. Same construction, nothing optimised, same 15 coins.
+- Forward book only: frozen at first import, never a strategy, never traded, never promoted.
+- Reported apart from the research verdict as `forward.hypotheses.H1`, with H1 vs the benchmark, and as a row in the control room.
+- 7/90 days as first planned fall outside the family's 4h limits (72–504 bars).
+
+**3D office off auto-deploy:**
+- `railway.json` no longer redeploys (and restarts the bot) for `src/aitrader/web/static/hq*`; such changes go live with the next approved deploy. On 22.11 two 3D deploys restarted trading.
+- `CLAUDE.md` gives every Claude session the observation-period rules.
+
 ## 2026-11-22 — final patch before 2–3 weeks of observation (reviewed with ChatGPT)
 Every trade now follows the strategy that opened it, and re-used out-of-sample data can no longer count as independent evidence.
 

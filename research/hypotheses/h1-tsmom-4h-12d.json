@@ -1,0 +1,60 @@
+{
+  "id": "h1-tsmom-4h-12d",
+  "hypothesis": "H1",
+  "shadow_only": true,
+  "registered": "2026-11-22",
+  "source": "Pre-registered hypothesis H1 (claude/PLAN.md §4), parameters fixed from the literature, not fitted to this data",
+  "family": "tsmom",
+  "timeframe": "4h",
+  "pairs": [
+    "BTC/USDT:USDT",
+    "ETH/USDT:USDT",
+    "SOL/USDT:USDT",
+    "XRP/USDT:USDT",
+    "DOGE/USDT:USDT",
+    "BNB/USDT:USDT",
+    "ADA/USDT:USDT",
+    "LINK/USDT:USDT",
+    "AVAX/USDT:USDT",
+    "LTC/USDT:USDT",
+    "BCH/USDT:USDT",
+    "DOT/USDT:USDT",
+    "TRX/USDT:USDT",
+    "NEAR/USDT:USDT",
+    "UNI/USDT:USDT"
+  ],
+  "sides": [
+    "long",
+    "short"
+  ],
+  "params": {
+    "lookback": 72,
+    "vol_len": 180,
+    "z_entry": 0.5,
+    "z_exit": 0.0,
+    "confirm_len": 20,
+    "exit_mode": 1,
+    "sl_atr": 4.0,
+    "lab_tp": 0.0,
+    "lab_trail": 0.0,
+    "max_hold": 500,
+    "conv_w": 0.0,
+    "htf_trend": 0,
+    "vol_regime": 0,
+    "session": 0,
+    "no_weekend": 0,
+    "event_guard": 0,
+    "tp_near": 0,
+    "event_lock": 0,
+    "vol_shock": 0
+  },
+  "preregistration": {
+    "hypothesis": "H1: crypto perpetuals trend at multi-week horizons (time-series momentum). An ensemble of the 12-day, 30-day and 84-day horizons is more robust than any single one. This file is the 12-day leg; the 30-day leg is the benchmark (research/external/benchmark-tsmom-4h-30d.json).",
+    "why_these_parameters": "Same construction as the benchmark (30-day volatility units, entry at 0.5, exit when momentum turns, 4xATR catastrophic stop, nothing optimised); only the lookback differs. 12 and 84 days are the documented 2-12 week TSMOM horizons and the family's limits on 4h candles (72-504 bars); 7 and 90 days, as first planned, fall outside them.",
+    "role": "Evidence: this id in the forward book, forward-tested on unseen data from registration, never re-optimised, never removed, reported apart from the research verdict. Since 2026-11-22 (owner's decision) the same configuration also trades on demo as the core sleeve core-tsmom-4h-12d; its demo results are reported separately and never replace the forward record.",
+    "decision_rule": "Forward v2 (claude/PLAN.md §6): judged at 90 days of forward data against the benchmark and BTC (alpha, Newey-West); 'works' needs the anytime-valid t threshold.",
+    "stop_rule": "Stop the hypothesis if its forward drawdown exceeds the 99th percentile of its backtest distribution; record it, do not tune it."
+  },
+  "core": true,
+  "core_id": "core-tsmom-4h-12d"
+}

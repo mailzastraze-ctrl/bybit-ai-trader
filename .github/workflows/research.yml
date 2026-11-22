@@ -266,6 +266,13 @@ jobs:
           mkdir -p research/imports research/reports
           cp work/export/imports/*.json research/imports/ && cp work/export/reports/*.md research/reports/
           cp work/export/ledger.json research/ledger.json
+          # keep 14 days of batch files in the tree; older ones stay in git history and in the live
+          # registry, and only slow the server's start-up import and grow the image
+          CUT=$(date -u -d '14 days ago' +%Y%m%d)
+          for f in research/imports/b*.json research/reports/b*.md; do
+            d=$(basename "$f" | sed -n 's/^b\([0-9]\{8\}\)-.*/\1/p')
+            if [ -n "$d" ] && [ "$d" -lt "$CUT" ]; then git rm -q --ignore-unmatch "$f" || true; fi
+          done
           [ -f work/export/screen.json ] && cp work/export/screen.json research/screen.json || true
           cat work/export/reports/*.md >> "$GITHUB_STEP_SUMMARY"
           git config user.name "aitrader-research-lab"

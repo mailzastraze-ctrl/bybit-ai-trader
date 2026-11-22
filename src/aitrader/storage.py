@@ -5,6 +5,11 @@ What grows without bound otherwise:
     detail, per-pair stats, ~8–10 KB each), 8–9 runs a day;
   * Freqtrade's log: its rotating handler keeps 10 × 10 MB.
 
+Since 2026-11-22 the janitor (bottom of this file) owns everything else that grows: hourly
+rotated logs, stale temp files, half-written atomic files, research leftovers (remote mode),
+the WAL; daily events (30 days, 7 on a low disk); on a very low disk candidates' charts too.
+The lab keeps 14 days of batch files in the repository (research.yml).
+
 What this does (daily, from the manager's housekeeping):
   * slims *rejected* experiments older than SLIM_AFTER_DAYS: drops the equity curve, the
     per-pair and exit-reason tables and the per-fold parameter detail. Everything the
@@ -132,8 +137,17 @@ def disk_breakdown(data_dir: Path, registry_path: Path, top: int = 8) -> dict:
             reg["free_mb"] = round(c.execute("PRAGMA freelist_count").fetchone()[0] * page / 2**20, 1)
     except sqlite3.Error:
         pass
+    import tempfile
+    tmp = sum(_size(Path(dp) / n) for dp, _d, ns in os.walk(tempfile.gettempdir()) for n in ns)
+    try:
+        root = shutil.disk_usage("/")
+        container = {"used_mb": round(root.used / 2**20), "free_mb": round(root.free / 2**20),
+                     "tmp_mb": round(tmp / 2**20, 1)}
+    except OSError:
+        container = {"tmp_mb": round(tmp / 2**20, 1)}
     return {"ts": iso(), "folders_mb": {k: round(v / 2**20, 1) for k, v in sorted(folders.items(), key=lambda kv: -kv[1])},
-            "largest": [{"file": f, "mb": round(s / 2**20, 1)} for s, f in files[:top]], "registry": reg}
+            "largest": [{"file": f, "mb": round(s / 2**20, 1)} for s, f in files[:top]], "registry": reg,
+            "container": container}
 
 
 def table_sizes(registry_path: Path) -> dict[str, float]:
@@ -210,3 +224,133 @@ def disk_tick(reg: Registry, data_dir: Path, registry_path: Path, now=None) -> d
 def parse_iso(v):
     from aitrader.util import parse_dt
     return parse_dt(v) if v else None
+
+
+# ---------------------------------------------------------------------------- janitor
+# Everything that grows by itself has an owner here, so the system can run for months
+# without anyone cleaning up (owner's rule, 2026-11-22: "мусор нужно удалять").
+#   hourly: rotated logs, stale temp files, the registry WAL;
+#   daily (housekeeping): old events, slimmed research detail, the signal journal, VACUUM;
+#   remote research mode: leftovers of research that used to run on the server;
+#   low disk: everything above, harder.
+TMP_MAX_AGE_H = 24
+LEFTOVER_AGE_D = 2
+EVENTS_KEEP_D = 30
+EVENTS_KEEP_LOW_D = 7
+VERY_LOW_FREE = 0.10
+
+
+def _delete_old_files(root: Path, max_age_s: float, now_ts: float, keep_root: bool = True) -> tuple[int, int]:
+    """Delete regular files older than `max_age_s` under `root`, then empty sub-folders.
+    Never follows symlinks; only files this process owns. Returns (files, bytes)."""
+    n = b = 0
+    root = Path(root)
+    if not root.is_dir():
+        return 0, 0
+    uid = os.getuid() if hasattr(os, "getuid") else None
+    for dirpath, _dirs, filenames in os.walk(root, topdown=False, followlinks=False):
+        for name in filenames:
+            p = Path(dirpath) / name
+            try:
+                st = p.lstat()
+            except OSError:
+                continue
+            if p.is_symlink() or not p.is_file() or (uid is not None and st.st_uid != uid):
+                continue
+            if now_ts - st.st_mtime < max_age_s:
+                continue
+            try:
+                p.unlink()
+                n += 1
+                b += st.st_size
+            except OSError:
+                pass
+        d = Path(dirpath)
+        if d != root or not keep_root:
+            try:
+                d.rmdir()  # only succeeds when empty
+            except OSError:
+                pass
+    return n, b
+
+
+def clean_tmp(tmp_dir: Path | None = None, max_age_h: float = TMP_MAX_AGE_H, now_ts: float | None = None) -> dict:
+    """Stale temp files (the container's /tmp: Freqtrade, pandas, registry snapshots)."""
+    import tempfile
+    import time
+    n, b = _delete_old_files(Path(tmp_dir or tempfile.gettempdir()), max_age_h * 3600, now_ts or time.time())
+    return {"files": n, "mb": round(b / 2**20, 1)}
+
+
+def clean_stale_atomic(state_dir: Path, max_age_s: float = 3600, now_ts: float | None = None) -> int:
+    """Half-written `.name.xxxx.tmp` files of atomic writes interrupted by a restart."""
+    import time
+    now_ts = now_ts or time.time()
+    n = 0
+    for p in Path(state_dir).glob(".*.tmp"):
+        try:
+            if p.is_file() and not p.is_symlink() and now_ts - p.stat().st_mtime > max_age_s:
+                p.unlink()
+                n += 1
+        except OSError:
+            pass
+    return n
+
+
+def research_leftovers(s) -> list[Path]:
+    """Folders only local research writes to. With research on GitHub (mode `remote`) nothing
+    current lives there: hyperopt/backtest jobs, downloaded candles, Freqtrade result folders."""
+    if getattr(s.research, "mode", "local") != "remote":
+        return []
+    u = s.user_data
+    return [s.jobs_dir, u / "data", u / "backtest_results", u / "hyperopt_results", u / "plot"]
+
+
+def clean_research_leftovers(s, age_d: float = LEFTOVER_AGE_D, now_ts: float | None = None) -> dict:
+    import time
+    n = b = 0
+    for d in research_leftovers(s):
+        fn, fb = _delete_old_files(d, age_d * 86400, now_ts or time.time())
+        n, b = n + fn, b + fb
+    return {"files": n, "mb": round(b / 2**20, 1)}
+
+
+def janitor_hourly(reg: Registry, s, now=None) -> dict:
+    """Cheap, safe, every hour: rotated logs, stale temp files, research leftovers (remote
+    mode only), and the registry WAL folded back. Returns what it freed (kv `janitor`)."""
+    now = now or utcnow()
+    out = {"ts": iso(now), "logs": trim_logs(s.user_data / "logs")}
+    out["tmp"] = clean_tmp()
+    out["leftovers"] = clean_research_leftovers(s)
+    out["stale_atomic"] = clean_stale_atomic(s.state_dir)
+    s.ensure_dirs()  # the folders themselves stay (Freqtrade and the manager expect them)
+    checkpoint_wal(s.registry_path)
+    prev = reg.kv_get("janitor") or {}
+    freed = float(out["tmp"]["mb"]) + float(out["leftovers"]["mb"])
+    out["freed_total_mb"] = round(float(prev.get("freed_total_mb") or 0.0) + freed, 1)
+    reg.kv_set("janitor", out)
+    if freed >= 50:
+        reg.event("manager", f"janitor freed {freed:.0f} MB (temp files, old research leftovers)")
+    return out
+
+
+def prune_registry(reg: Registry, free_pct: float | None, now=None) -> dict:
+    """Daily: events older than 30 days (7 when the disk is low); when the disk is very low,
+    also the charts of every experiment that no live strategy shows."""
+    now = now or utcnow()
+    low = free_pct is not None and free_pct < LOW_FREE
+    very_low = free_pct is not None and free_pct < VERY_LOW_FREE
+    keep = EVENTS_KEEP_LOW_D if low else EVENTS_KEEP_D
+    with reg.conn() as c:
+        ev = c.execute("DELETE FROM events WHERE ts < ?", (iso(now - timedelta(days=keep)),)).rowcount
+        c.execute("DELETE FROM equity WHERE ts < ?", (iso(now - timedelta(days=365))[:16],))
+    hard = 0
+    if very_low:  # last resort before trading could stop: candidates' charts too (verdicts, params stay)
+        alive = {r["experiment_id"] for r in reg.q("SELECT experiment_id FROM strategies WHERE stage NOT IN "
+                                                   "('retired','rejected')") if r.get("experiment_id")}
+        for r in reg.q("SELECT id, result FROM experiments WHERE status='done'"):
+            res = r.get("result")
+            if isinstance(res, dict) and not res.get("slim") and r["id"] not in alive:
+                reg.update("experiments", r["id"], {"result": slim_result(res)})
+                hard += 1
+    return {"events_deleted": ev, "events_keep_days": keep, "candidates_slimmed": hard}

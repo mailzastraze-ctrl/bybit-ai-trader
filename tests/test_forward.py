@@ -200,3 +200,31 @@ def test_strategy_cards_explain_every_strategy_in_russian(env):
     ap = next(c for c in out["cards"] if c.get("autopilot"))
     assert ap["oos"]["profit_factor"] == 2.66 and ap["oos"]["total_return"] == 1.925 and len(ap["autopilot"]["checks"]) == 7
     assert out["autopilot"]["swing_survivors"] == 2 and ap["pairs"] == ["BTC/USDT:USDT", "ETH/USDT:USDT"]
+
+
+def test_preregistered_hypothesis_is_shadow_only_and_reported_apart(env):
+    """H1 legs (research/hypotheses): forward book from their first import, frozen across
+    restarts, never a strategy (no walk-forward, demo or promotion), outside the research verdict."""
+    from aitrader.lifecycle import Lifecycle
+    s, reg = env
+    life = Lifecycle(s, reg)
+    hdir = Path(__file__).resolve().parents[1] / "research" / "hypotheses"
+    assert life.import_hypotheses(hdir) == 2
+    first = dict(reg.kv_get("hypotheses"))
+    assert life.import_hypotheses(hdir) == 0 and reg.kv_get("hypotheses") == first  # freeze kept on restart
+    assert not reg.q("SELECT id FROM strategies WHERE id LIKE 'h1-%'")  # never a tradable strategy
+    legs = {e["id"]: e for e in forward.book(reg) if e.get("kind") == "hypothesis"}
+    assert set(legs) == {"h1-tsmom-4h-12d", "h1-tsmom-4h-84d"}
+    assert legs["h1-tsmom-4h-12d"]["params"]["lookback"] == 72 and legs["h1-tsmom-4h-84d"]["params"]["lookback"] == 504
+    assert all(e["timeframe"] == "4h" and e["hypothesis"] == "H1" for e in legs.values())
+    # research rows decide the verdict; H1 (+ the benchmark as its 30-day leg) is reported apart
+    rows = _rows(8, 0.002, 0.0)
+    hyp = [{**r, "id": hid, "hypothesis": "H1", "score": 0.0} for r, hid in zip(_rows(2, 0.01, 0.01, seed=5), sorted(legs), strict=True)]
+    bench = [{**_rows(1, -0.001, -0.001, seed=7)[0], "id": "benchmark-tsmom-4h-30d", "benchmark": True}]
+    plain = forward.summarize(rows + bench)
+    out = forward.summarize(rows + bench + hyp)
+    assert out["top"] == plain["top"] and out["verdict"] == plain["verdict"]
+    h1 = out["hypotheses"]["H1"]
+    assert h1["strategies"] == 3 and "benchmark-tsmom-4h-30d" in h1["legs"] and h1["pnl_pct"] > 0
+    # a forward winner that is a hypothesis is never promoted to demo trading
+    assert forward._promote(reg, hyp) == 0

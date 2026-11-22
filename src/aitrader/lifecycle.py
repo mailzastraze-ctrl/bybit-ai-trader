@@ -112,6 +112,77 @@ class Lifecycle:
             n += 1
         return n
 
+    # ------------------------------------------------------------------ the demo core
+    CORE_SCORE = 10.0  # first among exploration sleeves on a shared coin
+
+    def import_core(self, *directories) -> int:
+        """The permanent demo core (owner's decision 2026-11-22: "the best strategies must always
+        be in the market"): pre-registered configurations marked `"core": true` (the TSMOM
+        benchmark and the H1 legs). They always trade their coins at exploration risk – no
+        rotation, no retirement, not a research candidate. The forward book still judges the
+        same configurations separately, so demo trading never touches that evidence. The files
+        are the source of truth: rebuilt at every start."""
+        import json
+        from pathlib import Path
+        core = {}
+        for directory in directories:
+            for f in sorted(Path(directory).glob("*.json")):
+                try:
+                    d = json.loads(f.read_text())
+                    fam = FAMILIES[d["family"]]
+                except (OSError, json.JSONDecodeError, KeyError):
+                    continue
+                if not d.get("core") or not d.get("core_id"):
+                    continue
+                core[d["core_id"]] = {"id": d["core_id"], "source": d.get("id"), "family": fam.name,
+                                      "params": fam.normalize(d.get("params")), "pairs": d.get("pairs") or [],
+                                      "sides": d.get("sides") or ["long", "short"],
+                                      "timeframe": d.get("timeframe") or "1h"}
+        if core != (self.reg.kv_get("core") or {}):
+            self.reg.kv_set("core", core)
+            self.reg.event("lifecycle", f"demo core: {', '.join(sorted(core)) or 'none'} – always trading their coins "
+                           "at exploration risk", data={"core": sorted(core)})
+        return len(core)
+
+    def core_sleeves(self, excluded: set[str], scale: float = 1.0) -> list[Sleeve]:
+        out = []
+        for c in (self.reg.kv_get("core") or {}).values():
+            pairs = [p for p in c.get("pairs") or [] if p not in excluded]
+            if not pairs:
+                continue
+            out.append(Sleeve(id=c["id"], family=c["family"], params=c["params"], pairs=pairs, stage="exploration",
+                              risk=round(self.risk_for("exploration") * scale, 6), leverage=self.lc.leverage,
+                              sides=c.get("sides") or ["long", "short"], score=self.CORE_SCORE,
+                              timeframe=c.get("timeframe") or "", note="core"))
+        return out
+
+    def import_hypotheses(self, directory) -> int:
+        """Pre-registered hypotheses (research/hypotheses/*.json, e.g. H1 TSMOM legs): shadow
+        only. They go into the forward book from their first import (the freeze time is kept
+        across restarts) and are never a strategy here – no walk-forward, no demo, no promotion."""
+        import json
+        from pathlib import Path
+        known = self.reg.kv_get("hypotheses") or {}
+        n = 0
+        for f in sorted(Path(directory).glob("*.json")):
+            try:
+                d = json.loads(f.read_text())
+                fam = FAMILIES[d["family"]]
+            except (OSError, json.JSONDecodeError, KeyError):
+                continue
+            if not d.get("shadow_only") or not d.get("id") or d["id"] in known:
+                continue
+            known[d["id"]] = {"id": d["id"], "hypothesis": d.get("hypothesis") or d["id"], "family": fam.name,
+                              "params": fam.normalize(d.get("params")), "pairs": d.get("pairs") or [],
+                              "sides": d.get("sides") or ["long", "short"], "timeframe": d.get("timeframe") or "1h",
+                              "freeze": iso(), "registered": d.get("registered"), "source": d.get("source")}
+            self.reg.event("research", f"{d['id']}: pre-registered hypothesis {known[d['id']]['hypothesis']} enters the "
+                           "forward book (shadow only, never traded)", data={"hypothesis": d["id"]})
+            n += 1
+        if n:
+            self.reg.kv_set("hypotheses", known)
+        return n
+
     def import_batch(self, data: dict, announce: bool = True) -> int:
         """One research batch (GitHub research lab or offline file) → candidates."""
         n = 0
@@ -281,14 +352,16 @@ class Lifecycle:
             self.reg.set_stage(cand["id"], "incubation", "validated by research gates → forward test")
             n_inc += 1
         n_exp = len(self.reg.strategies(("exploration",)))
-        # queue by evidence: forward-proven first, then autopilot, then research score
+        # queue by evidence: forward-proven first, then autopilot, then research score – within each
+        # frequency lane, so rare precise strategies and frequent active ones are tested side by side
         exploratory = sorted(self.reg.strategies(("exploratory",)), key=lambda c: self.evidence_rank(c), reverse=True)
         for cand in exploratory:
             if not self.tradable_tf(cand) or self._family_full(cand):
                 continue
-            if n_exp >= lc.max_exploration and not self._displace_for(cand):
-                break
-            self.reg.set_stage(cand["id"], "exploration", "relaxed gates passed → tiny-risk live experiment")
+            lane = self.lane(cand)
+            if n_exp >= lc.max_exploration and not self._displace_for(cand, lane):
+                continue  # this lane is full of stronger or still-young sleeves; the other lane may still move
+            self.reg.set_stage(cand["id"], "exploration", f"relaxed gates passed → tiny-risk live experiment ({lane} lane)")
             n_exp = len(self.reg.strategies(("exploration",)))
         # Always-on learning: keep the exploration lane busy with the best recent near-misses
         # (profitable out-of-sample but failed a strict gate) so live evidence keeps flowing.
@@ -349,15 +422,49 @@ class Lifecycle:
             cls = 1
         return (cls, float(st.get("score") or 0.0))
 
-    def _displace_for(self, cand: dict) -> bool:
+    ACTIVE_TF = ("15m", "1h")
+
+    def lane(self, st: dict) -> str:
+        """Frequency lane: `active` (15m/1h candles, frequent trades) or `precise` (2h–12h)."""
+        return "active" if self.strategy_tf(st) in self.ACTIVE_TF else "precise"
+
+    def lane_quota(self, lane: str) -> int:
+        active = round(self.lc.max_exploration * self.lc.explore_active_share)
+        return active if lane == "active" else self.lc.max_exploration - active
+
+    def lane_room(self, lane: str, members: list[dict]) -> bool:
+        """Does `lane` hold fewer sleeves than its share of the exploration lane?"""
+        return sum(1 for r in members if self.lane(r) == lane) < self.lane_quota(lane)
+
+    def _displace_for(self, cand: dict, lane: str | None = None) -> bool:
         """Rotation by evidence. A full exploration lane makes room for a stronger candidate by
         moving out a sleeve that holds its slot without evidence: a placeholder, a sleeve with
         < 3 trades after `rotate_idle_days`, or (for an autopilot candidate) an ordinary sleeve
         without a live edge. Sleeves that earned their place live (≥ 10 trades, PF ≥ 1.1) are
-        never moved. A rotated research candidate goes back to the queue, it did not fail."""
+        never moved. A rotated research candidate goes back to the queue, it did not fail.
+
+        Frequency lanes (2026-11-22): a candidate competes with sleeves of its own lane. A lane
+        below its share may also take the slot of a sleeve from the other lane that is above its
+        share and has not earned its place – so neither the rare precise strategies nor the
+        frequent active ones can crowd the other out."""
         mine = self.evidence_rank(cand)
+        members = self.reg.strategies(("exploration",))
+        lane = lane or self.lane(cand)
+        if self.lane_room(lane, members):
+            other = "precise" if lane == "active" else "active"
+            over = [r for r in members if self.lane(r) == other
+                    and not (int((r.get("live") or {}).get("trades", 0) or 0) >= 10
+                             and (r.get("live") or {}).get("profit_factor", 0) >= 1.1)]
+            over_quota = sum(1 for r in members if self.lane(r) == other) > self.lane_quota(other)
+            if over and over_quota:
+                r = min(over, key=lambda x: (self.evidence_rank(x), -_days_since(x.get("stage_since"))))
+                self.reg.set_stage(r["id"], "exploratory" if not self._near_miss(r) else "retired",
+                                   f"rotated out: {other} lane above its share, slot given to {cand['id']} ({lane} lane)")
+                return True
         victims = []
-        for r in self.reg.strategies(("exploration",)):
+        for r in members:
+            if self.lane(r) != lane:
+                continue  # only sleeves of the candidate's own lane compete for its slot
             live = r.get("live") or {}
             n = int(live.get("trades", 0) or 0)
             if n >= 10 and live.get("profit_factor", 0) >= 1.1:
@@ -509,7 +616,8 @@ class Lifecycle:
         # Pairs may be shared by up to `max_sleeves_per_pair` independent strategies (more
         # signals, more forward evidence); the whitelist is capped to protect the bot's memory.
         per_pair: dict[str, int] = {}
-        union: set[str] = set()
+        core = self.core_sleeves(excluded, scale)
+        union: set[str] = {p for c in core for p in c.pairs}  # the core's coins are always on the whitelist
         sleeves: list[Sleeve] = []
         for r in rows:
             mine: list[str] = []
@@ -534,6 +642,7 @@ class Lifecycle:
                                                 if r["stage"] in ("production", "incubation", "eligible") else 1.0), 6),
                                   leverage=self.lc.leverage, sides=r.get("sides") or ["long", "short"],
                                   score=float(r.get("score") or 0.0), timeframe=self.strategy_tf(r)))
+        sleeves += core
         # retired sleeves that still hold positions keep managing them (no new entries)
         live_ids = {s.id for s in sleeves}
         for t in open_trades:

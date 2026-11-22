@@ -8,7 +8,9 @@
       "ft/**",
       "config/**",
       "Dockerfile",
-      "pyproject.toml"
+      "pyproject.toml",
+      "!src/aitrader/web/static/hq*",
+      "!src/aitrader/web/static/hq/**"
     ]
   },
   "deploy": {

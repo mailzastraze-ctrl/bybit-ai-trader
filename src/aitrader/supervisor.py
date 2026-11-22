@@ -165,7 +165,7 @@ def main() -> None:
             subprocess.run([py, "-m", "aitrader.selftest", "240"], env=os.environ.copy())
         threading.Thread(target=_selftest, daemon=True).start()
 
-    last_status = 0.0
+    last_status = last_disk_line = 0.0
     while not stopping.is_set():
         now = time.time()
         if now - last_status > 300:
@@ -179,6 +179,9 @@ def main() -> None:
                 log.info("STATUS heartbeats=%s universe=%d experiments=%s strategies=%s closed_trades=%s rss_mb=%s",
                          hb, len(u.get("pairs") or []), ex, st, nt, _rss_by_proc(procs))
                 log.info("%s", observe.status_line(reg))  # positions, stops, risk, lab, disk, forward, red flags
+                if now - last_disk_line > 3600:
+                    last_disk_line = now
+                    log.info("%s", observe.disk_line(reg))  # what fills the volume, what the janitor freed
             except Exception as e:  # noqa: BLE001
                 log.warning("status line failed: %s", e)
         for p in procs:
