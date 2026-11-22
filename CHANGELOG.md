@@ -2,6 +2,9 @@
 
 History of the system, newest first. `PROJECT_STATUS.md` holds only the current state.
 
+## 2026-11-22 (audit) — forward records outlive the 60-day book, so the 90-day decision can happen
+A strategy leaves the forward book (and is no longer re-tested) 60 days after its freeze. Until now its forward record was deleted at that moment. `forward_days` (now minus the oldest freeze among the records) therefore never passed 60, while the pre-registered final rule needs 90 days: the verdict was stuck at "early read" for good, and the 19.02.2027 decision could never fire. Records now stay for 120 days after their freeze. Re-testing is unchanged (60 days, ≤ 160 strategies), so there is no extra lab load. Tests: book life at 59/60/61/90/100 days and the 90-day record in `tests/test_forward.py`.
+
 ## 2026-11-22 (evening) — demo always in the market: TSMOM core, active/precise lanes, no daily stop on demo
 These are the owner's decisions; they change what trades on demo, not the evidence. The forward book still judges every configuration separately.
 

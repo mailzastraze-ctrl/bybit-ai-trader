@@ -228,3 +228,47 @@ def test_preregistered_hypothesis_is_shadow_only_and_reported_apart(env):
     assert h1["strategies"] == 3 and "benchmark-tsmom-4h-30d" in h1["legs"] and h1["pnl_pct"] > 0
     # a forward winner that is a hypothesis is never promoted to demo trading
     assert forward._promote(reg, hyp) == 0
+
+
+# ---------------------------------------------------------------- audit 22.11: 60-day book vs 90-day decision
+def _forward_result(eid, days_ago, per_day=2, edge=0.002, seed=3):
+    """A lab forward result for a strategy frozen `days_ago` days ago, trading every day since
+    (up to its 60-day book life)."""
+    rng, now = random.Random(seed), utcnow()
+    life = min(days_ago, forward.BOOK_MAX_AGE_DAYS)
+    trades = [[iso(now - timedelta(days=days_ago - d))[:16], rng.gauss(edge, 0.002)]
+              for d in range(life) for _ in range(per_day)]
+    return {"id": eid, "score": 1.0, "freeze": iso(now - timedelta(days=days_ago)), "trades": trades, "ok": True,
+            "variant": "v"}
+
+
+@pytest.mark.parametrize("hours, in_book", [(59 * 24, True), (60 * 24 - 1, True), (60 * 24 + 1, False),
+                                             (61 * 24, False), (90 * 24, False), (100 * 24, False)])
+def test_book_life_is_60_days(env, hours, in_book):
+    s, reg = env
+    _exp(reg, "x1", 0.5, hours_ago=hours)
+    assert bool(forward.book(reg)) is in_book
+
+
+def test_forward_record_outlives_the_60_day_book_so_the_90_day_decision_can_happen(env):
+    """Strategies leave the book (no more re-tests) at 60 days, but their forward record must
+    stay: the pre-registered decision needs 90 days of forward data. Before the fix every result
+    older than 60 days was deleted, so `forward_days` never exceeded 60 and the verdict was stuck
+    at 'early read' forever (the 19.02.2027 decision could never fire)."""
+    s, reg = env
+    ages = [100, 95, 90, 80, 61, 59, 30, 10]
+    for i, a in enumerate(ages):
+        _exp(reg, f"x{i}", 1.0 - i * 0.1, hours_ago=a * 24)
+    payload = {"results": [{**_forward_result(f"x{i}", a, seed=i), "score": 1.0 - i * 0.1} for i, a in enumerate(ages)]}
+    forward.apply(reg, payload)
+    kept = reg.kv_get("forward_results")
+    assert set(kept) == {f"x{i}" for i in range(len(ages))}  # every record kept, re-tested or not
+    summ = reg.kv_get("forward")
+    assert summ["forward_days"] >= 90  # was capped at 60: the decision rule could never be reached
+    assert summ["verdict"] not in ("too_early",)
+    assert len(forward.book(reg)) == 3  # only the young ones are still re-tested: no extra lab load
+    # records far past any decision window are dropped, so the store stays bounded
+    payload2 = {"results": [_forward_result("x99", 200)]}
+    _exp(reg, "x99", 0.1, hours_ago=200 * 24)
+    forward.apply(reg, payload2)
+    assert "x99" not in reg.kv_get("forward_results")

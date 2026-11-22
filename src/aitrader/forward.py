@@ -57,6 +57,11 @@ BOOK_MAX_AGE_DAYS = 60
 # accumulates. Before 2026-11-21 the book was simply the newest 120 experiments: ~2 lab runs,
 # so every strategy was forward-tested for only a few hours and then dropped out.
 BOOK_KEEP = 100
+# A strategy is re-tested for its 60-day book life, but its forward record is kept much longer:
+# the pre-registered decision needs `final_days` (90) of forward data. Until 2026-11-22 results
+# were deleted when a strategy left the book, so `forward_days` could never pass 60 and the
+# verdict could never reach its final rule. Records are dropped only after this many days.
+RECORD_KEEP_DAYS = 120  # 90-day decision + a month of margin; bounded store
 RULES = {"version": 2, "early_trades": 100, "early_days": 7, "final_trades": 200, "final_days": 90,
          "pf_works": 1.15, "t_works": EV.T_FLOOR, "t_rule": "anytime-valid (normal mixture, ρ = 90 days, α = 5 %)"}
 PROMOTE = {"trades": 20, "pf": 1.3}
@@ -346,7 +351,11 @@ def apply(reg: Registry, payload: dict) -> dict:
         if r.get("ok", True):
             prev[r["id"]] = r
     live_ids = {e["id"] for e in book(reg, limit=10_000)}
-    prev = {k: v for k, v in prev.items() if k in live_ids}
+    keep_since = utcnow() - timedelta(days=RECORD_KEEP_DAYS)
+    # strategies still in the book, and the records of those that left it (no longer re-tested,
+    # their forward trades up to then stay evidence) until RECORD_KEEP_DAYS after their freeze
+    prev = {k: v for k, v in prev.items()
+            if k in live_ids or ((parse_dt(v.get("freeze")) or keep_since) > keep_since)}
     reg.kv_set("forward_results", prev)
     summ = summarize(list(prev.values()), btc=EV.btc_returns(reg.kv_get("btc_daily")) if reg.kv_get("btc_daily") else None)
     summ["persistence"] = persistence(reg)
