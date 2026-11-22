@@ -61,7 +61,10 @@ def test_api_json_is_gzipped_static_is_not(client):
     a = ("admin", "pw")
     r = client.get("/api/events?limit=300", auth=a, headers={"Accept-Encoding": "gzip"})
     assert r.status_code == 200 and r.headers.get("content-encoding") == "gzip" and len(r.json()) > 0
+    # JS/CSS are gzipped since ae01b3d (they are re-validated on every load); other static files are not
     r = client.get("/static/control.js", headers={"Accept-Encoding": "gzip"})
+    assert r.status_code == 200 and r.headers.get("content-encoding") == "gzip"
+    r = client.get("/static/explorer.html", headers={"Accept-Encoding": "gzip"})
     assert r.status_code == 200 and r.headers.get("content-encoding") is None
     assert iso()  # registry + app share the test data dir
 
