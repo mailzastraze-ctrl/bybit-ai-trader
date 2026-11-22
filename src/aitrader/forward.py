@@ -38,6 +38,15 @@ apart (`calendar_days`) and decides nothing. The daily series weighs equally the
 test that day (a day under test without trades is a 0, a strategy not yet frozen or no longer
 tested is absent), and the benchmark is compared on the same observed days only.
 
+Data source (audit 2026-11-22): the lab falls back to OKX candles for a whole run when the Bybit
+relay is unavailable (research/batch.py, lab-prep). Such results are not Bybit evidence: they never
+replace a Bybit record and do not move `tested_until`, so the clock stops for that run
+(forward3.accept_source; a record without `exchange` is accepted only from runs of the lab code
+before the stamp existed). `last_accepted` is when Bybit forward evidence last arrived.
+
+v3 (docs/DECISIONS.md): the lab also sends each strategy's value per complete UTC day; forward3
+records it append-only, with the Q1 membership decided at the freeze. This v2 verdict is unchanged.
+
 Objective comparison (does not change the verdict):
   * benchmark – a pre-registered fixed TSMOM configuration (research/external/benchmark-*.json)
     stays in the book permanently and is reported next to Q1: research must beat it;
@@ -51,6 +60,7 @@ positive) become `exploratory` candidates and can receive small demo capital.
 
 from __future__ import annotations
 
+import logging
 import math
 from collections import defaultdict
 from datetime import datetime, timedelta
@@ -58,8 +68,11 @@ from datetime import datetime, timedelta
 import pandas as pd
 
 from aitrader import evidence as EV
+from aitrader import forward3 as F3
 from aitrader.registry import Registry
 from aitrader.util import iso, parse_dt, utcnow
+
+log = logging.getLogger(__name__)
 
 BOOK_LIMIT = 160
 BOOK_MAX_AGE_DAYS = 60
@@ -108,8 +121,12 @@ def book(reg: Registry, limit: int = BOOK_LIMIT, max_age_days: int = BOOK_MAX_AG
                      "bt_pf": oos.get("profit_factor"), "bt_trades": oos.get("trades"),
                      "variant": res.get("variant") or r["family"],
                      "timeframe": res.get("timeframe") or spec.get("timeframe") or "1h"})
-    promising = {b["id"] for b in ((reg.kv_get("forward") or {}).get("best") or [])
-                 if (b.get("p_pos") or 0) >= 0.8 and (b.get("trades") or 0) >= 10}
+    # which forward-promising strategies keep their place: the set from two days ago, so whether a
+    # strategy is observed on a day never depends on that day's own results (DECISIONS.md, condition 1);
+    # the current set only until the first lagged record exists (the first days after 23.11)
+    promising = F3.lagged_promising(reg)
+    if promising is None:
+        promising = promising_ids((reg.kv_get("forward") or {}).get("best") or [])
     kept = sorted((e for e in exps if e["verdict"] in ("validated", "exploratory") or e["id"] in promising),
                   key=lambda e: (e["id"] not in promising, -e["score"]))[:min(keep, limit)]
     kept_ids = {e["id"] for e in kept}
@@ -147,6 +164,10 @@ def book(reg: Registry, limit: int = BOOK_LIMIT, max_age_days: int = BOOK_MAX_AG
                     "bt_trades": oos.get("trades"), "variant": oos.get("variant") or st["family"],
                     "timeframe": oos.get("timeframe") or "1h", "external": bool(oos.get("external"))})
     return out
+
+
+def promising_ids(best: list[dict]) -> set[str]:
+    return {b["id"] for b in best if (b.get("p_pos") or 0) >= 0.8 and (b.get("trades") or 0) >= 10}
 
 
 # ---------------------------------------------------------------------------- stats (pure)
@@ -399,13 +420,20 @@ def apply(reg: Registry, payload: dict) -> dict:
     """Store the lab's forward results, recompute the verdict, promote forward winners."""
     results = payload.get("results") or []
     prev = reg.kv_get("forward_results") or {}
+    old_summ = reg.kv_get("forward") or {}
     now = utcnow()
+    other = [r for r in results if not F3.accept_source(r, now)]
+    results = [r for r in results if F3.accept_source(r, now)]
+    if other:
+        src = sorted({str(r.get("exchange") or "unknown") for r in other})
+        reg.event("research", f"forward test: {len(other)} results on {'/'.join(src)} data ignored "
+                  "(not Bybit evidence; the clock stops for this run)", "warning")
     for r in results:  # every run re-tests from the freeze time, so the newest result supersedes
         if r.get("ok", True):
             # observed up to this run (the lab stamps its own test time; the import time otherwise)
             until = parse_dt(r.get("tested_until"))
             r["tested_until"] = iso(min(until, now) if until else now)
-            prev[r["id"]] = r
+            prev[r["id"]] = {k: v for k, v in r.items() if k != "v3"}  # v3 lives in its own ledger
     live_ids = {e["id"] for e in book(reg, limit=10_000)}
     keep_since = now - timedelta(days=RECORD_KEEP_DAYS)
     # strategies still in the book, and the records of those that left it (no longer re-tested,
@@ -416,12 +444,24 @@ def apply(reg: Registry, payload: dict) -> dict:
     summ = summarize(list(prev.values()), now=now, btc=EV.btc_returns(reg.kv_get("btc_daily")) if reg.kv_get("btc_daily") else None)
     summ["persistence"] = persistence(reg)
     summ["errors"] = sum(1 for r in results if not r.get("ok", True))
-    old = (reg.kv_get("forward") or {}).get("verdict")
+    accepted = [r for r in results if r.get("ok", True)]
+    summ["ignored_other_source"] = len(other)
+    summ["last_accepted"] = iso(now) if accepted else old_summ.get("last_accepted")
+    try:  # v3 recording must never break the v2 forward import
+        summ["v3"] = F3.apply(reg, accepted, now)
+    except Exception as ex:  # noqa: BLE001
+        log.warning("forward v3 recording failed: %s", ex)
+        summ["v3"] = {"error": str(ex)[:200]} | {k: v for k, v in (old_summ.get("v3") or {}).items() if k != "error"}
+    old = old_summ.get("verdict")
     reg.kv_set("forward", summ)
+    try:
+        F3.note_promising(reg, promising_ids(summ.get("best") or []), now)
+    except Exception as ex:  # noqa: BLE001
+        log.warning("forward v3: promising history not stored: %s", ex)
     if old != summ["verdict"]:
         reg.event("research", f"forward test: {summ['text']}", "info", data={"forward": summ["verdict"]})
     promoted = _promote(reg, list(prev.values()))
-    return {"strategies": len(prev), "verdict": summ["verdict"], "promoted": promoted}
+    return {"strategies": len(prev), "verdict": summ["verdict"], "promoted": promoted, "ignored": len(other)}
 
 
 def _promote(reg: Registry, rows: list[dict]) -> int:

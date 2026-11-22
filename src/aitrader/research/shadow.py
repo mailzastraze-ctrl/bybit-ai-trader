@@ -4,6 +4,7 @@ freeze time (see aitrader.forward). Runs on GitHub runners, never on the trading
 from __future__ import annotations
 
 import logging
+import os
 from concurrent.futures import ThreadPoolExecutor
 from datetime import timedelta
 
@@ -30,11 +31,35 @@ def _trades_after(trades: list[dict], freeze) -> list[list]:
     return out
 
 
+def _provenance(s: Settings) -> dict:
+    try:
+        from freqtrade import __version__ as ftv
+    except Exception:  # noqa: BLE001 – unit tests run without freqtrade
+        ftv = None
+    return {"exchange": s.research.exchange, "code_sha": os.environ.get("GITHUB_SHA"), "ft_version": ftv}
+
+
+def _v3(s: Settings, e: dict, trades: list[dict], freeze, now) -> dict | None:
+    """Forward v3 record (research/marks.py): value per complete UTC day, open trades marked."""
+    from aitrader.research import marks
+    from aitrader.research.pipeline import pair_file
+    try:
+        tf = e.get("timeframe") or s.research.timeframe
+        pairs = sorted(set(e.get("pairs") or []) | {t.get("pair") for t in trades if t.get("pair")})
+        candles = {p: c for p in pairs if (c := marks.day_candles(pair_file(s, p, tf)))}
+        return marks.v3_record(trades, freeze, e.get("pairs") or pairs, candles, tf, now)
+    except Exception as ex:  # noqa: BLE001 – the v3 record must never break the v2 forward test
+        log.warning("forward v3 record %s failed: %s", e.get("id"), ex)
+        return None
+
+
 def test_one(s: Settings, ft: FreqtradeRunner, root, e: dict) -> dict:
     freeze = parse_dt(e["freeze"])
     base = {k: e.get(k) for k in ("id", "kind", "family", "variant", "score", "freeze", "pairs", "bt_pf", "verdict",
                                   "timeframe", "external", "benchmark", "hypothesis")}
-    base["tested_until"] = iso(utcnow())  # data end of this run: the record is observed up to here
+    now = utcnow()
+    base["tested_until"] = iso(now)  # data end of this run: the record is observed up to here
+    base |= _provenance(s)  # whose candles, which code: only Bybit data counts as forward evidence
     if freeze is None or utcnow() - freeze < timedelta(hours=MIN_FORWARD_H):
         return base | {"ok": True, "trades": []}
     job = Job(root / e["id"])
@@ -51,7 +76,8 @@ def test_one(s: Settings, ft: FreqtradeRunner, root, e: dict) -> dict:
         trades = strategy_stats(load_backtest(out), "AIPortfolio").get("trades", [])
         fwd = _trades_after(trades, freeze)
         n_open = sum(1 for t in trades if t.get("exit_reason") == "force_exit")
-        return base | {"ok": True, "trades": fwd, "diag": {"backtest_trades": len(trades), "still_open": n_open}}
+        return base | {"ok": True, "trades": fwd, "v3": _v3(s, e, trades, freeze, now),
+                       "diag": {"backtest_trades": len(trades), "still_open": n_open}}
     except Exception as ex:  # noqa: BLE001 – one broken strategy must not stop the book
         log.warning("forward test %s failed: %s", e["id"], ex)
         return base | {"ok": False, "error": str(ex)[:300], "trades": []}

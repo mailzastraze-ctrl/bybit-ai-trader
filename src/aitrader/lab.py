@@ -144,10 +144,21 @@ def build_state(s: Settings, reg: Registry) -> dict:
                       "live": r.get("live")} for r in reg.strategies(DEPLOYED)],
         "server_trials_90d": len(srs),
         "universe": reg.kv_get("universe"),
-        "shadow": forward.book(reg),
+        "shadow": _book_scheduled(reg),
         "external_tests": external_tests(reg),
         "screen_tested": screen_tested(reg),
     }
+
+
+def _book_scheduled(reg: Registry) -> list[dict]:
+    """The forward book for this lab run; every entry is scheduled (the v3 coverage denominator)."""
+    book = forward.book(reg)
+    try:
+        from aitrader import forward3
+        forward3.note_scheduled(reg, book)
+    except Exception as ex:  # noqa: BLE001 – bookkeeping must never stop a lab run
+        log.warning("forward v3: schedule not stored: %s", ex)
+    return book
 
 
 def screen_tested(reg: Registry, days: int = 21) -> list[str]:

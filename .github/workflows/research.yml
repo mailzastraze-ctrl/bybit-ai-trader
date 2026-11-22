@@ -215,7 +215,7 @@ jobs:
       - name: Forward test of the frozen strategy book
         run: |
           chmod -R 777 work
-          docker run --rm -v "$PWD/work:/data" -e RESEARCH_EXCHANGE \
+          docker run --rm -v "$PWD/work:/data" -e RESEARCH_EXCHANGE -e GITHUB_SHA \
             -e ACTIONS_ID_TOKEN_REQUEST_URL -e ACTIONS_ID_TOKEN_REQUEST_TOKEN \
             aitrader:research python -m aitrader.research.batch lab-shadow --out /data/batch \
               --jobs $(nproc) --run-id ${{ github.run_id }} --server "$LAB_SERVER"
