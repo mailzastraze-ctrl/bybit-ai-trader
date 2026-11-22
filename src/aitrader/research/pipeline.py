@@ -132,7 +132,10 @@ class Pipeline:
             self.ft.download(job, base_cfg, data_pairs, f"{data_start:%Y%m%d}-", timeframe=tf)
         if long_rep:
             # older candles than the cache holds, then fit the quarters to what really exists
-            self.ft.download(job, base_cfg, data_pairs, f"{data_start:%Y%m%d}-", timeframe=tf, prepend=True)
+            try:
+                self.ft.download(job, base_cfg, data_pairs, f"{data_start:%Y%m%d}-", timeframe=tf, prepend=True)
+            except Exception as e:  # noqa: BLE001 – older history is a bonus; fit_folds copes without it
+                log.warning("%s: prepending older candles failed: %s", eid, str(e)[:200])
             first = earliest_candle(self.s, pairs, tf)
             n = fit_folds(first, warmup_days(tf), rs.replication_train_days, rs.replication_folds)
             if n < len(folds):
