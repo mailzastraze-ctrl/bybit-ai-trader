@@ -94,7 +94,9 @@ function renderBrief() {
   if (dk.free_pct != null && dk.free_pct < 0.2) att.push([dk.free_pct < 0.08 ? "crit" : "warn", `Диск сервера почти заполнен: свободно ${dk.free_mb} МБ из ${dk.total_mb}. Система сама чистит старые данные исследований; если предупреждение держится сутки — напишите мне.`]);
   const par = ov.parity || {};
   if (par.alarm && par.ts && Date.now() - new Date(par.ts).getTime() < 2 * 86400e3)
-    att.push(["crit", `Бот не повторяет стратегии автопоиска: ${par.broken} из ${par.checked} у него убыточны, хотя движок Strategy Lab показывает прибыль за те же годы. Это дефект исполнения, а не рынок — нужна правка.`]);
+    att.push([par.like_for_like ? "crit" : "warn", par.like_for_like
+      ? `Бот не повторяет стратегии автопоиска на их собственной монете: ${par.broken} из ${par.checked} (сигналы расходятся: ${par.signals_broken || 0}, прибыль: ${par.profit_gaps || 0}) за то же время, что и движок Strategy Lab. Нужна проверка исполнения — напишите мне.`
+      : `Сверка бота с движком Strategy Lab: ${par.broken} из ${par.checked} не совпадают (старый способ сравнения, по всем монетам сразу — до 22.11 он завышал расхождения). Ждём следующий прогон лаборатории.`]);
   const imp = rs.lab?.last_import ? Date.now() - new Date(rs.lab.last_import).getTime() : null;
   if (imp != null && imp > 10 * 3600e3) att.push(["warn", `Лаборатория не присылала результаты ${span(imp)}. Прогоны перезапускаются сами по расписанию.`]);
   for (const d of ctx.delistings || []) att.push(["warn", `Bybit объявил делистинг ${esc(pair(d.pair))} — новые входы по этой монете закрыты автоматически.`]);

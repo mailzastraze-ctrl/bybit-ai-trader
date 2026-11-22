@@ -121,7 +121,9 @@ def test_screener_and_external_configs_cannot_validate_on_data_they_were_chosen_
     assert verdict == "exploratory" and not gates["clean_oos"]["pass"]
     assert evaluate_gates(g, _m(clean_oos=True))[0] == "validated"
     assert not clean_oos({"screen": "scr-1"}) and not clean_oos({"external": "owner-x"})
-    assert clean_oos({"family": "tsmom"}) and clean_oos({"revalidates": "s1"})
+    assert clean_oos({"family": "tsmom"})
+    # 2026-11-22: revalidations (pairs chosen on these windows) and refinements can reject, not validate
+    assert not clean_oos({"revalidates": "s1"}) and not clean_oos({"refines": "x1"})
 
 
 def test_batch_merge_caps_screener_survivors_at_exploratory(tmp_path):

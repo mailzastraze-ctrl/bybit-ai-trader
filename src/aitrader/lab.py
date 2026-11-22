@@ -182,13 +182,20 @@ def record_parity(reg: Registry, data: dict, now: str) -> dict | None:
     if not rows:
         return None
     broken = [sp.get("screen") for sp, p in rows if not p.get("ok")]
+    like = [p for _, p in rows if not p.get("pooled")]  # compared on the primary coin (2026-11-22 on)
+    sig = sum(1 for p in like if not p.get("signals_ok", True))
+    gaps = sum(1 for p in like if not p.get("profit_ok", True))
+    oth = [p.get("others") or {} for p in like]
     out = {"ts": now, "batch": data.get("batch_id"), "checked": len(rows), "broken": len(broken),
+           "signals_broken": sig, "profit_gaps": gaps, "like_for_like": len(like) == len(rows),
+           "others": {"trades": sum(int(o.get("trades") or 0) for o in oth),
+                      "pnl": round(sum(float(o.get("pnl") or 0.0) for o in oth), 2)},
            "alarm": len(rows) >= 4 and len(broken) >= len(rows) / 2, "examples": broken[:5]}
     reg.kv_set("parity", out)
     if out["alarm"]:
-        reg.event("research", f"PARITY ALARM: {len(broken)} of {len(rows)} autopilot configurations lose in the bot "
-                  "although the owner's engine shows them profitable over the same years – the bot is not trading "
-                  "the engine's strategies (exits/fills/signals); needs a fix", data={"lab": True})
+        reg.event("research", f"PARITY ALARM: {len(broken)} of {len(rows)} autopilot configurations do not repeat the "
+                  f"owner's engine on their own coin over the same time (signals differ: {sig}, profit gap: {gaps}) – "
+                  "check execution (exits/fills/funding)", data={"lab": True})
     return out
 
 
@@ -315,7 +322,9 @@ def apply_import(s: Settings, reg: Registry, data: dict) -> dict:
     n_cand = life.import_batch(data)
     Learner(s, reg).learn_from_research()
     lab = reg.kv_get("lab") or {}
+    full = data.get("experiments_full") or []
     lab.update({"last_import": now, "last_batch": data.get("batch_id"),
+                "last_batch_total": len(full), "last_batch_failed": sum(1 for e in full if e.get("result") is None),
                 "experiments_total": int(lab.get("experiments_total", 0)) + n_exp})
     reg.kv_set("lab", lab)
     reg.event("research", f"lab: batch {data.get('batch_id')} imported — {n_exp} experiments, "

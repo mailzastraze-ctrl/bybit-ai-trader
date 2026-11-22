@@ -10,6 +10,7 @@ from aitrader import context, memguard, observe, readiness, storage
 from aitrader.ftclient import FtClient
 from aitrader.learner import Learner
 from aitrader.lifecycle import Lifecycle
+from aitrader.manifest import Manifest, write_pairlist
 from aitrader.registry import Registry
 from aitrader.scanner import Scanner
 from aitrader.settings import get_settings
@@ -100,6 +101,30 @@ def housekeeping(reg: Registry, s=None) -> None:
     reg.kv_set("housekeeping_ts", iso(now))
 
 
+def startup_manifest(life: Lifecycle, s, excluded: set[str]) -> bool:
+    """At start the bot's open trades are not known yet. An existing manifest is kept as it is:
+    it lists the `closing` strategies of open trades, and a trade-less rewrite would hand those
+    trades to other strategies' stops until the next cycle (Freqtrade never widens a stop
+    again). Only a missing manifest is created. Returns True if one was written."""
+    if s.manifest_path.exists():
+        if not s.pairlist_path.exists():
+            write_pairlist(s.pairlist_path, Manifest.load(s.manifest_path).all_pairs() or ["BTC/USDT:USDT"])
+        return False
+    life.write(life.build_manifest([], excluded, False), [])
+    return True
+
+
+def refresh_manifest(life: Lifecycle, up: bool, open_trades: list[dict], excluded: set[str],
+                     paused: bool) -> Manifest | None:
+    """Rewrite the manifest only when the bot answered – its open trades decide which retired
+    strategies stay on as `closing`. With the bot unreachable the last manifest stays."""
+    if not up:
+        return None
+    man = life.build_manifest(open_trades, excluded, paused)
+    life.write(man, open_trades)
+    return man
+
+
 def main() -> None:
     s = get_settings()
     s.ensure_dirs()
@@ -110,7 +135,7 @@ def main() -> None:
     life.import_offline_candidates(s.app_dir / "research" / "imports")
     life.import_external(s.app_dir / "research" / "external")
     # make sure the bot has a manifest + pairlist before it starts trading
-    life.write(life.build_manifest([], set(scanner.excluded_pairs()), False), [])
+    startup_manifest(life, s, set(scanner.excluded_pairs()))
     reg.event("manager", "manager started")
     last_learn = last_ready = last_ctx = last_disk = 0.0
     while True:
@@ -129,11 +154,17 @@ def main() -> None:
                                       "open_trades": len(open_trades)}, key="ts")
                 learner.sync_trades(ft.all_closed_trades())
                 detail.update(equity=round(equity, 2), open_trades=len(open_trades))
-            paused = kill_switch(reg, equity, s.lifecycle.account_kill_dd,
-                                 s.lifecycle.kill_cooldown_hours) if equity > 0 else False
-            if equity > 0 and daily_stop(reg, equity, s.lifecycle.daily_loss_limit):
-                paused = True
-            life.evaluate(equity)
+                try:  # one-line health for the supervisor's STATUS (observation only)
+                    reg.kv_set("health", observe.health(open_trades, equity))
+                except Exception as e:  # noqa: BLE001
+                    log.info("health summary failed: %s", e)
+            paused = False
+            if up:  # risk and rotation decisions need fresh equity and the bot's real open trades
+                paused = kill_switch(reg, equity, s.lifecycle.account_kill_dd,
+                                     s.lifecycle.kill_cooldown_hours) if equity > 0 else False
+                if equity > 0 and daily_stop(reg, equity, s.lifecycle.daily_loss_limit):
+                    paused = True
+                life.evaluate(equity)
             if time.time() - last_learn > 6 * 3600:
                 learner.analyze_live()
                 last_learn = time.time()
@@ -150,19 +181,19 @@ def main() -> None:
                     log.info("context refresh failed: %s", e)
             # safety: no new entries on coins Bybit has announced to delist (open trades keep their exits)
             excluded = set(scanner.excluded_pairs()) | context.delisted_pairs(reg)
-            man = life.build_manifest(open_trades, excluded, paused)
-            life.write(man, open_trades)
-            detail.update(sleeves=len(man.sleeves), paused=paused)
+            man = refresh_manifest(life, up, open_trades, excluded, paused)
+            detail.update(sleeves=len(man.sleeves) if man else None, paused=paused,
+                          manifest="written" if man else "kept (bot unreachable)")
             if time.time() - last_ready > 600:
                 readiness.update(reg, equity if equity > 0 else None)
                 last_ready = time.time()
             housekeeping(reg, s)
             if time.time() - last_disk > 900:  # disk usage for the control room (cheap)
                 last_disk = time.time()
-                try:
-                    reg.kv_set("disk", {**(reg.kv_get("disk") or {}), **storage.disk_status(s.data_dir)})
-                except OSError:
-                    pass
+                try:  # usage, growth and days to full; what fills it (hourly); WAL checkpoint (6-hourly)
+                    storage.disk_tick(reg, s.data_dir, s.registry_path)
+                except Exception as e:  # noqa: BLE001 – observation must never break the loop
+                    log.info("disk tick failed: %s", e)
                 try:  # observation only: missed signals and how many independent bets are open
                     reg.kv_set("signals", observe.summarize_signals(observe.journal_path(s.state_dir)))
                     if up:

@@ -16,6 +16,7 @@ import threading
 import time
 from dataclasses import dataclass, field
 
+from aitrader import observe
 from aitrader.lifecycle import Lifecycle
 from aitrader.registry import Registry
 from aitrader.settings import get_settings
@@ -177,6 +178,7 @@ def main() -> None:
                 nt = reg.one("SELECT COUNT(*) n FROM live_trades")["n"]
                 log.info("STATUS heartbeats=%s universe=%d experiments=%s strategies=%s closed_trades=%s rss_mb=%s",
                          hb, len(u.get("pairs") or []), ex, st, nt, _rss_by_proc(procs))
+                log.info("%s", observe.status_line(reg))  # positions, stops, risk, lab, disk, forward, red flags
             except Exception as e:  # noqa: BLE001
                 log.warning("status line failed: %s", e)
         for p in procs:

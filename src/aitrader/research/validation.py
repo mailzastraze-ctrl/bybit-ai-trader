@@ -68,9 +68,14 @@ def clean_oos(spec: dict) -> bool:
 
     Not for screener survivors: the screener chose them on (almost) the whole history,
     including the last 360 days the walk-forward tests on. Not for external fixed configs
-    either (found by hand on the same history). Searched experiments re-optimise on each
-    train window and are tested on the next one, so their test windows are clean."""
-    return not (spec.get("screen") or spec.get("external"))
+    either (found by hand on the same history). Not for refinements (2026-11-22): the parent
+    was picked because of its result on these very windows and its children are searched
+    around it and tested on them again – 48 % of refinements passed against 9 % of fresh
+    searches. Not for revalidations either: a re-test of a strategy on windows that mostly
+    overlap the ones it was chosen on can retire it, not prove it. Fresh searched experiments
+    re-optimise on each train window and are tested on the next one, so their test windows
+    are clean."""
+    return not (spec.get("screen") or spec.get("external") or spec.get("refines") or spec.get("revalidates"))
 
 
 def evaluate_gates(g: Gates, m: dict) -> tuple[str, dict]:

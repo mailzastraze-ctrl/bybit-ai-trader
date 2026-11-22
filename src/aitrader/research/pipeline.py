@@ -46,19 +46,58 @@ STARTING_BALANCE = 10000.0
 LONG_REPLICATION_TF = ("2h", "4h", "6h", "12h")
 
 
-def parity(spec: dict, oos: dict) -> dict | None:
-    """Does the bot reproduce what the owner's engine saw? For an autopilot configuration the
-    engine's ~3-year record (A) is compared with the bot's replication. A strategy the engine
-    shows clearly profitable (PF ≥ 1.3) that the bot runs at PF < 1.0 over the same years means
-    the bot is not trading the engine's strategy (exits, fills, signals) – a defect to fix, not
-    a market verdict. (Until 2026-11-21 the bot used its own exits for these and most collapsed.)"""
-    a = ((spec.get("screen_holdout") or {}).get("A")) or None
+def _pf(trades: list[dict]) -> float | None:
+    win = sum(float(t.get("profit_abs") or 0.0) for t in trades if float(t.get("profit_abs") or 0.0) > 0)
+    loss = -sum(float(t.get("profit_abs") or 0.0) for t in trades if float(t.get("profit_abs") or 0.0) < 0)
+    if not trades:
+        return None
+    return round(win / loss, 3) if loss > 0 else None
+
+
+PARITY_SIGNAL_BAND = (0.75, 1.33)  # bot trades / engine trades (same coin, same length of time)
+
+
+def parity(spec: dict, oos: dict, trades: list[dict] | None = None, days: int | None = None) -> dict | None:
+    """Does the bot reproduce what the owner's engine saw – like for like?
+
+    The engine's record (A: the search years, B: the last 90 days) is for ONE coin, the one the
+    configuration was found on (`screen_holdout.coins.list[0]`). Until 2026-11-22 it was
+    compared with the bot's result on all coins of the configuration, so coins added by the
+    screener's "also holds elsewhere" check made a faithful replication look broken (first
+    3-year run: 11 of 15 "broken", while trade counts on the primary coin matched 65/66,
+    36/36, 51/51). Now, on the primary coin only:
+      * signals – the bot's trade count against the engine's trade rate over the same length
+        of time (within 0.75–1.33×; checked from 10 expected trades);
+      * money – engine PF ≥ 1.3 but bot PF < 1.0 with ≥ 10 trades is a gap.
+    The other coins are reported apart (`others`): how the configuration transfers, not parity."""
+    sh = spec.get("screen_holdout") or {}
+    a = sh.get("A") or None
     if not a or a.get("pf") is None:
         return None
-    e_pf, b_pf, n = float(a["pf"]), float(oos.get("profit_factor") or 0.0), int(oos.get("trades") or 0)
-    broken = e_pf >= 1.3 and n >= 10 and b_pf < 1.0
-    return {"engine_pf": round(e_pf, 3), "engine_trades": a.get("trades"), "bot_pf": round(b_pf, 3), "bot_trades": n,
-            "ratio": round(b_pf / e_pf, 3) if e_pf > 0 else None, "ok": not broken}
+    e_pf = float(a["pf"])
+    primary = ((sh.get("coins") or {}).get("list") or [None])[0]
+    if trades is None or not primary:  # no trade detail: the old pooled comparison, marked as such
+        b_pf, n = float(oos.get("profit_factor") or 0.0), int(oos.get("trades") or 0)
+        broken = e_pf >= 1.3 and n >= 10 and b_pf < 1.0
+        return {"engine_pf": round(e_pf, 3), "engine_trades": a.get("trades"), "bot_pf": round(b_pf, 3),
+                "bot_trades": n, "pooled": True, "ok": not broken}
+    mine = [t for t in trades if t.get("pair") == primary]
+    rest = [t for t in trades if t.get("pair") != primary]
+    n, b_pf = len(mine), _pf(mine)
+    b = sh.get("B") or {}
+    e_days = float(a.get("years") or 0.0) * 365.0 + (90.0 if b else 0.0)
+    e_trades = int(a.get("trades") or 0) + int(b.get("trades") or 0)
+    expected = None
+    if e_days > 0 and days:
+        expected = round(e_trades / e_days * min(float(days), e_days), 1)
+    lo, hi = PARITY_SIGNAL_BAND
+    signals_ok = expected is None or expected < 10 or lo <= n / expected <= hi
+    profit_ok = not (e_pf >= 1.3 and n >= 10 and (b_pf if b_pf is not None else 0.0) < 1.0)
+    return {"coin": primary, "engine_pf": round(e_pf, 3), "engine_trades": a.get("trades"),
+            "expected_trades": expected, "bot_pf": b_pf, "bot_trades": n,
+            "signals_ok": bool(signals_ok), "profit_ok": bool(profit_ok), "ok": bool(signals_ok and profit_ok),
+            "others": {"coins": len({t.get("pair") for t in rest}), "trades": len(rest), "pf": _pf(rest),
+                       "pnl": round(sum(float(t.get("profit_abs") or 0.0) for t in rest), 2)}}
 
 class Pipeline:
     def __init__(self, settings: Settings, registry: Registry, runner: FreqtradeRunner | None = None,
@@ -249,7 +288,7 @@ class Pipeline:
             "exit_reasons": (df["exit_reason"].value_counts().to_dict() if not df.empty else {}),
             "curve": M.equity_curve(oos_trades, STARTING_BALANCE, oos_start, oos_end),
             "replication": {"days": (oos_end - oos_start).days, "folds": len(folds)} if long_rep else None,
-            "parity": parity(spec, oos),
+            "parity": parity(spec, oos, oos_trades, (oos_end - oos_start).days),
         }
         self._record_strategy(eid, spec, result)
         return result

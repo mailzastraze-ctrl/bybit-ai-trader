@@ -80,20 +80,85 @@ class AIBase(IStrategy):
                 return s
         return None
 
-    def _open_tag(self, pair: str) -> str | None:
-        if self.config.get("runmode") not in (RunMode.LIVE, RunMode.DRY_RUN):
+    def _live(self) -> bool:
+        return self.config.get("runmode") in (RunMode.LIVE, RunMode.DRY_RUN)
+
+    def _open_trade(self, pair: str):
+        """The open trade on this pair (live/dry-run only; one trade per pair)."""
+        if not self._live():
             return None
         try:
             trades = Trade.get_trades_proxy(pair=pair, is_open=True)
         except Exception:  # noqa: BLE001
             return None
-        return trades[0].enter_tag if trades else None
+        return trades[0] if trades else None
+
+    def _open_tag(self, pair: str) -> str | None:
+        t = self._open_trade(pair)
+        return t.enter_tag if t is not None else None
+
+    def _exit_sleeve(self, pair: str, sleeves: list[Sleeve]) -> Sleeve | None:
+        """The strategy of the open trade on this pair when it no longer takes entries here
+        (rotated out → `closing`, or the coin went to another strategy). Its signals are still
+        computed – for the exit only – so the trade leaves on its own rules, never on another
+        strategy's exit signal."""
+        t = self._open_trade(pair)
+        if t is None or not t.enter_tag or t.enter_tag.startswith(EXEC_TEST_TAG):
+            return None
+        if t.enter_tag in {s.id for s in sleeves}:
+            return None
+        return self.sleeve_for_trade(t)
 
     def entries_paused(self) -> bool:
         return False
 
     def families_in_use(self) -> set[str]:
         return set()
+
+    # ------------------------------------------------------------------ the trade's own plan
+    # Each trade keeps a snapshot of the strategy that opened it (family, parameters,
+    # timeframe) and of its entry ATR: in memory, and in Freqtrade's per-trade custom data in
+    # live/dry-run so it survives restarts. Stops, targets and time exits are then computed
+    # from the trade's own plan even when the strategy has left the manifest.
+    PLAN_KEY = "aitrader_plan"
+
+    def _plan(self, trade) -> dict | None:
+        if not self._live():  # backtests: static manifest, and trade ids repeat across runs
+            return None
+        tid = getattr(trade, "id", None)
+        mem = self.__dict__.setdefault("_plans", {}).get(tid)
+        if mem:
+            return mem
+        if hasattr(trade, "get_custom_data"):
+            try:
+                v = trade.get_custom_data(self.PLAN_KEY)
+            except Exception:  # noqa: BLE001 – a storage problem must never break trading
+                v = None
+            if isinstance(v, dict):
+                self._plans[tid] = v
+                return v
+        return None
+
+    def _remember_plan(self, trade, sleeve: Sleeve | None = None, atr: float | None = None) -> None:
+        tid = getattr(trade, "id", None)
+        if tid is None or not self._live():
+            return
+        old = self._plan(trade) or {}
+        new = dict(old)
+        if sleeve is not None and not old.get("sleeve"):  # written once: the plan at entry
+            new["sleeve"] = {"id": sleeve.id, "family": sleeve.family, "params": sleeve.params,
+                             "timeframe": sleeve.timeframe, "sides": list(sleeve.sides),
+                             "leverage": sleeve.leverage, "pairs": [], "stage": "closing", "risk": 0.0}
+        if atr is not None and not old.get("atr"):
+            new["atr"] = float(atr)
+        if new == old:
+            return
+        self.__dict__.setdefault("_plans", {})[tid] = new
+        if hasattr(trade, "set_custom_data"):
+            try:
+                trade.set_custom_data(self.PLAN_KEY, new)
+            except Exception as e:  # noqa: BLE001
+                logger.debug("trade plan not stored: %s", e)
 
     # ------------------------------------------------------------------ funding data
     def _funding_tf(self) -> str:
@@ -128,7 +193,32 @@ class AIBase(IStrategy):
             out.append((MARKET_PAIR, self.timeframe))  # also the live market-shock guard
             out += [(MARKET_PAIR, self._tf(sl)) for sl in self.all_sleeves()
                     if sl.family in NEEDS_MARKET and self._tf(sl) != self.timeframe]
+        out += self._open_trade_informatives(wl)
         return list(dict.fromkeys(out))
+
+    def _open_trade_informatives(self, wl: set[str]) -> list[tuple]:
+        """Higher-timeframe candles for open trades whose strategy no longer lists the coin
+        (`closing` sleeves have no pairs): without them its exit signal and its own ATR are
+        missing and the trade would be managed on the bot's 15m ATR."""
+        if not self._live():
+            return []
+        try:
+            trades = Trade.get_trades_proxy(is_open=True)
+        except Exception:  # noqa: BLE001
+            return []
+        out = []
+        for t in trades:
+            if not t.enter_tag or t.enter_tag.startswith(EXEC_TEST_TAG):
+                continue
+            sl = self.sleeve_for_trade(t)
+            tf = self._tf(sl)
+            if sl is None or tf == self.timeframe:
+                continue
+            if t.pair in wl:
+                out.append((t.pair, tf))
+            if sl.family in NEEDS_MARKET:
+                out.append((MARKET_PAIR, tf))
+        return out
 
     def _needs_oi(self) -> bool:
         return bool(self.families_in_use() & NEEDS_OI)
@@ -235,8 +325,14 @@ class AIBase(IStrategy):
             dataframe = self._merge_funding(dataframe, metadata["pair"])
         if self._needs_market():
             dataframe = self._merge_market(dataframe, self.timeframe)
-        if self._needs_oi() and any(s.family in NEEDS_OI and self._tf(s) == self.timeframe
-                                    for s in self.sleeves_for_pair(metadata["pair"])):
+        here = self.sleeves_for_pair(metadata["pair"])
+        ex = self._exit_sleeve(metadata["pair"], here)
+        here = here + ([ex] if ex is not None else [])
+        if ex is not None and ex.family in NEEDS_MARKET and self._tf(ex) == self.timeframe \
+                and "mkt_close" not in dataframe:
+            dataframe = self._merge_market(dataframe, self.timeframe)
+        if any(s.family in NEEDS_OI and self._tf(s) == self.timeframe for s in here) \
+                and (self._needs_oi() or ex is not None):
             dataframe = self._merge_oi(dataframe, metadata["pair"], self.timeframe)
         return dataframe
 
@@ -244,9 +340,16 @@ class AIBase(IStrategy):
         # Signals are computed here (not in populate_indicators) so hyperopt re-evaluates
         # entry parameters every epoch.
         sleeves = self.sleeves_for_pair(metadata["pair"])
-        if not sleeves:
+        exit_only = self._exit_sleeve(metadata["pair"], sleeves)
+        if not sleeves and exit_only is None:
             return dataframe
         cols = ["date", "open", "high", "low", "close", "volume"] + [c for c in ("funding", "mkt_close", "oi") if c in dataframe]
+        if exit_only is not None:  # the open trade's own strategy: exit columns and ATR, never entries
+            res = self._sleeve_signals(dataframe, metadata["pair"], exit_only, cols)
+            if res is not None:
+                dataframe[f"xl:{exit_only.id}"] = res["exit_long_sig"].values
+                dataframe[f"xs:{exit_only.id}"] = res["exit_short_sig"].values
+                dataframe[f"at:{exit_only.id}"] = res["atr"].values
         paused = self.entries_paused()
         free = pd.Series(True, index=dataframe.index)  # rows not yet claimed by a higher-priority sleeve
         for i, sleeve in enumerate(sleeves):
@@ -333,11 +436,24 @@ class AIBase(IStrategy):
 
     def populate_exit_trend(self, dataframe: pd.DataFrame, metadata: dict) -> pd.DataFrame:
         # Exit signals belong to the sleeve that opened the position (pairs can be shared).
-        tag = self._open_tag(metadata["pair"])
-        cl, cs = (f"xl:{tag}", f"xs:{tag}") if tag and f"xl:{tag}" in dataframe else ("exit_long_sig", "exit_short_sig")
-        if cl in dataframe:
+        # A tagged trade only ever gets its own strategy's exit columns; if they are missing
+        # (data not there yet) it gets no signal exit at all – never another strategy's.
+        pair = metadata["pair"]
+        tag = self._open_tag(pair)
+        owners = self.__dict__.setdefault("_exit_owner", {})
+        if tag and not tag.startswith(EXEC_TEST_TAG):
+            cl, cs, owner = f"xl:{tag}", f"xs:{tag}", tag
+        elif tag:
+            cl, cs, owner = "", "", None
+        else:  # no open trade (or a backtest): the primary sleeve's columns
+            first = self.sleeves_for_pair(pair)
+            cl, cs, owner = "exit_long_sig", "exit_short_sig", (first[0].id if first else None)
+        if cl and cl in dataframe:
             dataframe.loc[dataframe[cl].fillna(False).astype(bool), "exit_long"] = 1
             dataframe.loc[dataframe[cs].fillna(False).astype(bool), "exit_short"] = 1
+            owners[pair] = owner
+        else:
+            owners[pair] = None
         return dataframe
 
     # ------------------------------------------------------------------ helpers
@@ -354,10 +470,30 @@ class AIBase(IStrategy):
             self.bot_start()
         key = (trade.id, pair, str(trade.open_date_utc))
         atr = self._entry_atr.get(key)
+        exec_test = (trade.enter_tag or "").startswith(EXEC_TEST_TAG)
+        if trade.enter_tag and not exec_test and self.sleeve_for_trade(trade) is None:
+            # neither in the manifest nor in the trade's own record: no rules of ours apply –
+            # keep the stop where it is (Freqtrade's exchange stop stays) rather than guess
+            seen = self.__dict__.setdefault("_planless_logged", set())
+            if trade.id not in seen:
+                seen.add(trade.id)
+                logger.warning("trade %s (%s, %s): its strategy is unknown – stop kept as it is", trade.id,
+                               trade.enter_tag, pair)
+            return None
+        if atr is None and not exec_test:
+            atr = (self._plan(trade) or {}).get("atr")  # the entry ATR remembered with the trade
+            if atr:
+                self._entry_atr[key] = float(atr)
         if atr is None:
             df, _ = self.dp.get_analyzed_dataframe(pair, self.timeframe)
-            sl = None if (trade.enter_tag or "").startswith(EXEC_TEST_TAG) else self.sleeve_for_trade(trade)
-            col = f"at:{sl.id}" if sl is not None and df is not None and f"at:{sl.id}" in df else "atr"
+            sl = None if exec_test else self.sleeve_for_trade(trade)
+            own = f"at:{sl.id}" if sl is not None else None
+            col = own if own and df is not None and own in df else "atr"
+            if col == "atr" and sl is not None and self._tf(sl) != self.timeframe:
+                # a higher-timeframe strategy without its own ATR yet: the bot's 15m ATR would
+                # put the stop far too close (and Freqtrade never widens it again) – leave the
+                # stop as it is until the strategy's candles are there
+                return None
             row = signal_row(df, trade.open_date_utc, self._tf_min)
             if row is None or pd.isna(row.get(col)) or row[col] <= 0:
                 if df is None or df.empty or pd.isna(df[col].iloc[-1]):
@@ -366,6 +502,8 @@ class AIBase(IStrategy):
             else:
                 atr = float(row[col])
                 self._entry_atr[key] = atr
+                if not exec_test:
+                    self._remember_plan(trade, atr=atr)
         return EntryContext(entry=float(trade.open_rate), atr=atr, is_short=bool(trade.is_short))
 
     def _cur_atr(self, pair: str, trade: Trade, current_time: datetime) -> float | None:
@@ -450,11 +588,15 @@ class AIBase(IStrategy):
     def confirm_trade_exit(self, pair: str, trade: Trade, order_type: str, amount: float,
                            rate: float, time_in_force: str, exit_reason: str,
                            current_time: datetime, **kwargs) -> bool:
-        # Signal exits only count when the trade's own sleeve still runs (or the exit columns
-        # were computed for it); a sleeve that was removed exits via stops / time instead.
+        # A signal exit counts only when the exit columns were computed for this trade's own
+        # strategy (`populate_exit_trend` records whose they were). An unknown strategy, or
+        # columns of another strategy (e.g. computed before this trade opened), never close it.
         if exit_reason == "exit_signal":
             mine = self.sleeve_for_trade(trade)
-            if mine is None or mine.id not in {x.id for x in self.sleeves_for_pair(pair)}:
+            if mine is None:
+                return False
+            owner = self.__dict__.get("_exit_owner", {}).get(pair, mine.id)
+            if trade.enter_tag and owner != trade.enter_tag:
                 return False
         return True
 
@@ -756,5 +898,18 @@ class PortfolioBase(AIBase):
         return self._watcher().manifest.sleeves_for(pair)
 
     def sleeve_for_trade(self, trade: Trade) -> Sleeve | None:
+        """The strategy that opened this trade – for its whole life. Taken from the manifest
+        while the strategy is there (and remembered with the trade), from the trade's own
+        snapshot when it is not (manager restart, bot API down, rotation). A tagged trade never
+        borrows another strategy's stop, target or holding time; with no record at all it gets
+        None and its stop is left where it is."""
         m = self._watcher().manifest
-        return m.by_id(trade.enter_tag) or m.owner_of(trade.pair)
+        tag = getattr(trade, "enter_tag", None)
+        if not tag:
+            return m.owner_of(trade.pair)  # untagged (manual) trade: as before
+        s = m.by_id(tag)
+        if s is not None:
+            self._remember_plan(trade, sleeve=s)
+            return s
+        snap = (self._plan(trade) or {}).get("sleeve")
+        return Sleeve.from_dict(snap) if isinstance(snap, dict) and snap.get("id") == tag else None
