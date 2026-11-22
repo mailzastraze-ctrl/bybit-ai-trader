@@ -53,5 +53,22 @@
     "decision_rule": "Research is only worth its complexity if the top quartile's forward return beats this benchmark over the same period (reported in /api/forward)."
   },
   "core": true,
-  "core_id": "core-tsmom-4h-30d"
+  "core_id": "core-tsmom-4h-30d",
+  "provenance": {
+    "selected_on": "Family chosen on this system's own OOS results; the standard monthly TSMOM horizon, not fitted.",
+    "seen_data": [
+      {
+        "what": "the lab's walk-forward history of the tsmom family: 365-day training + 360-day OOS before each run (1h from 20.11.2026, 4h from 21.11.2026)",
+        "from": "2024-11",
+        "to": "2026-11-21"
+      },
+      {
+        "what": "the choice itself: tsmom became the benchmark and the core because it was the only family with a non-negative mean OOS Sharpe in 215 lab trials (METHOD_REVIEW, 21.11.2026)",
+        "from": "2025-11",
+        "to": "2026-11-21"
+      }
+    ],
+    "frozen": "2026-11-21 (import)",
+    "clean_evidence": "Clean evidence is the forward test from the freeze only. A one-off read on any period before the freeze is a replication: it can reject, never confirm (the same rule as clean_oos). PLAN B4's 'sealed last 12 months' is not sealed for this configuration."
+  }
 }

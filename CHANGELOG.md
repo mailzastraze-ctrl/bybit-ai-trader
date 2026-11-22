@@ -2,6 +2,8 @@
 
 History of the system, newest first. `PROJECT_STATUS.md` holds only the current state.
 
+## 2026-11-22 (audit F2) — every hypothesis says which data it has already seen
+Re-reading the history that chose a configuration never makes that history clean. TSMOM became the benchmark and the core because it was the only family not losing on the lab's out-of-sample windows (the last 360 days before each run), so PLAN B4's one-off read of a "sealed last 12 months" would confirm what H1 was selected on. The H1 legs, the benchmark and the owner's systems now carry a `provenance` block: how the configuration was chosen, which periods it has seen (from–to) and the rule that its clean evidence is the forward test from its freeze only; an earlier period can reject, never confirm (as `clean_oos`). Documentation only: the importers ignore the block, no id is re-frozen and the demo core is unchanged. Nothing under `src/**` changes, so merging does not redeploy the bot. Tests: `tests/test_provenance.py` (every hypothesis, benchmark and owner file declares it; the imported records and the core are unchanged).
 ## 2026-11-22 (audit) — account caps count a new entry at its sized risk
 `confirm_trade_entry` added a new trade at its sleeve's nominal risk, but `custom_stake_amount` sizes it up to 1.5× by conviction and may round a small stake up to the exchange minimum (another ≤ 1.5×). Near the 8 % / 4 % / 3 % caps one entry could pass them by up to ~0.1–0.2 % of equity. The new entry now counts at the larger of its nominal risk and its sized risk (order amount × stop distance), so the caps only get stricter. Open trades are unaffected. Tests: `tests/test_audit_risk.py`.
 ## 2026-11-22 (audit) — forward verdict counts observed days, not calendar age
