@@ -112,6 +112,28 @@ class AIBase(IStrategy):
     def all_sleeves(self) -> list[Sleeve]:
         return []
 
+    def sleeve_by_id(self, sleeve_id: str | None) -> Sleeve | None:
+        return None
+
+    def _open_trades(self, pair: str | None = None) -> list:
+        if self.config.get("runmode") not in (RunMode.LIVE, RunMode.DRY_RUN):
+            return []
+        try:
+            return Trade.get_trades_proxy(pair=pair, is_open=True) if pair else Trade.get_trades_proxy(is_open=True)
+        except Exception:  # noqa: BLE001
+            return []
+
+    def holding_sleeves(self, pair: str, skip: set[str]) -> list[Sleeve]:
+        """Strategies that still hold a position on `pair` but no longer trade it (retired, or
+        the coin went to stronger evidence). Their own exit signals and ATR keep being computed,
+        so the position is managed exactly as the strategy was tested; they never enter."""
+        out: list[Sleeve] = []
+        for t in self._open_trades(pair):
+            s = self.sleeve_by_id(t.enter_tag)
+            if s is not None and s.id not in skip and all(x.id != s.id for x in out):
+                out.append(s)
+        return out
+
     def informative_pairs(self):
         if not self.dp:
             return []
@@ -121,6 +143,10 @@ class AIBase(IStrategy):
             tf = self._tf(sl)
             if tf != self.timeframe:
                 out += [(p, tf) for p in sl.pairs if p in wl]
+        for t in self._open_trades():  # positions of strategies that left the coin
+            sl = self.sleeve_by_id(t.enter_tag)
+            if sl is not None and self._tf(sl) != self.timeframe:
+                out.append((t.pair, self._tf(sl)))
         if self._needs_funding():
             ftf = self._funding_tf()
             out += [(p, ftf, "funding_rate") for p in wl]
@@ -244,7 +270,8 @@ class AIBase(IStrategy):
         # Signals are computed here (not in populate_indicators) so hyperopt re-evaluates
         # entry parameters every epoch.
         sleeves = self.sleeves_for_pair(metadata["pair"])
-        if not sleeves:
+        holding = self.holding_sleeves(metadata["pair"], {s.id for s in sleeves})
+        if not sleeves and not holding:
             return dataframe
         cols = ["date", "open", "high", "low", "close", "volume"] + [c for c in ("funding", "mkt_close", "oi") if c in dataframe]
         paused = self.entries_paused()
@@ -274,6 +301,13 @@ class AIBase(IStrategy):
                 take = ss & free
                 dataframe.loc[take, ["enter_short", "enter_tag"]] = (1, sleeve.id)
                 free &= ~take
+        for sleeve in holding:  # exits and ATR only – these strategies no longer enter here
+            res = self._sleeve_signals(dataframe, metadata["pair"], sleeve, cols)
+            if res is None:
+                continue
+            dataframe[f"xl:{sleeve.id}"] = res["exit_long_sig"].values
+            dataframe[f"xs:{sleeve.id}"] = res["exit_short_sig"].values
+            dataframe[f"at:{sleeve.id}"] = res["atr"].values
         return dataframe
 
     # ------------------------------------------------------------------ signal journal
@@ -334,7 +368,12 @@ class AIBase(IStrategy):
     def populate_exit_trend(self, dataframe: pd.DataFrame, metadata: dict) -> pd.DataFrame:
         # Exit signals belong to the sleeve that opened the position (pairs can be shared).
         tag = self._open_tag(metadata["pair"])
-        cl, cs = (f"xl:{tag}", f"xs:{tag}") if tag and f"xl:{tag}" in dataframe else ("exit_long_sig", "exit_short_sig")
+        if tag and f"xl:{tag}" in dataframe:
+            cl, cs = f"xl:{tag}", f"xs:{tag}"
+        elif tag:
+            return dataframe  # its signals are unavailable: stops / time manage it, never a neighbour's exit
+        else:
+            cl, cs = "exit_long_sig", "exit_short_sig"
         if cl in dataframe:
             dataframe.loc[dataframe[cl].fillna(False).astype(bool), "exit_long"] = 1
             dataframe.loc[dataframe[cs].fillna(False).astype(bool), "exit_short"] = 1
@@ -450,12 +489,17 @@ class AIBase(IStrategy):
     def confirm_trade_exit(self, pair: str, trade: Trade, order_type: str, amount: float,
                            rate: float, time_in_force: str, exit_reason: str,
                            current_time: datetime, **kwargs) -> bool:
-        # Signal exits only count when the trade's own sleeve still runs (or the exit columns
-        # were computed for it); a sleeve that was removed exits via stops / time instead.
+        # Signal exits only count when they are the trade's own strategy's: it still runs on the
+        # pair, or it holds the position after leaving the coin and its exit columns were computed.
         if exit_reason == "exit_signal":
             mine = self.sleeve_for_trade(trade)
-            if mine is None or mine.id not in {x.id for x in self.sleeves_for_pair(pair)}:
+            if mine is None or (trade.enter_tag and mine.id != trade.enter_tag
+                                and not trade.enter_tag.startswith(EXEC_TEST_TAG)):
                 return False
+            if mine.id not in {x.id for x in self.sleeves_for_pair(pair)}:
+                df, _ = self.dp.get_analyzed_dataframe(pair, self.timeframe) if self.dp else (None, None)
+                if df is None or f"xl:{mine.id}" not in df:  # own exit signal not computed
+                    return False
         return True
 
     # ------------------------------------------------------------------ execution
@@ -751,6 +795,9 @@ class PortfolioBase(AIBase):
 
     def sleeve_for_pair(self, pair: str) -> Sleeve | None:
         return self._watcher().manifest.owner_of(pair)
+
+    def sleeve_by_id(self, sleeve_id: str | None) -> Sleeve | None:
+        return self._watcher().manifest.by_id(sleeve_id)
 
     def sleeves_for_pair(self, pair: str) -> list[Sleeve]:
         return self._watcher().manifest.sleeves_for(pair)

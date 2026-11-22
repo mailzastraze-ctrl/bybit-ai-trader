@@ -101,6 +101,40 @@ def test_exit_signal_blocked_when_trade_sleeve_no_longer_runs_the_pair(portfolio
     assert portfolio.confirm_trade_exit(tr.pair, tr, "market", 1, 1, "GTC", "take_profit", tr.open_date_utc) is True
 
 
+def test_position_of_a_strategy_that_left_the_coin_keeps_its_own_exits(portfolio, monkeypatch):
+    """A strategy displaced from a coin (stronger evidence took it) or retired still holds its
+    position: the bot keeps computing ITS exit signal and ATR there (never entries), and never
+    applies the coin's new strategy's exit to it. Before, the neighbour's exit fired every few
+    seconds (denied), the own exit never ran, and after a restart the stop used the bot's 15m ATR."""
+    import pathlib
+
+    from aitrader import ftbase
+    from aitrader.ftbase import RunMode
+    path = pathlib.Path(portfolio.config["aitrader"]["manifest_path"])
+    m = Manifest.load(path)
+    m.sleeves.append(Sleeve(id="old", family="meanrev_bb", params={}, pairs=[], stage="closing"))
+    m.save(path)
+    portfolio.bot_loop_start(None)
+    raw = ohlcv(900, seed=5, vol=0.015)
+    held = [SimpleNamespace(pair="BTC/USDT:USDT", enter_tag="old")]
+    monkeypatch.setattr(ftbase.Trade, "get_trades_proxy",
+                        staticmethod(lambda pair=None, is_open=True: held), raising=False)
+    portfolio.config["runmode"] = RunMode.LIVE
+    df = _populate(portfolio, raw)
+    assert {"xl:old", "xs:old", "at:old"} <= set(df.columns)
+    assert "old" not in set(df.get("enter_tag", pd.Series(dtype=object)).dropna())  # never enters
+    own = df["xs:old"].fillna(False).astype(bool)
+    assert own.any() and (df["exit_short"].fillna(0).astype(bool) == own).all()
+    portfolio.dp = FakeDP(df)
+    tr = _trade(df, 700, is_short=True, tag="old")
+    assert portfolio.confirm_trade_exit(tr.pair, tr, "limit", 1, 1, "GTC", "exit_signal", tr.open_date_utc) is True
+    # a position whose strategy is unknown gets no neighbour's exit signal at all
+    held[0] = SimpleNamespace(pair="BTC/USDT:USDT", enter_tag="gone")
+    df2 = _populate(portfolio, raw)
+    assert "exit_long" not in df2 or df2["exit_long"].fillna(0).sum() == 0
+    assert "exit_short" not in df2 or df2["exit_short"].fillna(0).sum() == 0
+
+
 def test_real_money_guard():
     from AIPortfolio import AIPortfolio
     from freqtrade.exceptions import OperationalException
