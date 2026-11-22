@@ -225,10 +225,13 @@ class FreqtradeRunner:
         return p
 
     # ------------------------------------------------------------------ commands
-    def download(self, job: Job, config: Path, pairs: list[str], timerange: str, timeframe: str | None = None) -> None:
+    def download(self, job: Job, config: Path, pairs: list[str], timerange: str, timeframe: str | None = None,
+                 prepend: bool = False) -> None:
+        """Freqtrade only appends to existing files; `prepend` fetches the missing *older* part
+        (the cache may start later than a long replication needs)."""
         self._run(["download-data", *self._common(job, [config]), "--timerange", timerange,
                    "--timeframes", timeframe or self.s.research.timeframe, "--trading-mode", "futures",
-                   "--pairs", *pairs], job, timeout=3 * 3600)
+                   *(["--prepend"] if prepend else []), "--pairs", *pairs], job, timeout=3 * 3600)
 
     def test_pairlist(self, job: Job, config: Path) -> list[str]:
         proc = self._run(["test-pairlist", "--config", str(config), "--userdir",

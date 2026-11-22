@@ -55,13 +55,14 @@ def _row(st: dict, fwd: dict, board: dict) -> dict:
 def listing(reg: Registry, show: str = "active") -> dict:
     fwd = reg.kv_get("forward_results") or {}
     board = _board(reg)
+    sig = (reg.kv_get("signals") or {}).get("per_sleeve") or {}
     rows = []
     for st in reg.strategies():
         if show == "active" and st["stage"] in ("rejected", "retired"):
             continue
         if show == "retired" and st["stage"] != "retired":
             continue
-        rows.append(_row(st, fwd, board))
+        rows.append({**_row(st, fwd, board), "signals": sig.get(st["id"])})
     rows.sort(key=lambda r: (STAGE_ORDER.get(r["stage"], 9), -(r["demo"]["trades"] or 0), -r["score"]))
     counts: dict[str, int] = {}
     for st in reg.strategies():
@@ -98,7 +99,8 @@ def detail(reg: Registry, sid: str) -> dict | None:
     trades = [_norm_trade(t) for t in reg.q(
         "SELECT trade_id, pair, is_short, open_date, close_date, open_rate, close_rate, profit_abs, "
         "profit_ratio, exit_reason, stake_amount, leverage FROM live_trades WHERE sleeve_id=? ORDER BY open_date", (sid,))]
-    return {"row": _row(st, fwd_all, _board(reg)), "card": card, "gates": gate_rows,
+    sig = ((reg.kv_get("signals") or {}).get("per_sleeve") or {}).get(sid)
+    return {"row": {**_row(st, fwd_all, _board(reg)), "signals": sig}, "card": card, "gates": gate_rows,
             "history": (st.get("history") or [])[-12:],
             "research": {k: (res or {}).get(k) for k in ("oos", "stress", "mc", "market", "wfe", "robust_frac", "fold_pos",
                                                          "dsr", "clean_oos", "verdict", "replication", "parity")} if res else {"oos": st.get("oos")},

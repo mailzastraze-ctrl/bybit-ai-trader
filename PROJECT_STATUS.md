@@ -1,6 +1,6 @@
 # PROJECT_STATUS
 
-_Last updated: 2026-11-21 20:35 CET (PR #5 merged, deploy d1a0bde)_
+_Last updated: 2026-11-22 09:30 CET (signal journal, independent bets, PR #6 fixes)_
 
 ## Summary
 The system is **deployed and running autonomously on Bybit Demo**. It never trades real money: `demo_trading` is hard-required.
@@ -35,6 +35,8 @@ Links and rules:
 - **Best first** (`Lifecycle.outclasses`): a candidate that is clearly better (higher evidence class, or the same class with research score ≥ 1.5× and ≥ +0.2) takes the slot of the weakest exploration sleeve that has not earned it live (< 10 trades); the moved sleeve goes back to the queue. Order of victims: placeholders, idle sleeves, then the weakest. Sleeves with ≥ 10 live trades and PF ≥ 1.1 are never moved; the margin keeps slots from flipping on noise.
 - **Owner's systems** queue like autopilot finds (class 2): `research/external/owner-btc6h-ema47-76.json` (EMA 47/76, BTC 6h, stop 2×ATR, TP 2R, close on the opposite cross, engine exits) and `owner-sol15m-zscore-x2.json` (the SOL z-score with the engine's exact exits; supersedes the first import, which used the system's exits). More can be dropped into `research/external/` with `"owner": true`.
 - Explorer shows the replication length and "движок → бот" PF per strategy.
+- **Crowded coins go to the strongest evidence first** (PR #7, found in the 22:00 check): the manifest handed pairs out by score only, so with ≤ 4 strategies per coin and the 45-pair whitelist 5 of 24 exploration strategies had no coin (an owner/autopilot system with score 0 on BTC would lose it first). Within a stage pairs now go by evidence class, then score (manifest 19 → 20 sleeves; the rest are weak and rotate out when idle for 7 days).
+First run on exact exits (44933681420): of 16 autopilot replications 6 are exploratory (PF 1.14–2.49; MACD 4h on 2 coins went from PF 0.15 to 1.14), EMA crosses on 2–4h still lose on the last year (PF 0.12–0.68) – the 3-year replication + parity check from PR #6 will tell whether that is the market or a remaining mismatch.
 Honest caveat for the owner: PF 2.66 over the whole chart is the record of the best of many variants seen with hindsight; in the last run shuffled-history decoys alone passed the seven checks 32 times against 84 real configurations, so roughly 4 in 10 "stable" finds are luck-level. The forward test on unseen data decides.
 
 ## Strategy explorer `/explorer` (2026-11-21, 21:30; owner: "сделай удобный интерфейс, все стратегии, все сделки на свечах")
@@ -336,6 +338,15 @@ First run, 2026-11-20: scan finished at 14:56 UTC, experiments streaming.
 
 ## Bugs found by real runs (all fixed, with regression tests)
 userdir must exist · absolute `file:////` pairlist URL · OOM on 1 GB (now: no research on the server) · universe too small · artifact permissions · forced-entry stake · keep-alive reset · hyperopt hang (watchdog) · weak candidates (stricter gates + retraction) · placeholders blocking research · CI missing psutil.
+
+## Signal journal + independent bets; fixes to PR #6 (2026-11-22 morning; agreed with the owner the evening before)
+**Fixes found in the morning check (my mistakes in PR #6):**
+- The 3-year replication failed for every 6h/12h configuration (~13 per run, incl. the owner's EMA 47/76 BTC 6h): Freqtrade only appends to cached candle files, so history older than the cache was never fetched ("no data left after adjusting for startup candles"). Now the download also prepends older candles (`download-data --prepend`), and the number of quarters is fitted to the history that really exists (`fit_folds`: 4–12; e.g. 10 for 6h if the cache starts 1200 days back).
+- `replication` and `parity` were computed in the lab but dropped by the merge (`RESULT_KEYS`), so the parity alarm could not fire and the explorer showed nothing. Added.
+**Observation only (no trading decision changed):**
+- **Signal journal** (`ftbase._journal*`, `signals.jsonl` next to the manifest, `observe.summarize_signals`): every new entry signal (rising edge on the last closed candle, once per candle) and every entry decision (once per 15 min). Each signal gets one outcome: executed, or why not – coin held by another strategy, two signals on one candle, pause/daily stop, same-side count, exploration count, open risk, side risk, exploration risk, or "not entered" (bot limit, zero stake, order). Kept 30 days. Control room under the positions: "Сигналы за 7 дней: N, исполнено M (x%). Пропущены: …"; explorer per strategy.
+- **Independent bets** (`observe.exposure`): open positions weighted by risk at their stops and the correlation of the coins' hourly returns (bot's own 15m candles, local API, every 15 min): effective bets = (Σ|risk|)² / sᵀCs (10 same-side positions at ρ 0.8 ≈ 1.2 bets), plus the share of open risk on one side. In the positions header: "≈K независимых ставок, x% риска в одну сторону".
+Later (≥ 50 demo trades): each sleeve's demo vs its own backtest over the same days.
 
 ## Needs the owner
 1. A usage limit in Railway (Hobby is paid since 2026-11-20).

@@ -352,3 +352,41 @@ def test_exploration_cannot_crowd_out_proven_strategies(tmp_path, monkeypatch):
     assert st.confirm_trade_entry("SOL/USDT:USDT", "limit", 1, 100, "GTC", None, "ex", "short") is False
     st.config["aitrader"]["max_explore_risk"] = 0.03
     assert st.confirm_trade_entry("SOL/USDT:USDT", "limit", 1, 100, "GTC", None, "ex", "short") is True
+
+
+def test_signal_journal_records_decisions_without_changing_them(tmp_path, monkeypatch):
+    """Observation only: every refusal and acceptance is journalled once per 15 minutes, every
+    new signal once per candle with what happened to it; decisions stay exactly the same."""
+    import json
+
+    import pandas as pd
+    from AIPortfolio import AIPortfolio
+    from freqtrade.persistence import Trade
+    m = Manifest(sleeves=[Sleeve(id="ex", family="trend_ema", params={}, pairs=["ETH/USDT:USDT", "SOL/USDT:USDT"],
+                                 stage="exploration", risk=0.001, sides=["long", "short"])])
+    path = tmp_path / "manifest.json"
+    m.save(path)
+    st = AIPortfolio({"aitrader": {"manifest_path": str(path), "max_open_risk": 0.08, "max_side_risk": 0.04,
+                                   "max_same_side": 25, "max_explore_trades": 1, "max_explore_risk": 0.03},
+                      "runmode": "live", "exchange": {"demo_trading": True}})
+    st.bot_start()
+    st.wallets = FakeWallets()
+    t = SimpleNamespace(pair="ETH/USDT:USDT", enter_tag="ex", is_short=True, open_rate=100.0, stop_loss=101.0,
+                        stake_amount=100.0, leverage=1.0)
+    monkeypatch.setattr(Trade, "get_open_trades", staticmethod(lambda: [t]), raising=False)
+    for _ in range(3):  # offered again every few seconds while the candle lasts
+        assert st.confirm_trade_entry("SOL/USDT:USDT", "limit", 1, 100, "GTC", None, "ex", "short") is False
+    st.config["aitrader"]["max_explore_trades"] = 5
+    assert st.confirm_trade_entry("SOL/USDT:USDT", "limit", 1, 100, "GTC", None, "ex", "short") is True
+    df = pd.DataFrame({"date": pd.date_range("2026-11-22", periods=3, freq="15min", tz="UTC")})
+    sl = st.sleeves_for_pair("SOL/USDT:USDT")[0]
+    rise, flat = pd.Series([False, False, True]), pd.Series([True, True, True])
+    monkeypatch.setattr(st, "_open_tag", lambda pair: "other")
+    st._journal_signals(df, "SOL/USDT:USDT", sl, rise, flat, pd.Series([True] * 3))   # long: new; short: lasting state
+    st._journal_signals(df, "SOL/USDT:USDT", sl, rise, flat, pd.Series([True] * 3))   # same candle again: no new line
+    monkeypatch.setattr(st, "_open_tag", lambda pair: "ex")
+    st._journal_signals(df.assign(date=df["date"] + pd.Timedelta("15min")), "SOL/USDT:USDT", sl, rise, flat,
+                        pd.Series([True] * 3))  # its own position: not a missed signal
+    lines = [json.loads(x) for x in (tmp_path / "signals.jsonl").read_text().splitlines()]
+    assert [(x["k"], x["o"]) for x in lines] == [("cfm", "explore_count"), ("cfm", "accepted"), ("sig", "pair_busy")]
+    assert lines[-1]["d"] == "long" and lines[-1]["s"] == "ex"

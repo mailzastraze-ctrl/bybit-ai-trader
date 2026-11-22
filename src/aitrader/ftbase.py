@@ -9,7 +9,7 @@ from __future__ import annotations
 import json
 import logging
 import os
-from datetime import datetime
+from datetime import UTC, datetime
 from pathlib import Path
 
 import pandas as pd
@@ -260,10 +260,12 @@ class AIBase(IStrategy):
             dataframe[f"xs:{sleeve.id}"] = res["exit_short_sig"].values
             dataframe[f"cv:{sleeve.id}"] = res["conviction"].values
             dataframe[f"at:{sleeve.id}"] = res["atr"].values  # ATR on the sleeve's own timeframe
-            if paused:
-                continue
             ls = pd.Series(res["long_sig"].values, index=dataframe.index).fillna(False).astype(bool)
             ss = pd.Series(res["short_sig"].values, index=dataframe.index).fillna(False).astype(bool)
+            if paused:
+                self._journal_signals(dataframe, metadata["pair"], sleeve, ls, ss, free, paused=True)
+                continue
+            self._journal_signals(dataframe, metadata["pair"], sleeve, ls, ss, free)
             if "long" in sleeve.sides:
                 take = ls & free
                 dataframe.loc[take, ["enter_long", "enter_tag"]] = (1, sleeve.id)
@@ -273,6 +275,61 @@ class AIBase(IStrategy):
                 dataframe.loc[take, ["enter_short", "enter_tag"]] = (1, sleeve.id)
                 free &= ~take
         return dataframe
+
+    # ------------------------------------------------------------------ signal journal
+    # Observation only (aitrader.observe): what happened to each new entry signal of the live
+    # book. Nothing here changes a decision; any failure is swallowed.
+    def _journal(self, kind: str, sleeve_id: str | None, pair: str, side: str, outcome: str,
+                 candle: str | None = None) -> None:
+        if self.config.get("runmode") not in (RunMode.LIVE, RunMode.DRY_RUN) or not sleeve_id:
+            return
+        try:
+            now = datetime.now(UTC)
+            # one line per signal and candle, one per decision and 15 minutes (a declined signal
+            # is offered to the bot every few seconds while its candle lasts)
+            seen = self.__dict__.setdefault("_journal_seen", set())
+            key = (kind, sleeve_id, pair, side, candle if kind == "sig" else (outcome, int(now.timestamp()) // 900))
+            if key in seen:
+                return
+            if len(seen) > 20000:
+                seen.clear()
+            seen.add(key)
+            mpath = self.config.get("aitrader", {}).get("manifest_path") or os.environ.get(
+                "AITRADER_MANIFEST", "/data/aitrader/manifest.json")
+            line = json.dumps({"ts": now.strftime("%Y-%m-%dT%H:%M:%SZ"), "k": kind, "s": sleeve_id,
+                               "p": pair, "d": side, "o": outcome, "c": candle}, separators=(",", ":"))
+            with (Path(mpath).parent / "signals.jsonl").open("a", encoding="utf-8") as f:
+                f.write(line + "\n")
+        except Exception as e:  # noqa: BLE001
+            logger.debug("signal journal: %s", e)
+
+    def _journal_signals(self, dataframe: pd.DataFrame, pair: str, sleeve: Sleeve, ls: pd.Series, ss: pd.Series,
+                         free: pd.Series, paused: bool = False) -> None:
+        """A new signal = true on the last closed candle and not on the one before (state-type
+        signals count once per episode)."""
+        if self.config.get("runmode") not in (RunMode.LIVE, RunMode.DRY_RUN) or len(dataframe) < 2:
+            return
+        try:
+            candle = pd.Timestamp(dataframe["date"].iloc[-1]).strftime("%Y-%m-%dT%H:%M:%SZ")
+            for side, sig in (("long", ls), ("short", ss)):
+                if side not in sleeve.sides or (side == "short" and not self.can_short):
+                    continue
+                if not (bool(sig.iloc[-1]) and not bool(sig.iloc[-2])):
+                    continue
+                if paused:
+                    outcome = "paused"
+                else:
+                    held = self._open_tag(pair)
+                    if held == sleeve.id:
+                        continue  # already in this position: not a missed signal
+                    outcome = "pair_busy" if held else ("same_candle" if not bool(free.iloc[-1]) else "emitted")
+                self._journal("sig", sleeve.id, pair, side, outcome, candle)
+        except Exception as e:  # noqa: BLE001
+            logger.debug("signal journal: %s", e)
+
+    def _decline(self, entry_tag: str | None, pair: str, side: str, reason: str) -> bool:
+        self._journal("cfm", entry_tag, pair, side, reason)
+        return False
 
     def populate_exit_trend(self, dataframe: pd.DataFrame, metadata: dict) -> pd.DataFrame:
         # Exit signals belong to the sleeve that opened the position (pairs can be shared).
@@ -501,7 +558,7 @@ class AIBase(IStrategy):
         short = side == "short"
         if sum(1 for t in trades if bool(t.is_short) == short) >= max_side:
             logger.info("portfolio limit: %s %s skipped (%d %s positions already open)", side, pair, max_side, side)
-            return False
+            return self._decline(entry_tag, pair, side, "side_count")
         # The weak cannot crowd out the strong: unproven exploration sleeves share a sub-budget
         # (positions and open risk), so proven strategies always find room for their entries.
         new_sleeve = self.sleeve_by_tag(pair, entry_tag)
@@ -511,7 +568,7 @@ class AIBase(IStrategy):
             if len(explore) >= max_ex:
                 logger.info("portfolio limit: %s %s skipped (%d exploration positions open, cap %d – room kept for "
                             "proven strategies)", side, pair, len(explore), max_ex)
-                return False
+                return self._decline(entry_tag, pair, side, "explore_count")
         equity = float(self.wallets.get_total_stake_amount()) if self.wallets else 0.0
         if equity > 0:
             open_risk = 0.0
@@ -525,7 +582,7 @@ class AIBase(IStrategy):
             if open_risk + new_risk > max_risk * equity:
                 logger.info("portfolio limit: %s %s skipped (open risk %.2f%% of equity, cap %.1f%%)", side, pair,
                             100 * open_risk / equity, 100 * max_risk)
-                return False
+                return self._decline(entry_tag, pair, side, "open_risk")
             # one direction is close to one bet (crypto moves together): cap the risk per side too
             side_risk = sum(max(((t.stop_loss - t.open_rate) / t.open_rate if t.is_short else (t.open_rate - t.stop_loss) / t.open_rate), 0.0)
                             * float(t.stake_amount or 0) * float(t.leverage or 1)
@@ -534,7 +591,7 @@ class AIBase(IStrategy):
             if side_risk + new_risk > max_side_risk * equity:
                 logger.info("portfolio limit: %s %s skipped (%s risk %.2f%% of equity, cap %.1f%% per side)", side, pair,
                             side, 100 * side_risk / equity, 100 * max_side_risk)
-                return False
+                return self._decline(entry_tag, pair, side, "side_risk")
             if new_sleeve is not None and new_sleeve.stage == "exploration":
                 max_ex_risk = float(cfg.get("max_explore_risk", max_risk * 0.375))
                 ex_risk = sum(max(((t.stop_loss - t.open_rate) / t.open_rate if t.is_short else (t.open_rate - t.stop_loss) / t.open_rate), 0.0)
@@ -543,7 +600,8 @@ class AIBase(IStrategy):
                 if ex_risk + new_risk > max_ex_risk * equity:
                     logger.info("portfolio limit: %s %s skipped (exploration risk %.2f%% of equity, cap %.1f%% – room "
                                 "kept for proven strategies)", side, pair, 100 * ex_risk / equity, 100 * max_ex_risk)
-                    return False
+                    return self._decline(entry_tag, pair, side, "explore_risk")
+        self._journal("cfm", entry_tag, pair, side, "accepted")
         return True
 
     def _trade_stage(self, trade) -> str | None:

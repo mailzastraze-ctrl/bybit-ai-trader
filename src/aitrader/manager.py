@@ -6,7 +6,7 @@ from __future__ import annotations
 import time
 from datetime import timedelta
 
-from aitrader import context, memguard, readiness, storage
+from aitrader import context, memguard, observe, readiness, storage
 from aitrader.ftclient import FtClient
 from aitrader.learner import Learner
 from aitrader.lifecycle import Lifecycle
@@ -88,6 +88,10 @@ def housekeeping(reg: Registry, s=None) -> None:
             slimmed = storage.maintain(reg, s.data_dir, s.user_data / "logs").get("slimmed", 0)
         except Exception as e:  # noqa: BLE001
             log.warning("storage maintenance failed: %s", e)
+        try:
+            observe.trim_journal(observe.journal_path(s.state_dir))  # signal journal: last 30 days
+        except Exception as e:  # noqa: BLE001
+            log.warning("signal journal trim failed: %s", e)
     last_vac = parse_dt(reg.kv_get("vacuum_ts"))
     if last_vac is None or (now - last_vac).days >= 7 or slimmed >= 300:
         with reg.conn() as c:
@@ -159,6 +163,13 @@ def main() -> None:
                     reg.kv_set("disk", {**(reg.kv_get("disk") or {}), **storage.disk_status(s.data_dir)})
                 except OSError:
                     pass
+                try:  # observation only: missed signals and how many independent bets are open
+                    reg.kv_set("signals", observe.summarize_signals(observe.journal_path(s.state_dir)))
+                    if up:
+                        rets = observe.hourly_returns(ft, [t.get("pair") for t in open_trades if t.get("pair")])
+                        reg.kv_set("exposure", {"ts": iso(), **observe.exposure(open_trades, rets, equity or None)})
+                except Exception as e:  # noqa: BLE001
+                    log.info("observation failed: %s", e)
             memguard.release()
             h = memguard.headroom_mb()
             if h is not None:

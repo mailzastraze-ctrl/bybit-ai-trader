@@ -570,3 +570,9 @@ def test_parity_alarm_needs_half_of_at_least_four(tmp_path):
     out = record_parity(reg, {"batch_id": "b2", "experiments_full": [exp(False, 1), exp(True, 2), exp(True, 3), exp(True, 4)]}, "t")
     assert not out["alarm"]
     assert record_parity(reg, {"experiments_full": [{"spec": {}, "result": {}}]}, "t") is None
+
+
+def test_replication_and_parity_reach_the_server():
+    """They were computed in the lab but dropped by the merge (2026-11-21) – the alarm could not fire."""
+    from aitrader.research.batch import RESULT_KEYS
+    assert {"replication", "parity", "clean_oos", "market"} <= set(RESULT_KEYS)
