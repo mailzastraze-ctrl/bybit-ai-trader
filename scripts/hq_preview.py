@@ -194,19 +194,15 @@ def shoot(port: int, out: Path) -> int:
         pg.wait_for_function("window.__hqReady === true", timeout=90_000)
         time.sleep(9)
         snap(pg, out / "hq-overview.png")
-        shots = [("hq-mission", "mission"), ("hq-research", "research"), ("hq-trading", "trading"), ("hq-cloud", "cloud")]
-        for name, key in shots:
-            label = {"mission": "Company Mission", "research": "Research Lab", "trading": "Trading Floor",
-                     "cloud": "GitHub Research Lab"}[key]
-            pg.evaluate(f"document.querySelectorAll('.tag').forEach(t => {{ if (t.querySelector('b').textContent.trim() === {json.dumps(label)}) t.click(); }})")
+        for name, key in (("hq-trading", "trading"), ("hq-research", "research"), ("hq-mission", "meeting"), ("hq-analysts", "analysts")):
+            pg.evaluate(f"window.__hq.zone({json.dumps(key)})")
             time.sleep(4)
             snap(pg, out / f"{name}.png")
-        # close-ups: a researcher and a trader (character detail + animation)
-        pg.evaluate("document.getElementById('px').click()")
-        for name, idx in (("hq-person-research", 3), ("hq-person-trader", 11)):
-            pg.evaluate("document.getElementById('bReset').click()")
+        # close-ups over the shoulder: each person's own screen (manager's report, a trader's chart)
+        for name, pid in (("hq-person-ceo", "viktor"), ("hq-person-trader", "ivan"), ("hq-person-research", "dina")):
+            pg.evaluate("window.__hq.close(); window.__hq.home()")
             time.sleep(2)
-            pg.evaluate(f"window.__hq.follow({idx}, true)")
+            pg.evaluate(f"window.__hq.person({json.dumps(pid)})")
             time.sleep(4)
             snap(pg, out / f"{name}.png")
         b.close()

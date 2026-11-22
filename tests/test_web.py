@@ -29,7 +29,7 @@ def test_auth_and_endpoints(client):
     assert "Пульт управления" in client.get("/", auth=a).text
     assert "AI TRADER HQ" in client.get("/hq", auth=a).text
     assert "renderForward" in client.get("/static/control.js").text
-    assert "class Person" in client.get("/static/hq.js").text
+    assert "class Person" in client.get("/static/hq-people.js").text
     assert "Пульт управления" in client.get("/terminal", auth=a).text  # old page → the one control room
     ov = client.get("/api/overview", auth=a).json()
     assert ov["bot_up"] is False and ov["open_trades"] == []
