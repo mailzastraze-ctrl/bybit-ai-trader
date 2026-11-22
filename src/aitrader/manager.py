@@ -51,7 +51,10 @@ def kill_switch(reg: Registry, equity: float, limit: float, cooldown_h: float) -
 
 def daily_stop(reg: Registry, equity: float, limit: float) -> bool:
     """Pause new entries for the rest of the UTC day once equity is `limit` below the day's
-    first reading: a bad day stays a bad day. Open positions keep their stops and exits."""
+    first reading: a bad day stays a bad day. Open positions keep their stops and exits.
+    `limit` ≤ 0 switches it off (the demo default since 2026-11-22)."""
+    if not limit or limit <= 0:
+        return False
     day = utcnow().strftime("%Y-%m-%d")
     d = reg.kv_get("day_open") or {}
     if d.get("day") != day or not d.get("equity"):
@@ -134,7 +137,8 @@ def main() -> None:
     life.bootstrap()
     life.import_offline_candidates(s.app_dir / "research" / "imports")
     life.import_external(s.app_dir / "research" / "external")
-    life.import_hypotheses(s.app_dir / "research" / "hypotheses")  # shadow only: forward book, never demo
+    life.import_hypotheses(s.app_dir / "research" / "hypotheses")  # shadow: the forward book's own copies
+    life.import_core(s.app_dir / "research" / "external", s.app_dir / "research" / "hypotheses")  # demo core
     # make sure the bot has a manifest + pairlist before it starts trading
     startup_manifest(life, s, set(scanner.excluded_pairs()))
     reg.event("manager", "manager started")

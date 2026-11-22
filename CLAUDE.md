@@ -10,7 +10,9 @@ The owner runs several Claude sessions on this project (trading system, 3D offic
 
 ## Never
 - Weaken a research gate (gates only get stricter).
-- Change demo-only, 1x leverage, risk limits (8 % total, 4 % per side), exchange stops, the kill-switch or the daily loss limit.
+- Change demo-only, 1x leverage, risk limits (8 % total, 4 % per side), exchange stops or the kill-switch.
+- Switch the daily loss limit back on during the demo, or leave it off for real money. The owner switched it off on demo on 22.11; it is required before real money.
+- Remove or rotate the demo core (`core-*`, files with `"core": true`) without the owner. It is his decision of 22.11.
 - Add strategy families or genes during the observation period.
 
 ## Before merging

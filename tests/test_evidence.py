@@ -551,6 +551,10 @@ def test_daily_loss_limit_pauses_entries_until_the_next_utc_day(env):
     assert any("DAILY LOSS LIMIT" in e["message"] for e in reg.q("SELECT message FROM events"))
     reg.kv_set("day_open", {"day": "2000-01-01", "equity": 10_000, "hit": True})
     assert daily_stop(reg, 9_000, 0.03) is False   # a new day starts from its own first reading
+    # off on demo (owner, 2026-11-22): no pause however bad the day
+    assert daily_stop(reg, 10_000, 0.0) is False and daily_stop(reg, 5_000, 0.0) is False
+    from aitrader.settings import Settings
+    assert Settings().lifecycle.daily_loss_limit == 0.0
 
 
 def test_engine_bot_parity_flags_a_collapsed_replication():
