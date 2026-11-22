@@ -264,11 +264,104 @@ def test_forward_record_outlives_the_60_day_book_so_the_90_day_decision_can_happ
     kept = reg.kv_get("forward_results")
     assert set(kept) == {f"x{i}" for i in range(len(ages))}  # every record kept, re-tested or not
     summ = reg.kv_get("forward")
-    assert summ["forward_days"] >= 90  # was capped at 60: the decision rule could never be reached
-    assert summ["verdict"] not in ("too_early",)
+    assert summ["calendar_days"] >= 90  # the oldest record is still there (was deleted at 60 days)
     assert len(forward.book(reg)) == 3  # only the young ones are still re-tested: no extra lab load
     # records far past any decision window are dropped, so the store stays bounded
     payload2 = {"results": [_forward_result("x99", 200)]}
     _exp(reg, "x99", 0.1, hours_ago=200 * 24)
     forward.apply(reg, payload2)
     assert "x99" not in reg.kv_get("forward_results")
+
+
+# ---------------------------------------------------------------- audit 22.11 (rev. 2): observed days, not calendar age
+def _cohort(n, freeze_day, last_day, now, edge_top=0.0015, edge_rest=-0.0005, per_day=2, stamp=True, seed=11):
+    """n research strategies frozen on `freeze_day` (days before `now` = 90 - freeze_day …),
+    tested (and trading) only until `last_day`; days are counted from now - 90 days."""
+    rng, t0, rows = random.Random(seed), now - timedelta(days=90), []
+    for i in range(n):
+        top = i < n // 4
+        fz = t0 + timedelta(days=freeze_day, hours=1)
+        trades = [[iso(t0 + timedelta(days=d, hours=12))[:16], rng.gauss(edge_top if top else edge_rest, 0.002)]
+                  for d in range(freeze_day + 1, last_day) for _ in range(per_day)]
+        r = {"id": f"c{freeze_day:02d}-{i:03d}", "score": 10 - i * 0.1, "freeze": iso(fz), "trades": trades, "variant": "v"}
+        if stamp:
+            r["tested_until"] = iso(t0 + timedelta(days=last_day))
+        rows.append(r)
+    return rows
+
+
+@pytest.mark.parametrize("stamp", [True, False])
+def test_no_final_verdict_when_observation_stopped_at_60_days_but_the_calendar_says_90(stamp):
+    """The cohort left the book at day 60 (no re-tests, no new trades); the calendar reaches 90
+    days. Counting calendar age, the strong edge would read as 'works' – a final verdict on 60 days
+    of data. Only observed days count, so the read stays early (with or without the test stamp)."""
+    now = utcnow()
+    rows = _cohort(40, 0, 60, now, stamp=stamp)
+    v = forward.summarize(rows, now=now)
+    assert v["calendar_days"] >= 89.9
+    assert 58 <= v["forward_days"] <= 61  # observed days of the top quartile
+    assert v["verdict"].startswith("early_")
+    assert v["verdict"] not in ("works", "not_working", "inconclusive")
+
+
+def test_final_verdict_needs_90_observed_days_of_a_continuous_research_process():
+    """New strategies keep being frozen and each is observed for its 60-day book life: together
+    they cover 90 days, so the pre-registered decision can happen."""
+    now = utcnow()
+    rows = []
+    for k, fday in enumerate(range(0, 90, 10)):  # a new batch every 10 days
+        rows += _cohort(8, fday, min(fday + 60, 90), now, seed=k)
+    v = forward.summarize(rows, now=now)
+    assert v["forward_days"] >= 88
+    assert v["verdict"] in ("works", "inconclusive", "not_working")
+
+
+def test_a_stale_strategy_does_not_dilute_the_active_ones():
+    """Equal weight across strategies *under test that day*: a record whose observation ended is not
+    a zero in later days, and a strategy not yet frozen is not a zero in earlier days."""
+    now = utcnow()
+    a = _cohort(1, 0, 60, now, edge_top=0.01, seed=1)[0] | {"id": "a"}
+    b = _cohort(1, 60, 90, now, edge_top=0.01, seed=2)[0] | {"id": "b"}
+    a["trades"] = [[ts, 0.01] for ts, _ in a["trades"]]
+    b["trades"] = [[ts, 0.01] for ts, _ in b["trades"]]
+    series = forward._daily_series([a, b], now)
+    handover = a["tested_until"][:10]  # both are under test that day (a's last, b's first)
+    traded = [v for d, v in series.items() if v and d != handover]
+    assert len(traded) > 50 and all(v == pytest.approx(0.02) for v in traded)  # 2 trades of 1 % a day, never halved
+
+
+def test_benchmark_is_compared_on_the_same_observed_days_only():
+    now = utcnow()
+    bench = _cohort(1, 0, 90, now, edge_top=0.004, seed=3)[0] | {"id": "bench", "benchmark": True}
+    top = _cohort(4, 50, 90, now, edge_top=0.0, edge_rest=0.0, seed=4)
+    vs = forward.versus(top[:1], [bench], now=now)
+    assert 38 <= vs["days"] <= 41  # days 50–90 only, not the benchmark's 90
+    in_window = sum(x for ts, x in bench["trades"] if ts >= iso(now - timedelta(days=40))[:10])
+    assert vs["bench_pct"] == pytest.approx(round(in_window * 100, 3), abs=0.05)
+
+
+def test_apply_stamps_the_test_time_and_stops_the_clock_when_a_record_leaves_the_book(env, monkeypatch):
+    """Lab runs every 3 days; one cohort frozen on day 0, no new research. At day 90 its records are
+    still kept (evidence), but their observation ended at day 60: no final verdict."""
+    s, reg = env
+    base = utcnow() - timedelta(days=90)
+    clock = {"now": base}
+    monkeypatch.setattr(forward, "utcnow", lambda: clock["now"])
+    cohort = _cohort(40, 0, 90, base + timedelta(days=90))  # the full would-be trade stream
+    for r in cohort:
+        reg.upsert("experiments", {"id": r["id"], "created": r["freeze"], "family": "trend_ema", "status": "done",
+                                   "finished": r["freeze"], "spec": {"family": "trend_ema", "pairs": ["BTC/USDT:USDT"]},
+                                   "result": {"params": {"fast": 10}, "pairs": ["BTC/USDT:USDT"], "score": r["score"],
+                                              "verdict": "rejected", "oos": {}}})
+    for day in range(1, 91, 3):
+        clock["now"] = base + timedelta(days=day)
+        in_book = {e["id"] for e in forward.book(reg)}
+        results = [{k: v for k, v in r.items() if k != "tested_until"}
+                   | {"ok": True, "trades": [t for t in r["trades"] if t[0] <= iso(clock["now"])[:16]]}
+                   for r in cohort if r["id"] in in_book]  # the lab only re-tests the book
+        forward.apply(reg, {"results": results})
+    kept = reg.kv_get("forward_results")
+    assert len(kept) == 40  # evidence kept past the book life
+    summ = reg.kv_get("forward")
+    assert summ["calendar_days"] >= 88 and summ["forward_days"] <= 62
+    assert summ["verdict"].startswith("early_")
