@@ -2,6 +2,9 @@
 
 History of the system, newest first. `PROJECT_STATUS.md` holds only the current state.
 
+## 2026-11-22 (audit) — account caps count a new entry at its sized risk
+`confirm_trade_entry` added a new trade at its sleeve's nominal risk, but `custom_stake_amount` sizes it up to 1.5× by conviction and may round a small stake up to the exchange minimum (another ≤ 1.5×). Near the 8 % / 4 % / 3 % caps one entry could pass them by up to ~0.1–0.2 % of equity. The new entry now counts at the larger of its nominal risk and its sized risk (order amount × stop distance), so the caps only get stricter. Open trades are unaffected. Tests: `tests/test_audit_risk.py`.
+
 ## 2026-11-22 (evening) — demo always in the market: TSMOM core, active/precise lanes, no daily stop on demo
 These are the owner's decisions; they change what trades on demo, not the evidence. The forward book still judges every configuration separately.
 
