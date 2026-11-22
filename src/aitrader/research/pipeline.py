@@ -16,7 +16,7 @@ from datetime import timedelta
 import numpy as np
 import pandas as pd
 
-from aitrader.families import MARKET_PAIR, NEEDS_MARKET, NEEDS_OI, RESEARCH_CLASS, get_family
+from aitrader.families import MARKET_PAIR, NEEDS_OI, RESEARCH_CLASS, get_family
 from aitrader.manifest import Manifest, Sleeve
 from aitrader.registry import Registry
 from aitrader.research import metrics as M
@@ -164,7 +164,9 @@ class Pipeline:
         self._progress(eid, "download")
         from aitrader.research.screen import warmup_days
         data_start = folds[0].train_start - timedelta(days=warmup_days(tf))  # + 720-candle indicator warm-up
-        data_pairs = sorted(set(pairs) | ({MARKET_PAIR} if fam.name in NEEDS_MARKET else set()))
+        # BTC for every family: the market-alpha gate reads it (audit 22.11 – it used to be there
+        # only for rel_strength or by chance from the cache, and a missing file skipped the gate)
+        data_pairs = sorted(set(pairs) | {MARKET_PAIR})
         if tf == rs.timeframe:
             self.ft.download(job, base_cfg, data_pairs, f"{data_start:%Y%m%d}-")
         else:
@@ -261,7 +263,7 @@ class Pipeline:
         fold_pos = (sum(1 for f in fold_reports if (f.get("oos") or {}).get("total_return", 0) > 0)
                     / max(len(folds), 1))
         clean = clean_oos(spec)
-        market = self._oos_market_split(oos_trades, oos_start, oos_end)
+        market = self._oos_market_split(oos_trades, oos_start, oos_end, tf=tf)
         verdict, gates = evaluate_gates(self.s.gates, {
             "oos": oos, "stress": stress, "wfe": wfe, "robust_frac": robust_frac, "mc": mc,
             "dsr": dsr, "fold_pos": fold_pos, "clean_oos": clean,
@@ -293,12 +295,15 @@ class Pipeline:
         self._record_strategy(eid, spec, result)
         return result
 
-    def _oos_market_split(self, trades: list[dict], start, end) -> dict | None:
+    def _oos_market_split(self, trades: list[dict], start, end, tf: str | None = None) -> dict | None:
         """Beta to BTC and the alpha left after it, on the walk-forward OOS daily P&L. None
-        when BTC candles are not in the local data (the gate is then simply not applied)."""
+        when it cannot be measured (no BTC candles, too few days): the validation gate then
+        fails – a data gap is not a passed alpha test."""
         from aitrader import evidence as EV
         try:
-            fn = pair_file(self.s, MARKET_PAIR)
+            fn = pair_file(self.s, MARKET_PAIR, tf)  # downloaded with the experiment's own data
+            if not fn.exists():
+                fn = pair_file(self.s, MARKET_PAIR)
             if not trades or not fn.exists():
                 return None
             d = pd.read_feather(fn, columns=["date", "close"])

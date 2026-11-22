@@ -2,6 +2,9 @@
 
 History of the system, newest first. `PROJECT_STATUS.md` holds only the current state.
 
+## 2026-11-22 (audit) — a missing alpha over BTC no longer passes validation
+The `market_alpha` gate (OOS profit must not be just the BTC move) was skipped when the alpha could not be measured. BTC candles were downloaded only for `rel_strength`; for every other family the gate depended on whether a BTC file at the base timeframe happened to be in the cache and covered the OOS window. A data gap therefore passed as a successful alpha test, and a short book in a falling market could validate. Now BTC is downloaded with every experiment at its own timeframe, the split reads that file, and a missing alpha fails the gate (exploration is unaffected: it never needed alpha). This only makes a research gate stricter; nothing changes in live trading or for open positions. Tests: `tests/test_audit_alpha.py`; four older tests that relied on the skip now carry a measured alpha.
+
 ## 2026-11-22 (evening) — demo always in the market: TSMOM core, active/precise lanes, no daily stop on demo
 These are the owner's decisions; they change what trades on demo, not the evidence. The forward book still judges every configuration separately.
 
