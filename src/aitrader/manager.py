@@ -168,6 +168,7 @@ def main() -> None:
                     if up:
                         rets = observe.hourly_returns(ft, [t.get("pair") for t in open_trades if t.get("pair")])
                         reg.kv_set("exposure", {"ts": iso(), **observe.exposure(open_trades, rets, equity or None)})
+                        observe.postmortem(reg, ft)  # what happened after each exit
                 except Exception as e:  # noqa: BLE001
                     log.info("observation failed: %s", e)
             memguard.release()

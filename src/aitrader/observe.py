@@ -214,3 +214,174 @@ def hourly_returns(ft, pairs: list[str], limit: int = 1000) -> dict[str, list[fl
 
 def journal_path(state_dir: Path) -> Path:
     return state_dir / "signals.jsonl"
+
+# ---------------------------------------------------------------------- post-mortem ("работа над ошибками")
+STOP_EXITS = ("managed_stop", "stoploss_on_exchange", "stop_loss", "stoploss", "trailing_stop_loss", "liquidation")
+PM_KEEP_DAYS = 30   # results kept
+PM_WINDOW_DAYS = 10  # the bot keeps ~10 days of 15m candles: a trade is judged on what followed within it
+
+
+def _f(x) -> float | None:
+    try:
+        v = float(x)
+    except (TypeError, ValueError):
+        return None
+    return v if v == v else None
+
+
+def judge_exit(trade: dict, params: dict, candles: list[list], now=None) -> dict | None:
+    """What happened after one closed trade, in R (its initial risk):
+    - stop: the planned stop. 'reversed' if price then reached the target (or +1 R without
+      one) before going another 0.5 R against – a wider stop would have won; 'confirmed' if it
+      went the 0.5 R against first.
+    - protective / rule (stop moved to break-even/profit, exit signal, time exit, locks): the
+      trade is replayed with its original stop and target – `hold_r` – and the money the early
+      exit saved (> 0) or cost (< 0): `saved_usd` = (exit − hold) × risk.
+    - take_profit: how much further price went in the next 3 days (`further_r`).
+    Candles: [[ts_ms, open, high, low, close], ...]; 'open' while neither level has been hit."""
+    raw = trade.get("raw") if isinstance(trade.get("raw"), dict) else {}
+    o, isl = _f(trade.get("open_rate")), _f(raw.get("initial_stop_loss_abs"))
+    c, amt = _f(trade.get("close_rate")), _f(raw.get("amount"))
+    closed = parse_dt(trade.get("close_date"))
+    if not o or not isl or not c or not closed or abs(o - isl) <= 0:
+        return None
+    short = bool(trade.get("is_short"))
+    sgn = -1.0 if short else 1.0
+    risk = abs(o - isl)
+    r_exit = sgn * (c - o) / risk
+    reason = str(trade.get("exit_reason") or "")
+    p = params or {}
+    rr = _f(p.get("tp_rr")) or 2.0
+    if int(p.get("exit_mode") or 0) == 1:
+        rr = _f(p.get("lab_tp")) or 0.0  # Strategy Lab: no target when 0
+    tp = o + sgn * rr * risk if rr > 0 else None
+    if reason == "take_profit":
+        kind = "take_profit"
+    elif reason in STOP_EXITS and r_exit <= -0.8:
+        kind = "stop"
+    elif reason in STOP_EXITS:
+        kind = "protective"  # the stop had been moved (break-even, profit lock, trail, market shock)
+    else:
+        kind = "rule"        # exit signal, time exit, event/profit locks
+    out = {"trade_id": trade.get("trade_id"), "sleeve": trade.get("sleeve_id"), "pair": trade.get("pair"),
+           "kind": kind, "reason": reason, "r_exit": round(r_exit, 2), "close_date": trade.get("close_date"),
+           "status": "open"}
+    usd_per_r = risk * amt if amt else None
+    if kind == "stop" and r_exit < -1.05 and usd_per_r:  # filled beyond the stop (gap, market stop, restart)
+        out["slip_usd"] = round((-1.0 - r_exit) * usd_per_r, 2)
+    t0 = closed.timestamp() * 1000
+    after = [x for x in candles or [] if _f(x[0]) is not None and float(x[0]) > t0]
+    if not after:
+        return out
+    if kind == "take_profit":
+        horizon = t0 + 3 * 86400e3
+        best = max((sgn * ((x[3] if short else x[2]) - o) / risk for x in after if float(x[0]) <= horizon), default=None)
+        if best is not None:
+            out["further_r"] = round(max(best - r_exit, 0.0), 2)
+            out["status"] = "done" if after[-1][0] >= horizon else "open"
+        return out
+    if kind == "stop":
+        target = tp if tp is not None else o + sgn * risk
+        worse = isl + sgn * -0.5 * risk  # another half R against
+        for x in after:
+            hi, lo = float(x[2]), float(x[3])
+            hit_worse = hi >= worse if short else lo <= worse
+            hit_target = lo <= target if short else hi >= target
+            if hit_worse:  # conservative: a candle touching both counts as the stop being right
+                out["status"] = "confirmed"
+                return out
+            if hit_target:
+                out["status"] = "reversed"
+                return out
+        return out
+    # protective / rule: replay with the original stop and target
+    hold = None
+    for x in after:
+        hi, lo = float(x[2]), float(x[3])
+        if (hi >= isl) if short else (lo <= isl):
+            hold = -1.0
+            break
+        if tp is not None and ((lo <= tp) if short else (hi >= tp)):
+            hold = rr
+            break
+    if hold is None:
+        last = float(after[-1][4])
+        out["hold_r_now"] = round(sgn * (last - o) / risk, 2)
+        return out
+    out["status"] = "done"
+    out["hold_r"] = round(hold, 2)
+    if usd_per_r:
+        out["saved_usd"] = round((r_exit - hold) * usd_per_r, 2)
+    return out
+
+
+def summarize_postmortem(results: list[dict]) -> dict:
+    """Totals over the kept results: is the early-exit logic paying for itself, are stops too
+    tight, is the target too close? Small numbers are anecdotes – the learner needs ≥ 30."""
+    s = {"stop": {"n": 0, "reversed": 0, "confirmed": 0, "open": 0, "slipped": 0, "slip_usd": 0.0},
+         "protective": {"n": 0, "done": 0, "saved_usd": 0.0, "better": 0, "worse": 0, "open": 0},
+         "rule": {"n": 0, "done": 0, "saved_usd": 0.0, "better": 0, "worse": 0, "open": 0},
+         "take_profit": {"n": 0, "done": 0, "further_r_sum": 0.0}}
+    for r in results:
+        k = r.get("kind")
+        if k not in s:
+            continue
+        b = s[k]
+        b["n"] += 1
+        st = r.get("status")
+        if k == "stop":
+            b[st if st in ("reversed", "confirmed") else "open"] += 1
+            if r.get("slip_usd"):
+                b["slipped"] += 1
+                b["slip_usd"] = round(b["slip_usd"] + r["slip_usd"], 2)
+        elif k == "take_profit":
+            if r.get("further_r") is not None:
+                b["done"] += 1
+                b["further_r_sum"] += r["further_r"]
+        elif st == "done":
+            b["done"] += 1
+            v = r.get("saved_usd") or 0.0
+            b["saved_usd"] += v
+            b["better" if v > 0 else "worse"] += 1 if v != 0 else 0
+        else:
+            b["open"] += 1
+    tp = s["take_profit"]
+    tp["avg_further_r"] = round(tp.pop("further_r_sum") / tp["done"], 2) if tp["done"] else None
+    for k in ("protective", "rule"):
+        s[k]["saved_usd"] = round(s[k]["saved_usd"], 2)
+    return s
+
+
+def postmortem(reg, ft, now=None) -> dict:
+    """Judge trades closed in the last PM_WINDOW_DAYS days (finished verdicts are kept for
+    PM_KEEP_DAYS days) → kv 'postmortem'."""
+    now = now or utcnow()
+    prev = (reg.kv_get("postmortem") or {}).get("trades") or {}
+    keep = {k: v for k, v in prev.items() if (parse_dt(v.get("close_date")) or now) >= now - timedelta(days=PM_KEEP_DAYS)}
+    rows = reg.q("SELECT trade_id, sleeve_id, pair, is_short, open_rate, close_rate, close_date, exit_reason, profit_abs, raw "
+                 "FROM live_trades WHERE close_date >= ?", (iso(now - timedelta(days=PM_WINDOW_DAYS)),))
+    params = {r["id"]: r.get("params") or {} for r in reg.q("SELECT id, params FROM strategies")}
+    todo = [r for r in rows if (keep.get(str(r["trade_id"])) or {}).get("status") in (None, "open")]
+    candles: dict[str, list] = {}
+    for p in sorted({r["pair"] for r in todo}):
+        try:
+            d = ft.pair_candles(p, "15m", 1000) or {}
+            cols = d.get("columns") or []
+            ts = cols.index("__date_ts") if "__date_ts" in cols else None
+            ix = [cols.index(k) for k in ("open", "high", "low", "close")]
+            rows_ = []
+            for x in d.get("data") or []:
+                t = _f(x[ts]) if ts is not None else (parse_dt(x[cols.index("date")]).timestamp() * 1000)
+                vals = [_f(x[i]) for i in ix]
+                if t is not None and all(v is not None for v in vals):
+                    rows_.append([t, *vals])
+            candles[p] = rows_
+        except Exception:  # noqa: BLE001 – a coin the bot no longer follows stays 'open'
+            candles[p] = []
+    for r in todo:
+        res = judge_exit(r, params.get(r["sleeve_id"]) or {}, candles.get(r["pair"]) or [], now)
+        if res:
+            keep[str(r["trade_id"])] = res
+    out = {"ts": iso(now), "trades": keep, "summary": summarize_postmortem(list(keep.values()))}
+    reg.kv_set("postmortem", out)
+    return out

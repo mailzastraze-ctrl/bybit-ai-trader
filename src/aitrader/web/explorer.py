@@ -100,6 +100,9 @@ def detail(reg: Registry, sid: str) -> dict | None:
         "SELECT trade_id, pair, is_short, open_date, close_date, open_rate, close_rate, profit_abs, "
         "profit_ratio, exit_reason, stake_amount, leverage FROM live_trades WHERE sleeve_id=? ORDER BY open_date", (sid,))]
     sig = ((reg.kv_get("signals") or {}).get("per_sleeve") or {}).get(sid)
+    pm = (reg.kv_get("postmortem") or {}).get("trades") or {}
+    for t in trades:
+        t["after"] = pm.get(str(t.get("trade_id")))
     return {"row": {**_row(st, fwd_all, _board(reg)), "signals": sig}, "card": card, "gates": gate_rows,
             "history": (st.get("history") or [])[-12:],
             "research": {k: (res or {}).get(k) for k in ("oos", "stress", "mc", "market", "wfe", "robust_frac", "fold_pos",
