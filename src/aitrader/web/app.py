@@ -132,6 +132,7 @@ def overview() -> dict:
         "signals": (reg().kv_get("signals") or {}).get("total"),
         "signals_since": (reg().kv_get("signals") or {}).get("since"),
         "exposure": reg().kv_get("exposure"),
+        "postmortem": (reg().kv_get("postmortem") or {}).get("summary"),
     }
 
 

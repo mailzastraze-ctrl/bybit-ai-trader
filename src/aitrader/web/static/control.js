@@ -210,6 +210,18 @@ function renderPositions() {
   if ($("#sigLine")) $("#sigLine").textContent = sg && sg.signals ? `Сигналы за 7 дней: ${sg.signals}, исполнено ${sg.executed} (${Math.round(100 * sg.executed / sg.signals)}%)` +
     (Object.keys(sg.missed || {}).length ? ". Пропущены: " + Object.entries(sg.missed).sort((a, b) => b[1] - a[1]).map(([k, v]) => `${MR[k] || k} — ${v}`).join(", ") : "") + "."
     : (S.ov?.signals_since ? "" : "Журнал сигналов начат — первые цифры появятся с первыми сигналами стратегий.");
+  const pm = S.ov?.postmortem;
+  if ($("#pmLine")) {
+    const parts = [], usd = (v) => `${v >= 0 ? "+" : "−"}${Math.abs(v).toLocaleString("ru-RU", {maximumFractionDigits: 0})} $`;
+    if (pm?.stop?.n) parts.push(`стоп сработал ${pm.stop.n} раз, после этого цена развернулась к цели ${pm.stop.reversed}, стоп был прав ${pm.stop.confirmed}` +
+      (pm.stop.open ? `, ещё неясно ${pm.stop.open}` : "") + (pm.stop.slipped ? `; исполнено хуже стопа ${pm.stop.slipped} раз (${usd(-pm.stop.slip_usd)})` : ""));
+    for (const [k, name] of [["protective", "защитные выходы (стоп сдвинут в безубыток/прибыль)"], ["rule", "выходы по сигналу/времени"]]) {
+      const b = pm?.[k];
+      if (b?.n) parts.push(`${name} ${b.n}: ` + (b.done ? `против «держать до стопа или тейка» ${usd(b.saved_usd)} (лучше ${b.better}, хуже ${b.worse})` : "ещё неясно"));
+    }
+    if (pm?.take_profit?.n && pm.take_profit.avg_further_r != null) parts.push(`после тейка цена уходила дальше в среднем на ${pm.take_profit.avg_further_r.toLocaleString("ru-RU")}R`);
+    $("#pmLine").textContent = parts.length ? `Работа над ошибками (30 дней): ${parts.join("; ")}. Выводы — от 30 случаев.` : "";
+  }
   if (!open.length) { $("#positions").innerHTML = `<div class="empty">Открытых позиций нет. ${(S.ov?.manifest?.sleeves || []).filter((s) => s.stage !== "closing").length} стратегий ждут своих условий входа.</div>`; return; }
   $("#positions").innerHTML = `<table><thead><tr><th>Монета</th><th>Стратегия</th><th class="r">P&L</th><th>Защита</th><th class="r">В сделке</th></tr></thead><tbody>${open.map((t) => {
     const sl = sleeveOf(t.enter_tag), short = !!t.is_short, entry = +t.open_rate, stop = +t.stop_loss_abs, amt = +t.amount || 0;

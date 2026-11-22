@@ -120,6 +120,13 @@ const RS = {stop_loss: "стоп", stoploss_on_exchange: "стоп на бирж
 const MISSED = {pair_busy: "монета занята", same_candle: "два сигнала на свече", paused: "пауза", side_count: "лимит стороны",
                 explore_count: "лимит разведки", open_risk: "лимит риска", side_risk: "риск стороны", explore_risk: "риск разведки",
                 not_entered: "не вошёл"};
+function afterText(a) {
+  if (!a) return `<span class="dim">—</span>`;
+  if (a.kind === "stop") return a.status === "reversed" ? `<span class="neg">цена развернулась к цели</span>` : a.status === "confirmed" ? `<span class="pos">стоп был прав</span>` : `<span class="dim">пока неясно</span>`;
+  if (a.kind === "take_profit") return a.further_r != null ? `дальше ещё ${nf(a.further_r, 1)}R` : `<span class="dim">пока неясно</span>`;
+  if (a.status === "done") return `держать: ${a.hold_r > 0 ? "+" : ""}${nf(a.hold_r, 1)}R → ` + (a.saved_usd >= 0 ? `<span class="pos">выход сберёг ${nf(a.saved_usd, 0)} $</span>` : `<span class="neg">недобрали ${nf(-a.saved_usd, 0)} $</span>`);
+  return `<span class="dim">пока неясно${a.hold_r_now != null ? ` (сейчас было бы ${nf(a.hold_r_now, 1)}R)` : ""}</span>`;
+}
 let VIEW = "live", ALL = {strategies: [], groups: {}}, SEL = null, DET = null, PAIR = null;
 
 // ------------------------------------------------------------------ list
@@ -259,9 +266,9 @@ function renderDetail(pairs) {
       <div id="chart" style="margin-top:10px"><div class="empty">Загрузка свечей…</div></div>
     </div>
     <div class="card"><h3>Все сделки на демо-счёте (${tr.length}${tr.length - closed.length ? `, из них открыто ${tr.length - closed.length}` : ""})</h3>${tr.length ? `<div class="wrap"><table>
-      <thead><tr><th>Монета</th><th>Сторона</th><th>Вход</th><th class="r">цена</th><th>Выход</th><th class="r">цена</th><th class="r">результат</th><th>Причина</th></tr></thead>
+      <thead><tr><th>Монета</th><th>Сторона</th><th>Вход</th><th class="r">цена</th><th>Выход</th><th class="r">цена</th><th class="r">результат</th><th>Причина</th><th>Что было после</th></tr></thead>
       <tbody>${tr.slice().reverse().map((t) => `<tr data-p="${esc(t.pair)}"><td>${esc(coin(t.pair))}</td><td>${t.is_short ? "шорт" : "лонг"}</td><td>${dt(t.open_date)}</td><td class="r num">${esc(t.open_rate)}</td>
-        <td>${t.close_date ? dt(t.close_date) : "открыта"}</td><td class="r num">${esc(t.close_rate ?? "—")}</td><td class="r num">${t.close_date ? sg(t.profit_abs, 2, " $") : t.profit_abs == null ? "—" : `<span class="dim">сейчас</span> ${sg(t.profit_abs, 2, " $")}`}</td><td>${esc(RS[t.exit_reason] || t.exit_reason || "")}</td></tr>`).join("")}</tbody></table></div>`
+        <td>${t.close_date ? dt(t.close_date) : "открыта"}</td><td class="r num">${esc(t.close_rate ?? "—")}</td><td class="r num">${t.close_date ? sg(t.profit_abs, 2, " $") : t.profit_abs == null ? "—" : `<span class="dim">сейчас</span> ${sg(t.profit_abs, 2, " $")}`}</td><td>${esc(RS[t.exit_reason] || t.exit_reason || "")}</td><td>${afterText(t.after)}</td></tr>`).join("")}</tbody></table></div>`
       : `<div class="empty">Сделок на демо пока нет — стратегия ждёт своей точки входа${LIVE.includes(r.stage) ? "" : " или своей очереди"}.</div>`}
       ${closed.length ? `<div class="dim" style="margin-top:8px">Закрыто ${closed.length}, в плюс ${closed.filter((t) => +t.profit_abs > 0).length}, сумма ${sg(closed.reduce((a, t) => a + +t.profit_abs, 0), 2, " $")} (без поправки на проскальзывание).</div>` : ""}
     </div>

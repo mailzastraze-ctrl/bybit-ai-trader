@@ -60,3 +60,67 @@ def test_replication_quarters_fit_the_history_that_exists():
     assert fit_folds(now - timedelta(days=1200), 365, 90, 12, now=now) == 8    # 12h needs a year of warm-up
     assert fit_folds(now - timedelta(days=500), 365, 90, 12, now=now) == 4     # never below the old one year
     assert fit_folds(None, 185, 90, 12, now=now) == 4
+
+
+def _trade(tid, reason, close, isl=2.986, o=2.817, amount=229.5, short=True, closed=None):
+    return {"trade_id": tid, "sleeve_id": "s", "pair": "NEAR", "is_short": int(short), "open_rate": o, "close_rate": close,
+            "close_date": iso(closed or (utcnow() - timedelta(days=2))), "exit_reason": reason,
+            "raw": {"initial_stop_loss_abs": isl, "amount": amount}}
+
+
+def _candles(start, prices):
+    t0 = start.timestamp() * 1000
+    return [[t0 + (i + 1) * 900e3, p, p * 1.001, p * 0.999, p] for i, p in enumerate(prices)]
+
+
+def test_post_mortem_judges_each_exit_against_its_own_plan():
+    closed = utcnow() - timedelta(days=2)
+    p = {"tp_rr": 2.0}
+    risk = 2.986 - 2.817
+    # protective exit (stop moved near entry), then price ran to the original stop: the exit saved money
+    a = observe.judge_exit(_trade(1, "managed_stop", 2.842, closed=closed), p, _candles(closed, [2.85, 2.95, 3.0]))
+    assert a["kind"] == "protective" and a["status"] == "done" and a["hold_r"] == -1.0
+    assert abs(a["saved_usd"] - (-(2.842 - 2.817) / risk + 1) * risk * 229.5) < 0.05 and a["saved_usd"] > 30
+    # … or to the target: the early exit cost money
+    b = observe.judge_exit(_trade(2, "managed_stop", 2.842, closed=closed), p, _candles(closed, [2.7, 2.5, 2.45]))
+    assert b["hold_r"] == 2.0 and b["saved_usd"] < -70
+    # planned stop, then price went another half R against: the stop was right
+    c = observe.judge_exit(_trade(3, "managed_stop", 2.986, closed=closed), p, _candles(closed, [3.0, 3.1]))
+    assert c["kind"] == "stop" and c["status"] == "confirmed"
+    # planned stop, then price came back to the target: a wider stop would have won
+    d = observe.judge_exit(_trade(4, "stoploss_on_exchange", 2.99, closed=closed), p, _candles(closed, [2.9, 2.6, 2.47]))
+    assert d["kind"] == "stop" and d["status"] == "reversed" and "slip_usd" not in d
+    g = observe.judge_exit(_trade(8, "stoploss_on_exchange", 3.07, closed=closed), p, [])  # filled 0.5 R beyond the stop
+    assert abs(g["slip_usd"] - 0.497 * risk * 229.5) < 0.5
+    # take profit: how much further it went
+    e = observe.judge_exit(_trade(5, "take_profit", 2.479, closed=closed), p, _candles(closed, [2.45, 2.40, 2.50]))
+    assert e["kind"] == "take_profit" and 0.3 < e["further_r"] < 0.6
+    # nothing after the exit yet / no initial stop known → open / not judged
+    assert observe.judge_exit(_trade(6, "exit_signal", 2.8, closed=closed), p, [])["status"] == "open"
+    assert observe.judge_exit({**_trade(7, "exit_signal", 2.8), "raw": {}}, p, []) is None
+    s = observe.summarize_postmortem([a, b, c, d, e])
+    assert s["protective"] == {"n": 2, "done": 2, "saved_usd": round(a["saved_usd"] + b["saved_usd"], 2), "better": 1, "worse": 1, "open": 0}
+    assert s["stop"] == {"n": 2, "reversed": 1, "confirmed": 1, "open": 0, "slipped": 0, "slip_usd": 0.0} and s["take_profit"]["avg_further_r"] == e["further_r"]
+
+
+def test_post_mortem_runs_on_the_registry_and_keeps_verdicts(tmp_path):
+    from aitrader.registry import Registry
+    reg = Registry(tmp_path / "r.db")
+    closed = utcnow() - timedelta(days=1)
+    reg.upsert("live_trades", {**_trade(11, "managed_stop", 2.842, closed=closed), "open_date": iso(closed - timedelta(hours=5)),
+                               "profit_abs": -6.2, "profit_ratio": -0.01, "max_rate": 0, "min_rate": 0, "leverage": 1.0,
+                               "stake_amount": 650.0}, key="trade_id")
+    reg.upsert("strategies", {"id": "s", "family": "tsmom", "params": {"tp_rr": 2.0}, "stage": "exploration", "pairs": ["NEAR"]})
+
+    class FT:
+        calls = 0
+
+        def pair_candles(self, pair, tf, limit):
+            FT.calls += 1
+            rows = _candles(closed, [2.85, 2.95, 3.0])
+            return {"columns": ["date", "open", "high", "low", "close", "__date_ts"],
+                    "data": [[None, x[1], x[2], x[3], x[4], x[0]] for x in rows]}
+    out = observe.postmortem(reg, FT())
+    assert out["trades"]["11"]["status"] == "done" and out["summary"]["protective"]["better"] == 1
+    observe.postmortem(reg, FT())
+    assert FT.calls == 1  # a finished verdict is not recomputed
