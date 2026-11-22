@@ -37,14 +37,24 @@ class _ApiGZip:
 
     async def __call__(self, scope, receive, send):
         path = scope.get("path", "") if scope.get("type") == "http" else ""
-        if path.startswith(("/api/", "/relay/")) and path != "/api/lab/backup":
+        if (path.startswith(("/api/", "/relay/")) and path != "/api/lab/backup") or path.endswith((".js", ".css")):
             return await self.gzip(scope, receive, send)
         return await self.plain(scope, receive, send)
 
 
+class _Static(StaticFiles):
+    """Browsers revalidate every file (ETag → cheap 304), so a deploy is picked up at once. Without this
+    a cached old module that imports files removed by the deploy breaks the page until a hard refresh."""
+
+    def file_response(self, *args, **kwargs):
+        resp = super().file_response(*args, **kwargs)
+        resp.headers["Cache-Control"] = "no-cache"
+        return resp
+
+
 app.add_middleware(_ApiGZip)
 security = HTTPBasic()
-app.mount("/static", StaticFiles(directory=STATIC), name="static")
+app.mount("/static", _Static(directory=STATIC), name="static")
 _reg: Registry | None = None
 
 

@@ -245,9 +245,9 @@ body.q-high .glass, body.q-high .btn { --glass: rgba(13, 17, 26, .7); backdrop-f
 
 <div id="loader"><div class="in"><svg width="44" height="44" viewBox="0 0 30 30"><rect width="30" height="30" rx="9" fill="#111a2a"/><path d="M6 21l6-6 4 3 7-9" fill="none" stroke="#4ee6c4" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/></svg><b>AI TRADER HQ</b><div class="track"><i id="lbar"></i></div><p id="lmsg">Строим офис…</p><a class="btn" id="lerr" href="/#overview" target="_top">3D недоступно — вернуться в пульт</a></div></div>
 
-<script type="module" src="/static/hq.js"></script>
+<script type="module" src="/static/hq.js?v=20261122b"></script>
 <script>
-setTimeout(() => { if (!window.__hqReady) { document.getElementById("lerr").style.display = "inline-flex"; document.getElementById("lmsg").textContent = "Не удалось загрузить 3D-движок (CDN)."; } }, 20000);
+setTimeout(() => { if (!window.__hqReady) { document.getElementById("lerr").style.display = "inline-flex"; document.getElementById("lmsg").textContent = "Не удалось запустить 3D-офис. Обновите страницу (Ctrl+F5)."; } }, 20000);
 if (window.top !== window) document.getElementById("bBack").style.display = "none";
 </script>
 </body>
