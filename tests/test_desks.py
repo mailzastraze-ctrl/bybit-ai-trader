@@ -150,3 +150,42 @@ def test_activity_counts_entries_and_alarms_after_six_quiet_hours(env):
                            "per_sleeve": {"desk1": {"signals": 4, "executed": 3}}})
     assert observe.signals_line(reg) == ("SIGNALS days=7 since=None signals=5 executed=3 missed=[pair_busy 2] "
                                          "by_strategy=[desk1 3/4]")
+
+
+def test_a_new_experiment_starts_flat_once(env):
+    """Owner, 23.11: the previous stage is over – open trades that are not a current desk's own
+    (strategy, coin) are closed at market once per experiment; TradFi and execution tests stay."""
+    s, reg = env
+    life = Lifecycle(s, reg)
+    reg.kv_set("universe", {"pairs": ["ADA/USDT:USDT"]})
+    add(reg, "desk-ada", "exploratory", {"ADA/USDT:USDT": {"pnl": 100, "trades": 8}})
+    reg.kv_set("tradfi_cfg", {"xau-macd-12h": {"id": "xau-macd-12h", "family": "macd_cross", "params": {}, "rank": 0,
+                                               "pairs": ["XAU/USDT:USDT"], "demo_pairs": ["XAU/USDT:USDT"],
+                                               "sides": ["long", "short"], "timeframe": "12h"}})
+    life.build_manifest([], set(), False)
+
+    class FT:
+        def __init__(self):
+            self.closed = []
+
+        def forceexit(self, tid):
+            self.closed.append(tid)
+
+    trades = [{"trade_id": 1, "enter_tag": "core-tsmom-4h-30d", "pair": "BCH/USDT:USDT", "is_short": True},
+              {"trade_id": 2, "enter_tag": "desk-ada", "pair": "ADA/USDT:USDT"},          # the desk's own trade
+              {"trade_id": 3, "enter_tag": "desk-ada", "pair": "DOT/USDT:USDT"},          # same strategy, not its desk coin
+              {"trade_id": 4, "enter_tag": "xau-macd-12h", "pair": "XAU/USDT:USDT"},      # TradFi lane
+              {"trade_id": 5, "enter_tag": "exec-test-1", "pair": "BTC/USDT:USDT"}]
+    ft = FT()
+    assert len(life.flatten_for_experiment(ft, trades)) == 2 and ft.closed == [1, 3]
+    assert life.flatten_for_experiment(ft, trades) == [] and ft.closed == [1, 3]  # once per experiment
+
+    class Broken(FT):
+        def forceexit(self, tid):
+            raise RuntimeError("bot busy")
+
+    s.lifecycle.desk_epoch = 2
+    life.build_manifest([], set(), False)
+    assert life.flatten_for_experiment(Broken(), trades) == []
+    ft = FT()
+    assert life.flatten_for_experiment(ft, trades) and ft.closed == [1, 3]  # a failed close is tried again

@@ -211,6 +211,8 @@ def main() -> None:
             # safety: no new entries on coins Bybit has announced to delist (open trades keep their exits)
             excluded = set(scanner.excluded_pairs()) | context.delisted_pairs(reg)
             man = refresh_manifest(life, up, open_trades, excluded, paused)
+            if up and man is not None:  # a new desk experiment starts flat (once per experiment)
+                life.flatten_for_experiment(ft, open_trades)
             detail.update(sleeves=len(man.sleeves) if man else None, paused=paused,
                           manifest="written" if man else "kept (bot unreachable)")
             if time.time() - last_ready > 600:
