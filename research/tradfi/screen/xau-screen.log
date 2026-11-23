@@ -1,40 +1,40 @@
-80/440 tasks, 106276 combinations, 0 survivors
+80/440 tasks, 104859 combinations, 0 survivors
 90/440 tasks, 109632 combinations, 0 survivors
 100/440 tasks, 129183 combinations, 0 survivors
-110/440 tasks, 145723 combinations, 0 survivors
+110/440 tasks, 147236 combinations, 0 survivors
 120/440 tasks, 174508 combinations, 0 survivors
 130/440 tasks, 192170 combinations, 0 survivors
 140/440 tasks, 215716 combinations, 0 survivors
 150/440 tasks, 226808 combinations, 0 survivors
 160/440 tasks, 240202 combinations, 0 survivors
 170/440 tasks, 257413 combinations, 0 survivors
-180/440 tasks, 268974 combinations, 0 survivors
+180/440 tasks, 267816 combinations, 0 survivors
 190/440 tasks, 272319 combinations, 0 survivors
 200/440 tasks, 275764 combinations, 0 survivors
 210/440 tasks, 296818 combinations, 0 survivors
 220/440 tasks, 313357 combinations, 0 survivors
 230/440 tasks, 340600 combinations, 0 survivors
 240/440 tasks, 358234 combinations, 0 survivors
-250/440 tasks, 384903 combinations, 0 survivors
+250/440 tasks, 384892 combinations, 0 survivors
 260/440 tasks, 393514 combinations, 0 survivors
 270/440 tasks, 409090 combinations, 0 survivors
 280/440 tasks, 430173 combinations, 0 survivors
-290/440 tasks, 440595 combinations, 0 survivors
-300/440 tasks, 448421 combinations, 0 survivors
+290/440 tasks, 443274 combinations, 0 survivors
+300/440 tasks, 448382 combinations, 0 survivors
 310/440 tasks, 451828 combinations, 0 survivors
 320/440 tasks, 469836 combinations, 0 survivors
 330/440 tasks, 486344 combinations, 0 survivors
 340/440 tasks, 512049 combinations, 0 survivors
 350/440 tasks, 529686 combinations, 0 survivors
 360/440 tasks, 556950 combinations, 0 survivors
-370/440 tasks, 565596 combinations, 0 survivors
+370/440 tasks, 562822 combinations, 0 survivors
 380/440 tasks, 580013 combinations, 0 survivors
 390/440 tasks, 602970 combinations, 0 survivors
 400/440 tasks, 616621 combinations, 0 survivors
-410/440 tasks, 620909 combinations, 0 survivors
+410/440 tasks, 620870 combinations, 0 survivors
 420/440 tasks, 627223 combinations, 0 survivors
 430/440 tasks, 645269 combinations, 0 survivors
 440/440 tasks, 663329 combinations, 0 survivors
 false-discovery control: 0 holdout tests, BH q=0.2 → p ≤ none; 0 → 0
 swing autopilot: 94 configurations reached the checks, 62 passed all seven; decoys (shuffled history) passed 8.4 per copy → accepted 62 at luck share <= 0.2 (23 also significant at BH q=0.2)
-screened 663329 backtests (swing) on 4 series in 114s → 62 survivors
+screened 663329 backtests (swing) on 4 series in 147s → 62 survivors
