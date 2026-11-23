@@ -793,6 +793,36 @@ class Lifecycle:
             self.sync_desk_stages(new)
         return st
 
+    def flatten_for_experiment(self, ft, open_trades: list[dict]) -> list[str]:
+        """A desk experiment starts flat (owner, 23.11: "the previous stage was a failure, everything
+        starts anew"): once per desk epoch every open trade that is not a current desk's own
+        (strategy, coin) is closed at market. TradFi lane positions and execution tests are left
+        alone. If a close fails, it is tried again on the next cycle."""
+        st = self.reg.kv_get("desks") or {}
+        epoch = st.get("epoch")
+        if self.lc.demo_mode != "desks" or not st.get("coins") or self.reg.kv_get("desk_flat_epoch") == epoch:
+            return []
+        mine = {(x["strategy"], p) for p, d in st["coins"].items() for x in D.picks(d)}
+        lane = self.reg.kv_get("tradfi_cfg") or {}
+        closed, failed = [], []
+        for t in open_trades or []:
+            tag, pair = t.get("enter_tag") or "", t.get("pair") or ""
+            if (tag, pair) in mine or tag in lane or tag.startswith("exec-test") or tradfi.is_tradfi(pair):
+                continue
+            try:
+                ft.forceexit(int(t["trade_id"]))
+                closed.append(f"{D.coin_name(pair)} {'short' if t.get('is_short') else 'long'} ({tag or 'no tag'})")
+            except Exception as e:  # noqa: BLE001 – try again next cycle
+                failed.append(pair)
+                log.warning("closing %s (trade %s) for the new desk experiment failed: %s", pair, t.get("trade_id"), e)
+        if closed:
+            self.reg.event("lifecycle", f"desk experiment {epoch} starts flat: closed at market {', '.join(closed)}",
+                           "warning", data={"closed": closed})
+            log.info("DESKS epoch %s starts flat: closed %s", epoch, ", ".join(closed))
+        if not failed:
+            self.reg.kv_set("desk_flat_epoch", epoch)
+        return closed
+
     def sync_desk_stages(self, coins: dict) -> None:
         """Stages say what trades: the desk strategies are `exploration` (0.1 % risk), every other
         strategy that was trading goes back to the research shelf."""

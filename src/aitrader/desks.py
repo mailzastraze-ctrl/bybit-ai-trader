@@ -69,6 +69,14 @@ def coin_name(pair: str) -> str:
     return str(pair).split("/")[0]
 
 
+def picks(desk: dict) -> list[dict]:
+    """The strategies a desk trades: the automatic choice (one), or the owner's own choice from
+    the coin's list of best strategies (`picks`, any number, possibly none)."""
+    if isinstance(desk.get("picks"), list):
+        return [p for p in desk["picks"] if isinstance(p, dict) and p.get("strategy")]
+    return [desk] if desk.get("strategy") else []
+
+
 def bucket_cuts(options: list[Option]) -> tuple[float, float]:
     """Terciles of trades per month over the qualifying options (active above `hi`, rare below `lo`)."""
     f = sorted(o.per_month for o in options)
