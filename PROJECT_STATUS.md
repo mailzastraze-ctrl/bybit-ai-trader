@@ -1,6 +1,6 @@
 # PROJECT_STATUS
 
-_Last updated: 2026-11-23 (final patch before the observation: forward v3 recording fixes, H7 frozen). History: `CHANGELOG.md`. Forward-test rules: `docs/DECISIONS.md`. Rules for Claude sessions: `CLAUDE.md`._
+_Last updated: 2026-11-23 (TradFi lane: gold on demo with the autopilot's best; before: forward v3 recording fixes, H7 frozen). History: `CHANGELOG.md`. Forward-test rules: `docs/DECISIONS.md`. Rules for Claude sessions: `CLAUDE.md`._
 
 ## What runs
 - **Railway** (one container, volume `/data`, EU West, Hobby plan): Freqtrade on **Bybit Demo only** (`demo_trading` is hard-required, 1x), the manager (lifecycle, learning, manifest) and the web control room. No research on the server.
@@ -16,6 +16,10 @@ _Last updated: 2026-11-23 (final patch before the observation: forward v3 record
 - **Exploration lane:**
   - 24 slots, half active (15m/1h, frequent trades) and half precise (2h–12h, rare trades);
   - rotated by evidence within each half.
+- **TradFi lane** (owner, 23.11; `docs/TRADFI.md`): Bybit's gold and S&P 500 perpetuals in the same bot, entries only while the underlying market is open, ≤ 2 positions, ≤ 0.5 % at stops, 0.1 % risk × BTC-correlation scale.
+  - **XAUUSDT:** only `xau-macd-12h` (MACD 11/56/10 + zero line, 12h; the Strategy Lab autopilot's best by stability + return on ~3.3 years of PAXG, decoy-controlled; not clean evidence).
+  - **SPYUSDT** (S&P 500; `SPXUSDT` is a memecoin): Trend Following (the TSMOM benchmark rule) and Momentum Rotation vs gold.
+  - Whether the demo account lists them: `HEALTH … tradfi=[XAU ok open, SPY …]`; the TradFi execution test runs once they are confirmed. Off: `TRADFI_ENABLED=0`.
 - **Limits:**
   - no daily loss limit on demo (owner);
   - account limits stay: 8 % open risk, 4 % per side (a new entry counts at its sized risk), 1x, exchange stops, 25 % kill-switch.

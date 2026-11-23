@@ -13,7 +13,8 @@ The owner runs several Claude sessions on this project (trading system, 3D offic
 - Change demo-only, 1x leverage, risk limits (8 % total, 4 % per side), exchange stops or the kill-switch.
 - Switch the daily loss limit back on during the demo, or leave it off for real money. The owner switched it off on demo on 22.11; it is required before real money.
 - Remove or rotate the demo core (`core-*`, files with `"core": true`) without the owner. It is his decision of 22.11.
-- Add strategy families or genes during the observation period.
+- Add strategy families or genes during the observation period. (Owner's exception, 23.11.2026: the TradFi
+  lane – gold and S&P 500, `docs/TRADFI.md`; its families are outside the lab's search.)
 
 ## Before merging
 - `ruff check src ft tests` and `pytest -q` locally.
