@@ -1,0 +1,42 @@
+name: tradfi-gold-screen
+# TradFi lane (2026-11-23): the owner's Strategy Lab autopilot (swing mode: 10 rules × parameters ×
+# exits on 2h–12h, seven checks + target–decoy control) on ~3.3 years of gold (PAXG proxy – Bybit's
+# XAUUSDT has too little history). Runs on the tradfi branch only; results are committed back.
+on:
+  push:
+    branches: [tradfi-gold-spy]
+    paths: [".github/workflows/tradfi-gold-screen.yml", ".github/tradfi/**"]
+  workflow_dispatch:
+permissions:
+  contents: write
+concurrency:
+  group: tradfi-gold-screen
+  cancel-in-progress: true
+jobs:
+  screen:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v4
+        with: {node-version: "22"}
+      - uses: actions/setup-python@v6
+        with: {python-version: "3.13"}
+      - run: pip install -q pandas requests
+      - name: Gold candles (PAXG; Binance public archive, fallback Coinbase)
+        run: python .github/tradfi/gold_candles.py --out work/candles --days 1230
+      - name: Strategy Lab autopilot on gold (seven checks + 10 decoy copies)
+        run: |
+          node screener/screen.js --mode swing --data work/candles --out work/xau-screen.json \
+            --top 5 --workers $(nproc) --decoys 10 --swing-combos 1500 2>&1 | tee work/screen.log
+      - name: Commit results to the branch
+        run: |
+          mkdir -p research/tradfi/screen
+          cp work/xau-screen.json research/tradfi/screen/xau-screen.json
+          cp work/candles-meta.json research/tradfi/screen/xau-candles-meta.json
+          tail -n 40 work/screen.log > research/tradfi/screen/xau-screen.log
+          git config user.name "tradfi-screen"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add research/tradfi/screen
+          git commit -m "tradfi: gold screen results (run ${{ github.run_id }}) [skip ci]" || exit 0
+          git pull --rebase -q origin tradfi-gold-spy && git push origin HEAD:tradfi-gold-spy
