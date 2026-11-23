@@ -1,6 +1,6 @@
 # PROJECT_STATUS
 
-_Last updated: 2026-11-23 (TradFi lane: gold on demo with the autopilot's best; before: forward v3 recording fixes, H7 frozen). History: `CHANGELOG.md`. Forward-test rules: `docs/DECISIONS.md`. Rules for Claude sessions: `CLAUDE.md`._
+_Last updated: 2026-11-23 evening (demo = coin desks, monthly core off, no-entry alarm; before: TradFi lane, gold on demo). History: `CHANGELOG.md`. Forward-test rules: `docs/DECISIONS.md`. Rules for Claude sessions: `CLAUDE.md`._
 
 ## What runs
 - **Railway** (one container, volume `/data`, EU West, Hobby plan): Freqtrade on **Bybit Demo only** (`demo_trading` is hard-required, 1x), the manager (lifecycle, learning, manifest) and the web control room. No research on the server.
@@ -8,25 +8,23 @@ _Last updated: 2026-11-23 (TradFi lane: gold on demo with the autopilot's best; 
 - Web: https://aitrader-production-cf456409.up.railway.app (basic auth: `WEB_USER` / `WEB_PASSWORD` in Railway). `/` control room, `/explorer` every strategy, `/hq` 3D office (owner-maintained).
 - No profitability is claimed. Numbers come from demo fills or walk-forward / forward tests after costs.
 
-## What trades on demo (22.11 evening)
-- **Core:**
-  - always TSMOM on 4h, 15 coins (12/30/84 days), at 0.1 % risk;
-  - pre-registered, nothing optimised;
-  - in a position whenever a coin trends either way.
-- **Exploration lane:**
-  - 24 slots, half active (15m/1h, frequent trades) and half precise (2h–12h, rare trades);
-  - rotated by evidence within each half.
+## What trades on demo (23.11 evening, owner)
+- **Coin desks – one experiment** (`aitrader/desks.py`): up to 30 top coins, on each coin the one tested strategy that is best on that coin (walk-forward profit per month on the coin with a drawdown discount), every desk a different strategy, trade frequencies mixed (active / medium / rare), 0.1 % risk.
+  - Frozen for the whole experiment: no queue, no rotation, no retirement; open coins are filled on a later lab import. A new choice only with the owner (`DESK_EPOCH`).
+  - The assignment: `DESKS` log line and the event log; per coin the live record is the strategy's record.
+  - By history ≈ 30 trades a month in total (0.4–2.5 per coin): tested strategies trade rarely per coin.
+- **Monthly TSMOM core:** off on demo (owner, 23.11); stays the forward benchmark and H1. Its open trades end on their own rules.
 - **TradFi lane** (owner, 23.11; `docs/TRADFI.md`): Bybit's gold and S&P 500 perpetuals in the same bot, entries only while the underlying market is open, ≤ 2 positions, ≤ 0.5 % at stops, 0.1 % risk × BTC-correlation scale.
   - **XAUUSDT:** only `xau-macd-12h` (MACD 11/56/10 + zero line, 12h; the Strategy Lab autopilot's best by stability + return on ~3.3 years of PAXG, decoy-controlled; not clean evidence).
   - **SPYUSDT** (S&P 500; `SPXUSDT` is a memecoin): Trend Following (the TSMOM benchmark rule) and Momentum Rotation vs gold.
   - Whether the demo account lists them: `HEALTH … tradfi=[XAU ok open, SPY …]`; the TradFi execution test runs once they are confirmed. Off: `TRADFI_ENABLED=0`.
 - **Limits:**
-  - no daily loss limit on demo (owner);
+  - no daily loss limit on demo (owner); up to 30 exploration positions / 3.5 % (all desks at once);
   - account limits stay: 8 % open risk, 4 % per side (a new entry counts at its sized risk), 1x, exchange stops, 25 % kill-switch.
 
 ## Where the evidence stands (23.11)
 - 0 validated strategies. "Exploratory" means it may trade at 0.1 % risk; it is not proof of an edge. Most exploratory strategies are refinements or screener finds, and those can no longer validate (`clean_oos`).
-- Pre-registered hypothesis **H1** (TSMOM 12/30/84 days on 4h; the 30-day leg is the benchmark) is judged in the forward book from 22.11. The same configurations also trade on demo as the core; demo results never replace the forward record.
+- Pre-registered hypothesis **H1** (TSMOM 12/30/84 days on 4h; the 30-day leg is the benchmark) is judged in the forward book from 22.11. From 22.11 to 23.11 the same configurations also traded on demo as the core; demo results never replace the forward record.
 - **Forward v3** (`docs/DECISIONS.md`, deployed 23.11): the system now records each frozen strategy's value per complete UTC day (open positions at liquidation value), append-only, with Q1 decided at the freeze and the composition of each day fixed by daily snapshots of the book (a later return to the book never changes a past day). Record now, judge later: no v3 return is computed or shown until the v3 verdict code exists; the `HEALTH` line shows only its data quality (`v3=[records, q1, coverage, revisions, ok age, failed F/N]`).
 - **Pre-registered, not coded:** H6 chart patterns (`docs/H6_PATTERNS.md`) and H7 Elliott waves (`docs/H7_ELLIOTT.md`). Code only after the 03.01.2027 window with the owner's OK; neither becomes a trading strategy by itself.
 - Calendar (DECISIONS §10): primary v3 sample from 25.11.2026; research Q1 and research-vs-benchmark looks at 90 / 180 valid days ≈ 23.02 / 24.05.2027; H1 ≈ 20.02 / 21.05.2027; no positive verdict before the calibration. 19.02.2027 is an interim resource decision on diagnostics only.
@@ -39,7 +37,9 @@ _Last updated: 2026-11-23 (TradFi lane: gold on demo with the autopilot's best; 
   - lab import age, disk free + MB/day + days to full;
   - forward summary and `v3=[…]` (data quality of the v3 recording, no returns);
   - `flags=` red flags.
+- **Activity:** `HEALTH … entries_24h=N (L/S) desks=[…]`; hourly `SIGNALS` line (signals of 7 days, taken, why not).
 - **Red flags:**
+  - `no entry > 6h` (the demo stopped entering);
   - manager not `ok` / silent > 15 min;
   - a position without an exchange stop;
   - lab import > 24 h or > 20 % failed experiments in a run;

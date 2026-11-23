@@ -7,6 +7,7 @@ from __future__ import annotations
 import logging
 from datetime import timedelta
 
+from aitrader import desks as D
 from aitrader import evidence as EV
 from aitrader import tradfi
 from aitrader.families import FAMILIES
@@ -147,6 +148,8 @@ class Lifecycle:
 
     def core_sleeves(self, excluded: set[str], scale: float = 1.0) -> list[Sleeve]:
         out = []
+        if not self.lc.demo_core:  # off since 23.11 (owner); the configurations stay the forward book's benchmark
+            return out
         for c in (self.reg.kv_get("core") or {}).values():
             pairs = [p for p in c.get("pairs") or [] if p not in excluded]
             if not pairs:
@@ -342,6 +345,8 @@ class Lifecycle:
     def evaluate(self, equity: float) -> None:
         lc = self.lc
         self.update_live(equity)
+        if lc.demo_mode == "desks":
+            return  # one frozen experiment (aitrader.desks): no promotion, retirement, queue or rotation
         strategies = {s["id"]: s for s in self.reg.strategies()}
 
         for s in [x for x in strategies.values() if x["stage"] in DEPLOYED]:
@@ -692,8 +697,131 @@ class Lifecycle:
         return out
 
     def build_manifest(self, open_trades: list[dict], excluded: set[str], paused: bool) -> Manifest:
-        rows = self.reg.strategies(DEPLOYED)
         scale = self.portfolio_scale()
+        if self.lc.demo_mode == "desks":
+            sleeves = self.desk_sleeves(excluded, scale)
+        else:
+            sleeves = self.lane_sleeves(excluded, scale)
+        sleeves += self.tradfi_sleeves(excluded, scale)  # independent lane: its own instruments, outside the crypto slots
+        # retired sleeves that still hold positions keep managing them (no new entries)
+        live_ids = {s.id for s in sleeves}
+        tf_cfg = self.reg.kv_get("tradfi_cfg") or {}
+        core_cfg = self.reg.kv_get("core") or {}
+        for t in open_trades:
+            tag = t.get("enter_tag")
+            if tag and tag not in live_ids and tag in tf_cfg:  # TradFi lane off or instrument gone: manage to the end
+                c = tf_cfg[tag]
+                sleeves.append(Sleeve(id=tag, family=c["family"], params=c["params"], pairs=[], stage="closing",
+                                      risk=0.0, leverage=self.lc.leverage, sides=c.get("sides") or ["long", "short"],
+                                      timeframe=c.get("timeframe") or "4h", note="tradfi"))
+                live_ids.add(tag)
+                continue
+            if tag and tag not in live_ids and tag in core_cfg:  # the demo core is off: its trades end on its own rules
+                c = core_cfg[tag]
+                sleeves.append(Sleeve(id=tag, family=c["family"], params=c["params"], pairs=[], stage="closing",
+                                      risk=0.0, leverage=self.lc.leverage, sides=c.get("sides") or ["long", "short"],
+                                      timeframe=c.get("timeframe") or "4h", note="core"))
+                live_ids.add(tag)
+                continue
+            if tag and tag not in live_ids:
+                r = self.reg.one("SELECT * FROM strategies WHERE id=?", (tag,))
+                if r:
+                    sleeves.append(Sleeve(id=r["id"], family=r["family"], params=r["params"],
+                                          pairs=[], stage="closing", risk=0.0, leverage=self.lc.leverage,
+                                          sides=r.get("sides") or ["long", "short"], timeframe=self.strategy_tf(r)))
+                    live_ids.add(tag)
+        return Manifest(sleeves=sleeves, entries_paused=paused)
+
+    # ------------------------------------------------------------------ coin desks (owner, 2026-11-23)
+    DESK_POOL = ("validated", "exploratory", "exploration", "incubation", "eligible", "production")
+
+    def desk_evidence(self) -> dict[str, list[D.Option]]:
+        """Each tested strategy's out-of-sample record per coin (walk-forward `pair_stats`).
+        Only strategies that passed the research tests: no near-misses, placeholders or random explorers."""
+        out: dict[str, list[D.Option]] = {}
+        marks = ",".join("?" * len(self.DESK_POOL))
+        for r in self.reg.q(f"SELECT * FROM strategies WHERE stage IN ({marks})", self.DESK_POOL):
+            if not r.get("experiment_id") or not self.tradable_tf(r) or self._near_miss(r) \
+                    or str(r["id"]).startswith(("boot-", "rnd-", "core-")):
+                continue
+            e = self.reg.one("SELECT result FROM experiments WHERE id=?", (r["experiment_id"],))
+            res = (e or {}).get("result")
+            if not isinstance(res, dict) or not isinstance(res.get("pair_stats"), dict):
+                continue
+            o = res.get("oos") or {}
+            days = float(o.get("n_days") or o.get("days") or 0) or 360.0
+            tf, rank = self.strategy_tf(r), self.evidence_rank(r)
+            dd = float(o.get("max_drawdown") or (r.get("oos") or {}).get("max_drawdown") or 0.0)
+            for pair, v in res["pair_stats"].items():
+                if tradfi.is_tradfi(pair) or not isinstance(v, dict):
+                    continue
+                out.setdefault(pair, []).append(D.Option(
+                    strategy=r["id"], family=r["family"], timeframe=tf, pnl=float(v.get("pnl") or 0.0),
+                    trades=int(v.get("trades") or 0), days=days, dd=dd, rank=rank))
+        return out
+
+    def ensure_desks(self, excluded: set[str]) -> dict:
+        """The frozen desk assignment; made once per `desk_epoch`. Open coins are filled when a new
+        lab import may bring a qualifying strategy – desks already set are never changed."""
+        lc = self.lc
+        st = self.reg.kv_get("desks") or {}
+        lab_ts = (self.reg.kv_get("lab") or {}).get("last_import") or "none"
+        if st.get("epoch") != lc.desk_epoch:
+            st = {"epoch": lc.desk_epoch, "created": iso(), "coins": {}, "cuts": None, "tried": None}
+        coins = st.get("coins") or {}
+        if len(coins) >= lc.desk_coins or st.get("tried") == lab_ts:
+            return st
+        evidence = self.desk_evidence()
+        universe = list((self.reg.kv_get("universe") or {}).get("pairs") or [])
+        cuts = tuple(st["cuts"]) if st.get("cuts") else None
+        new, cuts = D.assign(evidence, universe, lc.desk_coins, frozen=coins, cuts=cuts, excluded=set(excluded))
+        added = [p for p in new if p not in coins]
+        for p in added:  # freeze the strategy as it is now: later research changes never move a desk
+            r = self.reg.one("SELECT * FROM strategies WHERE id=?", (new[p]["strategy"],)) or {}
+            new[p].update(params=r.get("params") or {}, sides=r.get("sides") or ["long", "short"],
+                          assigned=iso(), stage_at_assignment=r.get("stage"))
+        st.update(coins=new, cuts=list(cuts), tried=lab_ts, updated=iso())
+        self.reg.kv_set("desks", st)
+        if added:
+            line = ", ".join(f"{D.coin_name(p)}:{new[p]['strategy']}({new[p]['family']} {new[p]['timeframe']}, "
+                             f"{new[p]['bucket']} ~{new[p]['per_month']}/mo)" for p in added)
+            sm = D.summary(new)
+            log.info("DESKS epoch %s: %d coins (active %d, medium %d, rare %d) + %s", lc.desk_epoch, sm["coins"],
+                     sm["active"], sm["medium"], sm["rare"], line)
+            self.reg.event("lifecycle", f"coin desks (experiment {lc.desk_epoch}): {len(added)} coins assigned, "
+                           f"{sm['coins']} of {lc.desk_coins} in total – {line}", data={"desks": sm})
+            self.sync_desk_stages(new)
+        return st
+
+    def sync_desk_stages(self, coins: dict) -> None:
+        """Stages say what trades: the desk strategies are `exploration` (0.1 % risk), every other
+        strategy that was trading goes back to the research shelf."""
+        mine = {d["strategy"]: p for p, d in coins.items()}
+        for r in self.reg.strategies(DEPLOYED):
+            if r["id"] not in mine:
+                back = "validated" if r["stage"] in ("incubation", "eligible", "production") else "exploratory"
+                self.reg.set_stage(r["id"], back, "demo switched to coin desks (one strategy per coin, owner 23.11)")
+        for sid, pair in mine.items():
+            r = self.reg.one("SELECT stage FROM strategies WHERE id=?", (sid,))
+            if r and r["stage"] in ("validated", "exploratory"):
+                self.reg.set_stage(sid, "exploration", f"coin desk {D.coin_name(pair)}: the best tested strategy on this coin")
+
+    def desk_sleeves(self, excluded: set[str], scale: float = 1.0) -> list[Sleeve]:
+        st = self.ensure_desks(excluded)
+        out = []
+        for pair, d in (st.get("coins") or {}).items():
+            if pair in excluded:
+                continue  # e.g. a delisting: no new entries, the open trade keeps its exits
+            out.append(Sleeve(id=d["strategy"], family=d["family"], params=d.get("params") or {}, pairs=[pair],
+                              stage="exploration", risk=round(self.risk_for("exploration") * scale, 6),
+                              leverage=self.lc.leverage, sides=d.get("sides") or ["long", "short"],
+                              score=1.0, timeframe=d.get("timeframe") or "",
+                              note=f"desk {D.coin_name(pair)}: {d.get('bucket')}, ~{d.get('per_month')} trades/month"))
+        return out
+
+    def lane_sleeves(self, excluded: set[str], scale: float) -> list[Sleeve]:
+        """The exploration lanes (until 23.11): queue, rotation, up to 4 strategies per coin."""
+        rows = self.reg.strategies(DEPLOYED)
         pscale = self.proven_scale(rows)
         penalty = self.correlation_penalty([r["id"] for r in rows if r["stage"] in ("production", "incubation", "eligible")])
         # within a stage the strongest evidence gets its coins first (forward-proven, autopilot and
@@ -733,27 +861,7 @@ class Lifecycle:
                                   leverage=self.lc.leverage, sides=r.get("sides") or ["long", "short"],
                                   score=float(r.get("score") or 0.0), timeframe=self.strategy_tf(r)))
         sleeves += core
-        sleeves += self.tradfi_sleeves(excluded, scale)  # independent lane: its own instruments, outside the crypto slots
-        # retired sleeves that still hold positions keep managing them (no new entries)
-        live_ids = {s.id for s in sleeves}
-        tf_cfg = self.reg.kv_get("tradfi_cfg") or {}
-        for t in open_trades:
-            tag = t.get("enter_tag")
-            if tag and tag not in live_ids and tag in tf_cfg:  # TradFi lane off or instrument gone: manage to the end
-                c = tf_cfg[tag]
-                sleeves.append(Sleeve(id=tag, family=c["family"], params=c["params"], pairs=[], stage="closing",
-                                      risk=0.0, leverage=self.lc.leverage, sides=c.get("sides") or ["long", "short"],
-                                      timeframe=c.get("timeframe") or "4h", note="tradfi"))
-                live_ids.add(tag)
-                continue
-            if tag and tag not in live_ids:
-                r = self.reg.one("SELECT * FROM strategies WHERE id=?", (tag,))
-                if r:
-                    sleeves.append(Sleeve(id=r["id"], family=r["family"], params=r["params"],
-                                          pairs=[], stage="closing", risk=0.0, leverage=self.lc.leverage,
-                                          sides=r.get("sides") or ["long", "short"], timeframe=self.strategy_tf(r)))
-                    live_ids.add(tag)
-        return Manifest(sleeves=sleeves, entries_paused=paused)
+        return sleeves
 
     def write(self, manifest: Manifest, open_trades: list[dict]) -> bool:
         """Persist manifest + pairlist if the content changed. Returns True if changed."""

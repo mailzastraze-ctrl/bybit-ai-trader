@@ -12,7 +12,9 @@ The owner runs several Claude sessions on this project (trading system, 3D offic
 - Weaken a research gate (gates only get stricter).
 - Change demo-only, 1x leverage, risk limits (8 % total, 4 % per side), exchange stops or the kill-switch.
 - Switch the daily loss limit back on during the demo, or leave it off for real money. The owner switched it off on demo on 22.11; it is required before real money.
-- Remove or rotate the demo core (`core-*`, files with `"core": true`) without the owner. It is his decision of 22.11.
+- Change what trades on demo without the owner: since 23.11 the coin desks (`aitrader/desks.py`, one frozen
+  experiment; a new choice = `DESK_EPOCH`, only with his OK). The monthly core (`core-*`) is off on demo by his
+  decision of 23.11; it stays the forward benchmark and H1.
 - Add strategy families or genes during the observation period. (Owner's exception, 23.11.2026: the TradFi
   lane – gold and S&P 500, `docs/TRADFI.md`; its families are outside the lab's search.)
 

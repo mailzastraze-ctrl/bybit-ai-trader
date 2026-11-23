@@ -18,6 +18,7 @@ import os
 from datetime import timedelta
 from pathlib import Path
 
+from aitrader import desks as D
 from aitrader.util import iso, parse_dt, utcnow
 
 log = logging.getLogger(__name__)
@@ -431,6 +432,34 @@ def health(open_trades: list[dict], equity: float | None, now=None) -> dict:
             "risk_pct": round(100 * risk / equity, 2) if equity else None}
 
 
+NO_ENTRY_ALARM_H = 6  # owner, 23.11: a demo that stops entering must be noticed by the system, not by him
+
+
+def activity(reg, open_trades: list[dict], now=None) -> dict:
+    """New entries in the last 24 h (long / short) and the time of the newest one, from the
+    bot's closed and open trades. Execution tests are not entries. Observation only."""
+    now = now or utcnow()
+    since = now - timedelta(hours=24)
+    seen: dict = {}
+    for r in reg.q("SELECT trade_id, sleeve_id, is_short, open_date FROM live_trades WHERE open_date >= ?",
+                   (iso(now - timedelta(days=30)),)):
+        seen[("c", r["trade_id"])] = (r.get("sleeve_id"), bool(r.get("is_short")), parse_dt(r.get("open_date")))
+    for t in open_trades or []:
+        seen[("c", t.get("trade_id"))] = (t.get("enter_tag"), bool(t.get("is_short")),
+                                          parse_dt(t.get("open_date") or t.get("open_timestamp")))
+    out = {"ts": iso(now), "entries_24h": 0, "long_24h": 0, "short_24h": 0, "last_entry": None}
+    last = None
+    for tag, short, od in seen.values():
+        if od is None or str(tag or "").startswith("exec-test"):
+            continue
+        last = od if last is None or od > last else last
+        if od >= since:
+            out["entries_24h"] += 1
+            out["short_24h" if short else "long_24h"] += 1
+    out["last_entry"] = iso(last) if last else None
+    return out
+
+
 def red_flags(reg, now=None) -> list[str]:
     """The owner's red flags (PLAN §5) from what the registry already knows."""
     now = now or utcnow()
@@ -473,7 +502,21 @@ def red_flags(reg, now=None) -> list[str]:
     p = reg.kv_get("parity") or {}
     if p.get("alarm") and p.get("like_for_like"):
         out.append("PARITY ALARM")
+    a = reg.kv_get("activity") or {}
+    if a and not reg.kv_get("kill_since"):
+        le = parse_dt(a.get("last_entry"))
+        if le is None or (now - le).total_seconds() > NO_ENTRY_ALARM_H * 3600:
+            out.append(f"no entry > {NO_ENTRY_ALARM_H}h")
     return out
+
+
+def activity_part(reg) -> str:
+    """Entries in the last 24 h and the coin desks in the HEALTH line."""
+    a, d = reg.kv_get("activity") or {}, reg.kv_get("desks") or {}
+    ent = (f"{a.get('entries_24h', 0)} (L {a.get('long_24h', 0)}/S {a.get('short_24h', 0)})" if a else "?")
+    sm = D.summary(d.get("coins") or {})
+    desk = (f"{sm['coins']}: active {sm['active']}, medium {sm['medium']}, rare {sm['rare']}" if d else "off")
+    return f"entries_24h={ent} desks=[{desk}]"
 
 
 def status_line(reg, now=None) -> str:
@@ -497,7 +540,7 @@ def status_line(reg, now=None) -> str:
            f"rev {v3.get('revisions', 0)}, ok {age}{part}") if v3 else "none"
     flags = red_flags(reg, now)
     return (f"HEALTH positions={h.get('positions', '?')} no_exchange_stop={len(h.get('no_exchange_stop') or [])} "
-            f"risk={h.get('risk_pct', '?')}% import_age={imp} disk=[{disk}] "
+            f"risk={h.get('risk_pct', '?')}% {activity_part(reg)} import_age={imp} disk=[{disk}] "
             f"forward=[{fw.get('verdict', '?')}, days {fw.get('forward_days', '?')}, benchmark trades {bench}, "
             f"P(top>bench) {vs}] v3=[{v3s}] tradfi=[{tradfi_part(reg)}] flags={flags or 'none'}")
 
@@ -516,6 +559,18 @@ def tradfi_part(reg) -> str:
         st = "ok" if a else ("n/a" if a is False else "?")
         out.append(f"{p.split('/')[0]} {st}{' open' if (t.get('open_now') or {}).get(p) else ''}")
     return ", ".join(out) or "none"
+
+
+def signals_line(reg, top: int = 8) -> str:
+    """Hourly SIGNALS log line: entry signals of the live book over the last 7 days, how many the
+    bot took, why the rest were not taken, and the busiest strategies (readable without passwords)."""
+    s = reg.kv_get("signals") or {}
+    t = s.get("total") or {}
+    missed = ", ".join(f"{k} {v}" for k, v in sorted((t.get("missed") or {}).items(), key=lambda kv: -kv[1]))
+    per = sorted((s.get("per_sleeve") or {}).items(), key=lambda kv: -kv[1].get("signals", 0))[:top]
+    busy = ", ".join(f"{k} {v.get('executed', 0)}/{v.get('signals', 0)}" for k, v in per)
+    return (f"SIGNALS days={s.get('days', '?')} since={s.get('since')} signals={t.get('signals', 0)} "
+            f"executed={t.get('executed', 0)} missed=[{missed or 'none'}] by_strategy=[{busy or 'none'}]")
 
 
 def disk_line(reg) -> str:
