@@ -517,9 +517,10 @@ function renderDesks() {
       const pos = k.position;
       const now = pos ? `${pill(pos.side === "short" ? "шорт" : "лонг", pos.side === "short" ? "crit" : "good")} <span class="${cls(pos.profit_abs)}">${sgnUsd(+pos.profit_abs || 0)}</span>` +
         (pos.tag && p && pos.tag !== p.id ? `<div class="dim">${pos.guest ? "гость" : "позиция"} ${esc(pos.code ? "#" + pos.code : pos.method || pos.tag)}</div>` : "") : `<span class="dim">ждёт вход</span>`;
-      const guests = first && (k.guests || []).length ? `<div class="guests">Также торгуют эту монету: ${k.guests.map((g) => { const bits = [g.per_month != null ? `${nf(g.per_month, 1)} сд./мес` : "", g.pnl_month != null ? `${usd(g.pnl_month, 0)}/мес` : "",
-          g.demo?.trades ? `демо ${g.demo.trades} · <span class="${cls(g.demo.pnl)}">${sgnUsd(g.demo.pnl)}</span>` : ""].filter(Boolean);
-        return `<b>${code(g)}</b> ${esc(g.method)}${bits.length ? " — " + bits.join(", ") : ""}`; }).join("; ")}</div>` : "";
+      const guests = first && (k.guests || []).length ? `<div class="guests">гости: ${k.guests.map((g) => {
+        const tip = `${g.method}: на ${k.coin} ${g.per_month != null ? nf(g.per_month, 1) + " сделок/мес" : "—"}, ${g.pnl_month != null ? usd(g.pnl_month, 0) + "/мес" : "—"} по истории` +
+          (g.demo?.trades ? `; демо ${g.demo.trades} сделок, ${sgnUsd(g.demo.pnl)}` : "");
+        return `<span class="g" title="${esc(tip)}">${code(g)}${g.demo?.trades ? ` <span class="${cls(g.demo.pnl)}">${sgnUsd(g.demo.pnl)}</span>` : ""}</span>`; }).join("")}</div>` : "";
       const tf = p?.timeframe || "1h";
       if (!p) return `<tr class="click" data-chart="${esc(k.pair)}" data-tf="1h"><td><b>${esc(k.coin)}</b></td><td class="dim">не торгует (выбрано: ничего)${guests}</td><td class="r">—</td><td class="r">—</td><td class="r">—</td><td class="r">—</td><td>${now}</td>
         <td><button class="btn" data-pick="${esc(k.pair)}">Выбрать</button></td></tr>`;
