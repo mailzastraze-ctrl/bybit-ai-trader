@@ -5,13 +5,13 @@ _Last updated: 2026-11-23 evening (demo = coin desks, monthly core off, no-entry
 ## What runs
 - **Railway** (one container, volume `/data`, EU West, Hobby plan): Freqtrade on **Bybit Demo only** (`demo_trading` is hard-required, 1x), the manager (lifecycle, learning, manifest) and the web control room. No research on the server.
 - **GitHub Actions research lab** (`research-lab`, public repo, 4 runners, a run every ~3 h): walk-forward, screener/autopilot, forward test of frozen strategies. It sends compact results to the server.
-- Web: https://aitrader-production-cf456409.up.railway.app (basic auth: `WEB_USER` / `WEB_PASSWORD` in Railway). `/` control room, `/explorer` every strategy, `/hq` 3D office (owner-maintained).
+- Web: https://aitrader-production-cf456409.up.railway.app (basic auth: `WEB_USER` / `WEB_PASSWORD` in Railway). `/` control room («Монеты»: coin desks and the owner's choice), `/explorer` the one strategy base (codes, sortable), `/hq` 3D office (owner-maintained).
 - No profitability is claimed. Numbers come from demo fills or walk-forward / forward tests after costs.
 
 ## What trades on demo (23.11 evening, owner)
 - **Coin desks – one experiment** (`aitrader/desks.py`): up to 30 top coins, on each coin the one tested strategy that is best on that coin (walk-forward profit per month on the coin with a drawdown discount), every desk a different strategy, trade frequencies mixed (active / medium / rare), 0.1 % risk.
   - Frozen for the whole experiment: no queue, no rotation, no retirement; open coins are filled on a later lab import. A new choice only with the owner (`DESK_EPOCH`).
-  - The assignment: `DESKS` log line and the event log; per coin the live record is the strategy's record.
+  - The assignment: control room → «Монеты» (owner can pick any strategies from each coin's list of best), `DESKS` log line; per coin the live record is the strategy's record. One strategy base with codes: `/explorer`.
   - By history ≈ 30 trades a month in total (0.4–2.5 per coin): tested strategies trade rarely per coin.
 - **Monthly TSMOM core:** off on demo (owner, 23.11); stays the forward benchmark and H1. Its open trades end on their own rules.
 - **TradFi lane** (owner, 23.11; `docs/TRADFI.md`): Bybit's gold and S&P 500 perpetuals in the same bot, entries only while the underlying market is open, ≤ 2 positions, ≤ 0.5 % at stops, 0.1 % risk × BTC-correlation scale.

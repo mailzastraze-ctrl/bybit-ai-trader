@@ -109,9 +109,9 @@ def assign(evidence: dict[str, list[Option]], coin_order: list[str], n_desks: in
         cuts = bucket_cuts([o for xs in pool.values() for o in xs])
     rest = sorted((c for c in pool if c not in coin_order), key=lambda c: -pool[c][0].score)
     order = [c for c in coin_order if c in pool] + rest
-    used = Counter(d["strategy"] for d in desks.values())
-    counts = Counter(d["bucket"] for d in desks.values())
-    families = Counter(d["family"] for d in desks.values())
+    used = Counter(p["strategy"] for d in desks.values() for p in picks(d))
+    counts = Counter(p.get("bucket") for d in desks.values() for p in picks(d)[:1])
+    families = Counter(p.get("family") for d in desks.values() for p in picks(d))
     for coin in order:
         if len(desks) >= n_desks:
             break
@@ -140,8 +140,10 @@ def assign(evidence: dict[str, list[Option]], coin_order: list[str], n_desks: in
 
 
 def summary(desks: dict[str, dict]) -> dict:
-    c = Counter(d.get("bucket") for d in desks.values())
-    return {"coins": len(desks), **{b: c.get(b, 0) for b in BUCKETS}}
+    """Coins that trade, and the frequency type of their (first) strategy."""
+    first = [picks(d)[0] for d in desks.values() if picks(d)]
+    c = Counter(p.get("bucket") for p in first)
+    return {"coins": len(first), **{b: c.get(b, 0) for b in BUCKETS}}
 
 
 def option_dict(o: Option) -> dict:

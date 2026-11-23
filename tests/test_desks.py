@@ -143,7 +143,9 @@ def test_activity_counts_entries_and_alarms_after_six_quiet_hours(env):
     a = observe.activity(reg, [older, {"trade_id": 4, "enter_tag": "c", "is_short": True, "open_date": iso(now)}], now)
     reg.kv_set("activity", a)
     assert "no entry > 6h" not in observe.red_flags(reg, now)
-    reg.kv_set("desks", {"coins": {"BTC/USDT:USDT": {"bucket": "active"}, "ETH/USDT:USDT": {"bucket": "rare"}}})
+    reg.kv_set("desks", {"coins": {"BTC/USDT:USDT": {"strategy": "a", "bucket": "active"},
+                                   "ETH/USDT:USDT": {"strategy": "b", "bucket": "rare"},
+                                   "SOL/USDT:USDT": {"pair": "SOL/USDT:USDT", "picks": [], "manual": True}}})  # owner: none
     line = observe.status_line(reg, now)
     assert "entries_24h=2 (L 1/S 1)" in line and "desks=[2: active 1, medium 0, rare 1]" in line
     reg.kv_set("signals", {"days": 7, "total": {"signals": 5, "executed": 3, "missed": {"pair_busy": 2}},
@@ -189,3 +191,25 @@ def test_a_new_experiment_starts_flat_once(env):
     assert life.flatten_for_experiment(Broken(), trades) == []
     ft = FT()
     assert life.flatten_for_experiment(ft, trades) and ft.closed == [1, 3]  # a failed close is tried again
+
+
+def test_owner_picks_any_strategies_from_the_coins_list_of_best(env):
+    s, reg = env
+    life = Lifecycle(s, reg)
+    reg.kv_set("universe", {"pairs": ["BTC/USDT:USDT", "ETH/USDT:USDT"]})
+    add(reg, "a", "exploratory", {"BTC/USDT:USDT": {"pnl": 300, "trades": 20}, "ETH/USDT:USDT": {"pnl": 120, "trades": 9}})
+    add(reg, "b", "exploratory", {"ETH/USDT:USDT": {"pnl": 200, "trades": 12}})
+    add(reg, "c", "exploratory", {"ETH/USDT:USDT": {"pnl": 150, "trades": 10}})
+    life.build_manifest([], set(), False)
+    assert [o["strategy"] for o in life.desk_options("ETH/USDT:USDT")] == ["b", "c", "a"]  # best first
+    with pytest.raises(ValueError):
+        life.set_desk("ETH/USDT:USDT", ["nope"])
+    life.set_desk("ETH/USDT:USDT", ["c", "a"])  # two strategies; "a" also runs BTC
+    man = life.build_manifest([], set(), False)
+    by = {x.id: sorted(x.pairs) for x in man.sleeves}
+    assert by == {"a": ["BTC/USDT:USDT", "ETH/USDT:USDT"], "c": ["ETH/USDT:USDT"]}
+    assert {r["id"]: r["stage"] for r in reg.strategies()} == {"a": "exploration", "b": "exploratory", "c": "exploration"}
+    life.set_desk("ETH/USDT:USDT", [])  # none: the coin takes no entries, and is not refilled automatically
+    reg.kv_set("lab", {"last_import": "later"})
+    man = life.build_manifest([], set(), False)
+    assert {x.id: x.pairs for x in man.sleeves} == {"a": ["BTC/USDT:USDT"]}

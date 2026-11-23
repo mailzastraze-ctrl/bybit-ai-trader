@@ -39,6 +39,7 @@ function setTab(t) {
   if (t === "office" && !fr.src) fr.src = "/hq";
   document.querySelectorAll("#tabs button").forEach((b) => b.classList.toggle("on", b.dataset.t === t));
   try { history.replaceState(null, "", "#" + t); } catch (e) { /* ignore */ }
+  if (t === "strategies") api("/api/desks").then((d) => { S.desks = d; safe(renderDesks); }).catch(() => {});
   renderAll();
 }
 document.querySelectorAll("#tabs button").forEach((b) => b.onclick = () => setTab(b.dataset.t));
@@ -66,7 +67,10 @@ function renderKpis() {
   const tr = S.trades?.closed || [], wins = tr.filter((t) => +t.profit_abs > 0).length;
   $("#kpis").innerHTML = [
     kpi("Торговый капитал", usd(now, 0), ch == null ? "копим снимки" : `<span class="${cls(ch)}">${pct(ch)}</span> за 24ч`),
-    kpi("Результат на демо", `<span class="${cls(ov.closed_pnl)}">${sgnUsd(ov.closed_pnl)}</span>`, `${ov.closed_count ?? 0} закрытых сделок${tr.length ? ` · ${Math.round(wins / tr.length * 100)}% в плюс` : ""}`),
+    ov.experiment?.since
+      ? kpi("Эксперимент «монеты»", `<span class="${cls(ov.experiment.closed_pnl)}">${sgnUsd(ov.experiment.closed_pnl)}</span>`,
+            `${ov.experiment.closed_count} закрытых сделок с ${new Date(ov.experiment.since).toLocaleString("ru-RU", {day: "numeric", month: "short", hour: "2-digit", minute: "2-digit"})} · за всё время ${sgnUsd(ov.closed_pnl)}`)
+      : kpi("Результат на демо", `<span class="${cls(ov.closed_pnl)}">${sgnUsd(ov.closed_pnl)}</span>`, `${ov.closed_count ?? 0} закрытых сделок${tr.length ? ` · ${Math.round(wins / tr.length * 100)}% в плюс` : ""}`),
     kpi("Сейчас в рынке", `${open.length} ${plural(open.length, "позиция", "позиции", "позиций")}`, `<span class="${cls(upnl)}">${sgnUsd(upnl)}</span> · ${nTrading} стратегий на ${coins} монетах`),
     kpi("Может ли зарабатывать?", fwLabel, `форвард-тест: ${fw.top?.trades || 0} из ${fw.rules?.final_trades ?? 200} сделок`, {works: "pos", not_working: "neg"}[fw.verdict] || ""),
     kpi("Готовность к реалу", `${rd.passed ?? 0}/${rd.total ?? 10}`, rd.ready ? "все проверки пройдены — решать вам" : "проверок пройдено · только совет"),
@@ -149,7 +153,7 @@ function renderPipeline() {
     ["1", "Скринер", sc.evaluated ? `${nf(sc.evaluated, 0)} вариантов → выжило ${sc.n_survivors}` : "первый запуск с ближайшим прогоном"],
     ["2", "Строгая проверка", `${rs.counts?.done || 0} проверено · ${c("exploratory") + c("validated")} кандидатов`],
     ["3", "Форвард-тест", `${fw.book_size ?? 0} стратегий · ${fw.top?.trades || 0} сделок`],
-    ["4", "Демо-торговля", `${(S.ov?.manifest?.sleeves || []).filter((s) => s.stage !== "closing").length} стратегий торгуют`],
+    ["4", "Демо-торговля", S.desks?.summary ? `${S.desks.summary.coins} монет, на каждой своя стратегия` : `${(S.ov?.manifest?.sleeves || []).filter((s) => s.stage !== "closing").length} стратегий торгуют`],
     ["5", "Реальный счёт", `${S.ready?.passed ?? 0}/${S.ready?.total ?? 10} проверок · решаете вы`],
   ];
   $("#pipeline").innerHTML = steps.map(([n, t, d]) => `<div class="fstep"><span>шаг ${n}</span><b style="font-size:15px">${t}</b><span>${esc(d)}</span></div>`).join("");
@@ -232,9 +236,9 @@ function renderPositions() {
     const prot = !stop ? pill("нет данных о стопе", "warn") : locked ? pill(`прибыль зафиксирована ${sgnUsd(atStop)}`, "good") : pill(`риск до стопа ${usd(Math.abs(atStop))}`, "");
     const pr = +(t.profit_ratio ?? 0);
     return `<tr><td><b>${esc(pair(t.pair))}</b> ${pill(short ? "шорт" : "лонг", short ? "crit" : "good")}<div class="dim mono">вход ${entry}</div></td>
-      <td>${esc(famName(sl?.family))}<div class="dim mono hide-m">${esc(t.enter_tag || "")}</div></td>
+      <td data-v="${esc(UI.code(t.enter_tag) || UI.method(t.enter_tag))}">${esc(UI.method(t.enter_tag, famName(sl?.family)))}<div class="dim mono">${UI.code(t.enter_tag) ? "#" + esc(UI.code(t.enter_tag)) : esc(t.enter_tag || "")}</div></td>
       <td class="r num"><span class="${cls(t.profit_abs)}">${sgnUsd(+t.profit_abs)}</span><div class="dim">${pct(pr)}</div></td>
-      <td>${prot}<div class="dim mono">стоп ${stop || "—"}</div></td><td class="r num">${dur(t.open_date)}</td></tr>`;
+      <td>${prot}<div class="dim mono">стоп ${stop || "—"}</div></td><td class="r num" data-v="${new Date(t.open_date || 0).getTime() ? (Date.now() - new Date(t.open_date).getTime()) / 6e4 : ""}">${dur(t.open_date)}</td></tr>`;
   }).join("")}</tbody></table>`;
 }
 
@@ -263,7 +267,7 @@ function renderAutopilot() {
       `Принятые идут в строгую проверку с реальными издержками, затем торгуют на демо по всем монетам, где прошли.${off}`;
 }
 function renderCards() {
-  if (S.tab !== "strategies") return;
+  if (S.tab !== "strategies" || !$("#cards")) return;  // the strategy base lives at /explorer
   renderAutopilot();
   const cs = S.cards?.cards || [], counts = S.cards?.counts || {};
   $("#filters").innerHTML = [["all", `Все · ${cs.length}`], ...Object.entries(KIND).map(([k, l]) => [k, `${l} · ${counts[k] || 0}`])]
@@ -329,8 +333,8 @@ function openCard(c) {
   $("#drawer").classList.add("open");
   lineChart($("#dChart"), curvePts(c.curve), (v) => pct(v - 1, 1), fmtDate, "График появится после строгой проверки этой стратегии.");
 }
-$("#dx").onclick = () => $("#drawer").classList.remove("open");
-addEventListener("keydown", (e) => { if (e.key === "Escape") $("#drawer").classList.remove("open"); });
+$("#dx").onclick = () => $("#drawer").classList.remove("open", "wide");
+addEventListener("keydown", (e) => { if (e.key === "Escape") $("#drawer").classList.remove("open", "wide"); });
 
 // ---------------------------------------------------------------------------- лаборатория
 const STEPS = ["download", "hyperopt fold 1", "oos fold 1", "hyperopt fold 2", "oos fold 2", "hyperopt fold 3", "oos fold 3", "hyperopt fold 4", "oos fold 4", "robustness", "evaluated"];
@@ -343,6 +347,7 @@ function stageText(p) {
 }
 function renderLab() {
   if (S.tab !== "lab") return;
+  safe(renderAutopilot);
   const rs = S.rs || {}, lab = rs.lab || {}, exps = rs.experiments || [];
   const run = exps.filter((e) => e.status === "running" && e.progress?.remote && (!lab.run_id || e.progress.run_id == lab.run_id));
   const byJob = {}; for (const e of run) { const j = e.progress?.job ?? 0; if (!byJob[j] || e.created > byJob[j].created) byJob[j] = e; }
@@ -462,16 +467,94 @@ const RU_EVENTS = [
 ];
 const ruEvent = (msg) => { for (const [re, f] of RU_EVENTS) { const m = re.exec(msg); if (m) return f(m); } return msg; };
 
+// long internal ids in messages → the strategy's code ("#1047")
+const withCodes = (msg) => String(msg).replace(/\b(?:b\d{8}-\d+-[a-z_]+-\d+|fw-[\w-]+|x[0-9a-f]{10}x?\d?)\b/g, (id) => UI.code(id) ? "#" + UI.code(id) : id);
 function renderLog() {
   if (S.tab !== "overview" && S.tab !== "lab") return;
   const ev = S.ev?.events || S.ov?.events || [];
   const SRC = {research: "исследования", lifecycle: "отбор", strategy: "стратегия", manager: "менеджер", supervisor: "система", scanner: "рынок", risk: "риск", web: "пульт", learner: "обучение"};
-  $("#log").innerHTML = ev.slice(0, 60).map((e) => `<div class="${esc(e.level)}"><time class="num">${esc((e.ts || "").slice(11, 16))}</time><span class="src">${esc(SRC[e.source] || e.source)}</span><span class="msg">${esc(ruEvent(e.message))}</span></div>`).join("") || `<div class="empty">тихо</div>`;
+  $("#log").innerHTML = ev.slice(0, 60).map((e) => `<div class="${esc(e.level)}"><time class="num">${esc((e.ts || "").slice(11, 16))}</time><span class="src">${esc(SRC[e.source] || e.source)}</span><span class="msg">${esc(withCodes(ruEvent(e.message)))}</span></div>`).join("") || `<div class="empty">тихо</div>`;
 }
 function renderLearn() {
   const ln = (S.ln?.learnings || []).filter((l) => l.active).slice(0, 25);
   $("#learn").innerHTML = ln.map((l) => `<div><time class="num">${esc((l.ts || "").slice(5, 10))}</time><span class="src">${esc(l.scope)}</span><span class="msg">${esc(l.insight)}</span></div>`).join("") || `<div class="empty">Пока нет выводов — они появляются из завершённых проверок и закрытых сделок.</div>`;
 }
+
+
+// ---------------------------------------------------------------------------- монеты: на каждой своя стратегия
+const BUCKET = {active: ["активная", "good"], medium: ["средняя", ""], rare: ["редкая, точная", "warn"]};
+const bucketPill = (b) => pill(...(BUCKET[b] || [b || "—", ""]));
+const pfTxt = (v) => v == null ? "—" : v >= 99 ? "∞" : nf(v, 2);
+function renderDesks() {
+  if (S.tab !== "strategies" || !$("#desks")) return;
+  const d = S.desks;
+  if (!d) { $("#desks").innerHTML = `<div class="empty">Загрузка…</div>`; return; }
+  const sm = d.summary || {};
+  $("#deskSub").textContent = `${sm.coins || 0} монет торгуют · активных ${sm.active || 0}, средних ${sm.medium || 0}, редких ${sm.rare || 0}` +
+    (d.created ? ` · эксперимент №${d.epoch} с ${new Date(d.created).toLocaleString("ru-RU", {day: "numeric", month: "short", hour: "2-digit", minute: "2-digit"})}` : "");
+  const rows = [];
+  for (const k of d.desks || []) {
+    const ps = k.picks.length ? k.picks : [null];
+    for (const p of ps) rows.push({k, p});
+  }
+  if (!rows.length) { $("#desks").innerHTML = `<div class="empty">Столы ещё не назначены.</div>`; return; }
+  $("#desks").innerHTML = `<table><thead><tr><th>Монета</th><th>Код</th><th>Метод</th><th>Тип</th>
+    <th class="r">Сделок/мес<br><span class="dim">история</span></th><th class="r">Прибыль/мес<br><span class="dim">история</span></th><th class="r">Просадка<br><span class="dim">история</span></th>
+    <th class="r">Сделок<br><span class="dim">демо</span></th><th class="r">P&L<br><span class="dim">демо</span></th><th class="r">PF<br><span class="dim">демо</span></th><th>Сейчас</th><th class="nosort"></th></tr></thead><tbody>${rows.map(({k, p}) => {
+      const pos = k.position;
+      const now = pos ? `${pill(pos.side === "short" ? "шорт" : "лонг", pos.side === "short" ? "crit" : "good")} <span class="${cls(pos.profit_abs)}">${sgnUsd(+pos.profit_abs || 0)}</span>` +
+        (pos.tag && p && pos.tag !== p.id ? `<div class="dim">${k.picks.some((x) => x.id === pos.tag) ? "позиция" : "старая позиция"} (${esc(pos.code ? "#" + pos.code : pos.method || pos.tag)})</div>` : "") : `<span class="dim">ждёт вход</span>`;
+      if (!p) return `<tr><td><b>${esc(k.coin)}</b></td><td>—</td><td class="dim">не торгует (выбрано: ничего)</td><td>—</td><td class="r">—</td><td class="r">—</td><td class="r">—</td><td class="r">—</td><td class="r">—</td><td class="r">—</td><td>${now}</td>
+        <td><button class="btn" data-pick="${esc(k.pair)}">Выбрать</button></td></tr>`;
+      const dm = p.demo || {};
+      return `<tr><td><b>${esc(k.coin)}</b>${p.manual ? ` ${pill("ваш выбор", "good")}` : ""}</td><td class="mono"><a href="/explorer#${esc(p.id)}">#${esc(p.code ?? "—")}</a></td><td>${esc(p.method)}</td><td data-v="${esc(p.bucket)}">${bucketPill(p.bucket)}</td>
+        <td class="r num">${p.per_month ?? "—"}</td><td class="r num">${p.pnl_month != null ? usd(p.pnl_month, 0) : "—"}</td><td class="r num">${p.max_dd != null ? nf(p.max_dd * 100, 1) + "%" : "—"}</td>
+        <td class="r num">${dm.trades || 0}</td><td class="r num ${cls(dm.pnl)}">${dm.trades ? sgnUsd(dm.pnl) : "—"}</td><td class="r num">${dm.trades ? pfTxt(dm.pf) : "—"}</td><td>${now}</td>
+        <td><button class="btn" data-pick="${esc(k.pair)}">Выбрать</button></td></tr>`;
+    }).join("")}</tbody></table>`;
+  document.querySelectorAll("#desks [data-pick]").forEach((b) => b.onclick = () => openDeskChooser(b.dataset.pick));
+}
+async function openDeskChooser(pairName) {
+  $("#dbody").innerHTML = `<h3>${esc(pair(pairName))}: выбор стратегий</h3><div class="dim">Загрузка списка лучших стратегий для этой монеты…</div>`;
+  $("#drawer").classList.add("open", "wide");
+  let o;
+  try { o = await api(`/api/desks/options?pair=${encodeURIComponent(pairName)}`); } catch (e) { $("#dbody").innerHTML += `<div class="neg">Ошибка: ${esc(e.message)}</div>`; return; }
+  const opts = o.options || [];
+  $("#dbody").innerHTML = `<h3>${esc(o.coin)}: лучшие стратегии на этой монете</h3>
+    <div class="dim" style="margin:4px 0 10px;line-height:1.5">Все прошли проверки на истории. Порядок — прибыль на ${esc(o.coin)} в месяц с поправкой на просадку.
+      Отметьте любые (можно несколько: первая, давшая сигнал, займёт монету; можно ни одной — монета перестанет входить). Бот подхватит выбор в течение ~2 минут.
+      Сортировка — по клику на заголовок.</div>
+    ${opts.length ? `<div class="scroll" id="optTable"><table><thead><tr><th class="nosort">✓</th><th class="r">Место</th><th>Код</th><th>Метод</th><th>Тип</th><th class="r">Сделок/мес</th>
+      <th class="r">Прибыль/мес</th><th class="r">Просадка</th><th class="r">Сделок на монете</th><th class="r">PF (все монеты)</th><th>Где сейчас</th></tr></thead><tbody>${opts.map((x) => `<tr class="opt">
+        <td><input type="checkbox" data-id="${esc(x.id)}" ${x.chosen ? "checked" : ""}></td><td class="r num">${x.rank}</td><td class="mono">#${esc(x.code ?? "—")}</td><td>${esc(x.method)}</td>
+        <td data-v="${esc(x.bucket)}">${bucketPill(x.bucket)}</td><td class="r num">${x.per_month}</td><td class="r num">${usd(x.pnl_month, 0)}</td><td class="r num">${nf(x.max_dd * 100, 1)}%</td>
+        <td class="r num">${x.oos_trades}</td><td class="r num">${pfTxt(x.pf_all)}</td><td>${x.chosen ? pill("на этой монете", "good") : x.elsewhere ? esc("на " + x.elsewhere) : "—"}</td></tr>`).join("")}</tbody></table></div>
+      <div style="display:flex;gap:8px;margin-top:12px;align-items:center"><button class="btn on" id="optSave">Сохранить выбор</button><span class="dim" id="optMsg"></span></div>`
+    : `<div class="empty">Для этой монеты нет стратегий, прошедших проверки (нужно ≥ 3 сделок на ней и прибыль на истории).</div>`}`;
+  if (!opts.length) return;
+  $("#optSave").onclick = async () => {
+    const ids = [...document.querySelectorAll("#optTable input:checked")].map((i) => i.dataset.id);
+    if (!ids.length && !confirm(`Ни одной стратегии — ${o.coin} перестанет входить в сделки. Продолжить?`)) return;
+    $("#optMsg").textContent = "Сохраняю…";
+    try {
+      const r = await fetch("/api/desks/set", {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify({pair: pairName, strategies: ids})});
+      if (!r.ok) throw new Error((await r.json().catch(() => ({}))).detail || r.status);
+      $("#optMsg").textContent = "Сохранено. Бот подхватит в течение ~2 минут.";
+      S.desks = await api("/api/desks"); renderDesks();
+    } catch (e) { $("#optMsg").textContent = "Ошибка: " + e.message; }
+  };
+}
+async function openAddCoin() {
+  $("#dbody").innerHTML = `<h3>Добавить монету</h3><div class="dim">Загрузка…</div>`;
+  $("#drawer").classList.add("open", "wide");
+  let c;
+  try { c = (await api("/api/desks/coins")).coins || []; } catch (e) { $("#dbody").innerHTML += `<div class="neg">Ошибка: ${esc(e.message)}</div>`; return; }
+  $("#dbody").innerHTML = `<h3>Монеты, для которых есть проверенные стратегии</h3><div class="dim" style="margin:4px 0 10px">Нажмите на монету, чтобы выбрать для неё стратегии.</div>
+    <div class="scroll" id="coinTable"><table><thead><tr><th>Монета</th><th class="r">Стратегий в списке</th><th class="r">Лучшая прибыль/мес</th><th>Статус</th></tr></thead><tbody>${c.map((x) =>
+      `<tr style="cursor:pointer" data-coin="${esc(x.pair)}"><td><b>${esc(x.coin)}</b></td><td class="r num">${x.options}</td><td class="r num">${usd(x.best_score, 0)}</td><td>${x.desk ? pill("уже торгует", "good") : "—"}</td></tr>`).join("")}</tbody></table></div>`;
+  document.querySelectorAll("#coinTable [data-coin]").forEach((tr) => tr.onclick = () => openDeskChooser(tr.dataset.coin));
+}
+if ($("#addCoin")) $("#addCoin").onclick = openAddCoin;
 
 // ---------------------------------------------------------------------------- сделки
 function renderTrades() {
@@ -481,7 +564,7 @@ function renderTrades() {
   $("#slvSub").textContent = `${sl.length} стратегий · ${new Set(sl.flatMap((s) => s.pairs)).size} монет под наблюдением`;
   $("#sleeves").innerHTML = sl.length ? `<table><thead><tr><th>Стратегия</th><th>Стадия</th><th>ТФ</th><th>Монеты</th><th class="r">Риск/сделка</th><th class="r">Сделок</th><th class="r">P&L</th></tr></thead><tbody>${sl.map((s) => {
     const lv = byId[s.id]?.live || {};
-    return `<tr><td>${esc(famName(s.family))}<div class="dim mono">${esc(s.id)}</div></td><td>${stagePill(s.stage)}</td><td>${esc(s.timeframe || "1h")}</td>
+    return `<tr><td data-v="${esc(UI.code(s.id) || s.id)}">${esc(UI.method(s.id, famName(s.family)))}<div class="dim mono">${UI.code(s.id) ? "#" + esc(UI.code(s.id)) : esc(s.id)}</div></td><td>${stagePill(s.stage)}</td><td>${esc(s.timeframe || "1h")}</td>
       <td class="dim">${s.pairs.slice(0, 6).map(pair).join(", ")}${s.pairs.length > 6 ? ` +${s.pairs.length - 6}` : ""}</td>
       <td class="r num">${nf(s.risk * 100, 2)}%</td><td class="r num">${lv.trades ?? 0}</td><td class="r num ${cls(lv.pnl)}">${lv.pnl != null ? sgnUsd(lv.pnl) : "—"}</td></tr>`;
   }).join("")}</tbody></table>` : `<div class="empty">Стратегии не развёрнуты.</div>`;
@@ -489,19 +572,23 @@ function renderTrades() {
   const tot = tr.reduce((a, t) => a + (+t.profit_abs || 0), 0), wins = tr.filter((t) => +t.profit_abs > 0).length;
   const RS = {stop_loss: "стоп", stoploss_on_exchange: "стоп на бирже", managed_stop: "защитный стоп", take_profit: "тейк", exit_signal: "сигнал выхода", time_exit: "по времени", custom_exit: "фиксация прибыли", force_exit: "вручную"};
   $("#closedSub").textContent = tr.length ? `${tr.length} сделок · ${Math.round(wins / tr.length * 100)}% прибыльных · ${sgnUsd(tot)} на демо` : "";
-  $("#closed").innerHTML = tr.length ? `<table><thead><tr><th>Закрыта</th><th>Монета</th><th>Стратегия</th><th class="r">Вход → выход</th><th>Причина</th><th class="r">P&L</th><th class="r">%</th></tr></thead><tbody>${tr.slice(0, 60).map((t) => {
+  $("#closed").innerHTML = tr.length ? `<table><thead><tr><th>Закрыта</th><th>Монета</th><th>Стратегия</th><th class="r nosort">Вход → выход</th><th>Причина</th><th class="r">P&L</th><th class="r">%</th></tr></thead><tbody>${tr.slice(0, 60).map((t) => {
     const s = sleeveOf(t.sleeve_id);
-    return `<tr><td class="num">${esc((t.close_date || "").slice(5, 16).replace("T", " "))}</td><td><b>${esc(pair(t.pair))}</b> ${pill(t.is_short ? "шорт" : "лонг", t.is_short ? "crit" : "good")}</td>
-      <td>${esc(famName(s?.family))}<div class="dim mono">${esc(t.sleeve_id)}</div></td><td class="r num">${t.open_rate} → ${t.close_rate}</td><td>${esc(RS[t.exit_reason] || t.exit_reason)}</td>
+    return `<tr><td class="num" data-v="${esc(t.close_date || "")}">${esc((t.close_date || "").slice(5, 16).replace("T", " "))}</td><td><b>${esc(pair(t.pair))}</b> ${pill(t.is_short ? "шорт" : "лонг", t.is_short ? "crit" : "good")}</td>
+      <td data-v="${esc(UI.code(t.sleeve_id) || t.sleeve_id)}">${esc(UI.method(t.sleeve_id, famName(s?.family)))}<div class="dim mono">${UI.code(t.sleeve_id) ? "#" + esc(UI.code(t.sleeve_id)) : esc(t.sleeve_id)}</div></td><td class="r num">${t.open_rate} → ${t.close_rate}</td><td>${esc(RS[t.exit_reason] || t.exit_reason)}</td>
       <td class="r num ${cls(t.profit_abs)}">${sgnUsd(+t.profit_abs)}</td><td class="r num ${cls(t.profit_ratio)}">${pct(+t.profit_ratio)}</td></tr>`;
   }).join("")}</tbody></table>` : `<div class="empty">Закрытых сделок пока нет.</div>`;
 }
 
 // ---------------------------------------------------------------------------- опрос данных
 function safe(fn) { try { fn(); } catch (e) { console.warn(fn.name, e); } }
-function renderAll() { [renderHeader, renderKpis, renderBrief, renderWorld, renderPipeline, renderEquity, renderPositions, renderForward, renderGoals, renderLog, renderCards, renderLab, renderTrades].forEach(safe); }
+function renderAll() { [renderHeader, renderKpis, renderBrief, renderWorld, renderPipeline, renderEquity, renderPositions, renderForward, renderGoals, renderLog, renderCards, renderDesks, renderLab, renderTrades].forEach(safe); }
 async function fast() {
-  try { const [ov, rs] = await Promise.all([api("/api/overview"), api("/api/research")]); Object.assign(S, {ov, rs}); renderAll(); }
+  try {
+    const [ov, rs, desks] = await Promise.all([api("/api/overview"), api("/api/research"),
+      S.tab === "strategies" || !S.desks ? api("/api/desks").catch(() => null) : Promise.resolve(null)]);
+    Object.assign(S, {ov, rs}, desks ? {desks} : {}); renderAll();
+  }
   catch (e) { S.err = e.message; safe(renderBrief); return; }
   S.err = null;
 }
@@ -509,6 +596,7 @@ let lastSlow = 0;
 async function slow() {
   if (Date.now() - lastSlow < 50000) return; lastSlow = Date.now();
   const get = (p) => api(p).catch(() => null);
+  await UI.loadNames();  // code + method of every strategy for every table
   const [goals, ready, strats, trades, ln, fw, ev, scr, cards, ctx] = await Promise.all([get("/api/goals"), get("/api/readiness"), get("/api/strategies"), get("/api/trades?limit=200"),
     get("/api/learnings"), get("/api/forward"), get("/api/events?limit=60"), get("/api/screen"), get("/api/cards"), get("/api/context")]);
   Object.assign(S, Object.fromEntries(Object.entries({goals, ready, strats, trades, ln, fw, ev, scr, cards, ctx}).filter(([, v]) => v)));

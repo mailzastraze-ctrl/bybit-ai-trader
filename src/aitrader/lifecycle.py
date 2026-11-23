@@ -826,7 +826,7 @@ class Lifecycle:
     def sync_desk_stages(self, coins: dict) -> None:
         """Stages say what trades: the desk strategies are `exploration` (0.1 % risk), every other
         strategy that was trading goes back to the research shelf."""
-        mine = {d["strategy"]: p for p, d in coins.items()}
+        mine = {x["strategy"]: p for p, d in coins.items() for x in D.picks(d)}
         for r in self.reg.strategies(DEPLOYED):
             if r["id"] not in mine:
                 back = "validated" if r["stage"] in ("incubation", "eligible", "production") else "exploratory"
@@ -837,17 +837,61 @@ class Lifecycle:
                 self.reg.set_stage(sid, "exploration", f"coin desk {D.coin_name(pair)}: the best tested strategy on this coin")
 
     def desk_sleeves(self, excluded: set[str], scale: float = 1.0) -> list[Sleeve]:
+        """One sleeve per strategy with the coins it runs (normally one; the owner may put one
+        strategy on several coins or several strategies on one coin – the first signal takes it)."""
         st = self.ensure_desks(excluded)
-        out = []
+        by: dict[str, Sleeve] = {}
         for pair, d in (st.get("coins") or {}).items():
             if pair in excluded:
                 continue  # e.g. a delisting: no new entries, the open trade keeps its exits
-            out.append(Sleeve(id=d["strategy"], family=d["family"], params=d.get("params") or {}, pairs=[pair],
-                              stage="exploration", risk=round(self.risk_for("exploration") * scale, 6),
-                              leverage=self.lc.leverage, sides=d.get("sides") or ["long", "short"],
-                              score=1.0, timeframe=d.get("timeframe") or "",
-                              note=f"desk {D.coin_name(pair)}: {d.get('bucket')}, ~{d.get('per_month')} trades/month"))
-        return out
+            for x in D.picks(d):
+                sl = by.get(x["strategy"])
+                if sl is None:
+                    by[x["strategy"]] = Sleeve(
+                        id=x["strategy"], family=x["family"], params=x.get("params") or {}, pairs=[pair],
+                        stage="exploration", risk=round(self.risk_for("exploration") * scale, 6),
+                        leverage=self.lc.leverage, sides=x.get("sides") or ["long", "short"], score=1.0,
+                        timeframe=x.get("timeframe") or "",
+                        note=f"desk {D.coin_name(pair)}: {x.get('bucket')}, ~{x.get('per_month')} trades/month")
+                elif pair not in sl.pairs:
+                    sl.pairs.append(pair)
+        return list(by.values())
+
+    def desk_options(self, pair: str) -> list[dict]:
+        """The coin's list of best tested strategies (owner's choice in the control room), best first."""
+        st = self.reg.kv_get("desks") or {}
+        cuts = tuple(st.get("cuts") or ()) or None
+        opts = [o for o in self.desk_evidence().get(pair, []) if o.qualifies()]
+        if cuts is None:
+            cuts = D.bucket_cuts(opts)
+        opts.sort(key=lambda o: (-o.score, tuple(-x for x in o.rank)))
+        return [{"strategy": o.strategy, "family": o.family, "timeframe": o.timeframe, "bucket": D.bucket(o.per_month, cuts),
+                 "per_month": round(o.per_month, 2), "pnl_month": round(o.pnl_month, 2), "max_dd": round(o.dd, 4),
+                 "score": round(o.score, 2), "oos_trades": o.trades, "oos_days": round(o.days)} for o in opts]
+
+    def set_desk(self, pair: str, strategy_ids: list[str]) -> dict:
+        """The owner's choice for one coin: any strategies from its list of best (none = the coin
+        stops taking entries). Kept until he changes it; automatic filling never overrides it."""
+        options = {o["strategy"]: o for o in self.desk_options(pair)}
+        unknown = [s for s in strategy_ids if s not in options]
+        if unknown:
+            raise ValueError(f"not in the list of best strategies for {pair}: {', '.join(unknown)}")
+        st = self.reg.kv_get("desks") or {"epoch": self.lc.desk_epoch, "created": iso(), "coins": {}, "cuts": None}
+        coins = st.setdefault("coins", {})
+        chosen = []
+        for sid in dict.fromkeys(strategy_ids):
+            r = self.reg.one("SELECT params, sides FROM strategies WHERE id=?", (sid,)) or {}
+            chosen.append({**options[sid], "pair": pair, "params": r.get("params") or {},
+                           "sides": r.get("sides") or ["long", "short"], "assigned": iso(), "manual": True})
+        old = [x["strategy"] for x in D.picks(coins.get(pair) or {})]
+        coins[pair] = {"pair": pair, "picks": chosen, "manual": True, "updated": iso()}
+        st["updated"] = iso()
+        self.reg.kv_set("desks", st)
+        names = ", ".join(x["strategy"] for x in chosen) or "none – no new entries"
+        self.reg.event("lifecycle", f"coin desk {D.coin_name(pair)} set by the owner: {names} (was: {', '.join(old) or 'none'})",
+                       data={"desk": pair, "strategies": [x["strategy"] for x in chosen]})
+        self.sync_desk_stages(coins)
+        return coins[pair]
 
     def lane_sleeves(self, excluded: set[str], scale: float) -> list[Sleeve]:
         """The exploration lanes (until 23.11): queue, rotation, up to 4 strategies per coin."""
