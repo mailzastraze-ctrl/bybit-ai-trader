@@ -46,7 +46,7 @@ def _seed(reg):
 
 def test_listing_shows_research_forward_and_demo_side_by_side(reg):
     _seed(reg)
-    out = explorer.listing(reg)
+    out = explorer.listing(reg, "active")
     ids = [r["id"] for r in out["strategies"]]
     assert ids[0] == "s-live" and "s-wait" in ids and "s-old" not in ids  # trading first, retired hidden
     r = out["strategies"][0]
@@ -85,3 +85,20 @@ def test_open_positions_belong_to_their_strategy_only():
               {"trade_id": 8, "enter_tag": "other", "pair": "ETH/USDT:USDT"}]
     out = explorer.open_trades(status, "s-live")
     assert len(out) == 1 and out[0]["is_open"] and out[0]["close_date"] is None and out[0]["open_date"] == "2026-11-21T10:00:00Z"
+
+
+def test_one_base_every_strategy_has_a_code_and_a_method(reg):
+    """Owner, 23.11: one strategy base; each strategy a short numeric code (its name) and a method."""
+    _seed(reg)
+    reg.kv_set("desks", {"epoch": 1, "coins": {"ETH/USDT:USDT": {"strategy": "s-wait", "family": "tsmom", "bucket": "rare"}}})
+    out = explorer.listing(reg)  # default: all strategies, retired included
+    by = {r["id"]: r for r in out["strategies"]}
+    assert set(by) == {"s-live", "s-wait", "s-old"}
+    codes = sorted(r["code"] for r in by.values())
+    assert codes == [1001, 1002, 1003] and len(set(codes)) == 3
+    assert by["s-wait"]["method"] == "Импульс за несколько дней · 4h"
+    assert by["s-wait"]["desk"] == ["ETH/USDT:USDT"] and by["s-wait"]["status"] == "Торгует: ETH"
+    assert out["strategies"][0]["id"] == "s-wait"  # coin desks first
+    again = {r["id"]: r["code"] for r in explorer.listing(reg)["strategies"]}
+    assert again == {k: v["code"] for k, v in by.items()}  # codes never change
+    assert explorer.detail(reg, "s-wait")["row"]["code"] == by["s-wait"]["code"]

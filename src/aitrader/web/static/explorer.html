@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Стратегии — подробно · AI Trader</title>
+<title>База стратегий · AI Trader</title>
 <link rel="icon" href="data:,">
 <style>
   :root { --bg:#0f1216; --panel:#171b21; --panel2:#1e232b; --line:#2a313b; --text:#e7ebf0; --dim:#8c97a6;
@@ -74,28 +74,28 @@
 </head>
 <body>
 <header>
-  <h1>Стратегии — подробно</h1>
-  <div class="seg" id="seg">
-    <button data-v="live" class="on">Торгуют</button><button data-v="waiting">Ждут очереди</button>
-    <button data-v="active">Все</button><button data-v="retired">Снятые</button>
-  </div>
-  <input id="q" placeholder="Поиск: монета, семейство…" size="22">
-  <select id="sort">
-    <option value="stage">По статусу</option><option value="demo_pnl">По прибыли на демо</option>
-    <option value="fw_trades">По сделкам форвард-теста</option><option value="fw_pnl">По доходности форвард-теста</option>
-    <option value="res_pf">По PF исследования</option>
+  <h1>База стратегий</h1>
+  <select id="view" title="Какие стратегии показать">
+    <option value="all">Все стратегии</option><option value="live">Торгуют сейчас</option>
+    <option value="base">В базе (прошли проверки)</option><option value="off">Отсеянные и снятые</option>
   </select>
-  <a href="/" style="margin-left:auto">← Пульт</a>
+  <input id="q" placeholder="Поиск: код, метод, монета…" size="24">
+  <select id="sort" title="Порядок (на телефоне; в таблице — клик по заголовку)">
+    <option value="stage">Сначала торгующие</option><option value="code">По коду</option><option value="demo_pnl">По прибыли на демо</option>
+    <option value="per_month">По частоте сделок</option><option value="res_pf">По PF на истории</option><option value="dd">По просадке</option>
+    <option value="fw_pnl">По доходности форвард-теста</option>
+  </select>
+  <a href="/#strategies" style="margin-left:auto">Монеты</a><a href="/">← Пульт</a>
 </header>
 <main>
   <p class="hint" id="hint">Загрузка…</p>
   <div id="cards"></div>
   <div class="wrap" id="tableWrap"><table>
     <thead>
-      <tr><th></th><th></th><th class="hide-m"></th><th class="grp" colspan="3">Исследование (на истории)</th>
-          <th class="grp" colspan="3">Форвард-тест (новые данные)</th><th class="grp" colspan="3">Демо-счёт (реальные сделки)</th></tr>
-      <tr><th>Стратегия</th><th>Статус</th><th class="hide-m">Монеты</th>
-          <th class="r">сделок</th><th class="r">PF</th><th class="r">Шарп</th>
+      <tr><th class="nosort"></th><th class="nosort"></th><th class="nosort"></th><th class="hide-m nosort"></th><th class="grp nosort" colspan="4">Исследование (на истории)</th>
+          <th class="grp nosort" colspan="3">Форвард-тест (новые данные)</th><th class="grp nosort" colspan="3">Демо-счёт (реальные сделки)</th></tr>
+      <tr><th>Код</th><th>Метод</th><th>Статус</th><th class="hide-m">Монеты</th>
+          <th class="r">сделок</th><th class="r">в месяц</th><th class="r">PF</th><th class="r">просадка</th>
           <th class="r">сделок</th><th class="r">PF</th><th class="r">итог</th>
           <th class="r">сделок</th><th class="r">PF</th><th class="r">прибыль</th></tr>
     </thead>
@@ -105,6 +105,7 @@
 <div id="shade"></div>
 <aside id="drawer"><div class="dh"><h2 id="dTitle">—</h2><button class="close" id="dClose">Закрыть ✕</button></div><div class="db" id="dBody"></div></aside>
 
+<script src="/static/ui.js"></script>
 <script>
 const $ = (s) => document.querySelector(s);
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({"&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"}[c]));
@@ -127,39 +128,45 @@ function afterText(a) {
   if (a.status === "done") return `держать: ${a.hold_r > 0 ? "+" : ""}${nf(a.hold_r, 1)}R → ` + (a.saved_usd >= 0 ? `<span class="pos">выход сберёг ${nf(a.saved_usd, 0)} $</span>` : `<span class="neg">недобрали ${nf(-a.saved_usd, 0)} $</span>`);
   return `<span class="dim">пока неясно${a.hold_r_now != null ? ` (сейчас было бы ${nf(a.hold_r_now, 1)}R)` : ""}</span>`;
 }
-let VIEW = "live", ALL = {strategies: [], groups: {}}, SEL = null, DET = null, PAIR = null;
+let ALL = {strategies: [], groups: {}}, SEL = null, DET = null, PAIR = null;
+const OFF = ["rejected", "retired"];
 
 // ------------------------------------------------------------------ list
 async function loadList() {
-  const show = VIEW === "retired" ? "retired" : "active";
-  try { ALL = await api(`/api/explorer?show=${show}`); } catch (e) { $("#hint").textContent = `Нет данных с сервера (${e.message}).`; return; }
+  try { ALL = await api(`/api/explorer?show=all`); } catch (e) { $("#hint").textContent = `Нет данных с сервера (${e.message}).`; return; }
   renderList();
+  const h = decodeURIComponent((location.hash || "").slice(1));
+  if (h && !SEL && ALL.strategies.some((r) => r.id === h)) openStrategy(h);
 }
+const isLive = (r) => (r.desk || []).length > 0 || ["production", "eligible", "incubation", "closing"].includes(r.stage);
+const pillCls = (r) => isLive(r) ? "live" : OFF.includes(r.stage) ? "off" : "wait";
 function renderList() {
-  const q = $("#q").value.trim().toLowerCase();
-  let rows = ALL.strategies.filter((r) => VIEW === "live" ? LIVE.includes(r.stage) : VIEW === "waiting" ? WAIT.includes(r.stage) : true);
-  if (q) rows = rows.filter((r) => `${r.title} ${r.family} ${r.variant} ${r.id} ${r.pairs.join(" ")}`.toLowerCase().includes(q));
-  const key = {demo_pnl: (r) => -(r.demo.pnl ?? -1e9), fw_trades: (r) => -(r.forward.trades || 0), fw_pnl: (r) => -(r.forward.pnl_pct ?? -1e9),
-               res_pf: (r) => -(r.research.pf ?? -1e9)}[$("#sort").value];
+  const q = $("#q").value.trim().toLowerCase(), view = $("#view").value;
+  let rows = ALL.strategies.filter((r) => view === "live" ? isLive(r) : view === "base" ? !isLive(r) && !OFF.includes(r.stage) : view === "off" ? OFF.includes(r.stage) : true);
+  if (q) rows = rows.filter((r) => `${r.code ?? ""} #${r.code ?? ""} ${r.method} ${r.title} ${r.family} ${r.variant} ${r.id} ${r.pairs.join(" ")} ${(r.desk || []).join(" ")}`.toLowerCase().includes(q));
+  const key = {code: (r) => r.code ?? 1e9, demo_pnl: (r) => -(r.demo.pnl ?? -1e9), fw_pnl: (r) => -(r.forward.pnl_pct ?? -1e9),
+               per_month: (r) => -(r.research.per_month ?? -1), res_pf: (r) => -(r.research.pf ?? -1e9), dd: (r) => r.research.dd ?? 1e9}[$("#sort").value];
   if (key) rows = rows.slice().sort((a, b) => key(a) - key(b));
-  const g = ALL.groups || {};
-  $("#hint").innerHTML = `Торгуют сейчас: <b>${g.live ?? 0}</b> · ждут очереди: <b>${g.waiting ?? 0}</b> · снятые: <b>${g.retired ?? 0}</b>. ` +
-    `Нажмите на строку, чтобы открыть стратегию целиком: идея, все проверки, кривая капитала и сделки на графике.`;
+  const all = ALL.strategies, nLive = all.filter(isLive).length, nOff = all.filter((r) => OFF.includes(r.stage)).length;
+  $("#hint").innerHTML = `В базе <b>${all.length}</b> стратегий: торгуют сейчас <b>${nLive}</b>, прошли проверки и ждут <b>${all.length - nLive - nOff}</b>, отсеяны или сняты <b>${nOff}</b>. ` +
+    `У каждой свой код (имя) и метод. Сортировка — клик по заголовку колонки. Нажмите на строку — стратегия целиком: идея, проверки, кривая капитала, сделки на графике.`;
   $("#rows").innerHTML = rows.length ? rows.map((r) => {
-    const cls = LIVE.includes(r.stage) ? "live" : WAIT.includes(r.stage) ? "wait" : "off";
+    const cls = pillCls(r);
     const tags = (r.benchmark ? `<span class="tag">эталон</span>` : "") + (r.autopilot ? `<span class="tag">автопоиск</span>` : "") +
                  (r.id.startsWith("fw-") ? `<span class="tag">доказана форвардом</span>` : "");
-    return `<tr data-id="${esc(r.id)}"><td class="name"><b>${esc(r.title)}${tags}</b><small>${esc(r.timeframe)} · ${esc(r.id)}</small></td>
+    const coins = (r.desk || []).length ? r.desk : r.pairs;
+    return `<tr data-id="${esc(r.id)}"><td class="num"><b>#${esc(r.code ?? "—")}</b></td><td class="name"><b>${esc(r.method)}${tags}</b><small>${esc(r.id)}</small></td>
       <td><span class="pill ${cls}">${esc(r.status)}</span></td>
-      <td class="hide-m">${esc(r.pairs.slice(0, 5).map(coin).join(", "))}${r.pairs.length > 5 ? ` +${r.pairs.length - 5}` : ""}</td>
-      <td class="r num">${r.research.trades ?? "—"}</td><td class="r num">${pf(r.research.pf)}</td><td class="r num">${r.research.sharpe == null ? "—" : nf(r.research.sharpe, 2)}</td>
+      <td class="hide-m">${esc(coins.slice(0, 5).map(coin).join(", "))}${coins.length > 5 ? ` +${coins.length - 5}` : ""}</td>
+      <td class="r num">${r.research.trades ?? "—"}</td><td class="r num">${r.research.per_month == null ? "—" : nf(r.research.per_month, 1)}</td>
+      <td class="r num">${pf(r.research.pf)}</td><td class="r num">${r.research.dd == null ? "—" : nf(r.research.dd * 100, 1) + "%"}</td>
       <td class="r num">${r.forward.trades || "—"}</td><td class="r num">${pf(r.forward.pf)}</td><td class="r num">${r.forward.pnl_pct == null ? "—" : sg(r.forward.pnl_pct, 2, "%")}</td>
       <td class="r num">${r.demo.trades || "—"}</td><td class="r num">${r.demo.trades ? pf(r.demo.pf) : "—"}</td><td class="r num">${r.demo.trades ? sg(r.demo.pnl, 2, " $") : "—"}</td></tr>`;
-  }).join("") : `<tr><td colspan="12" class="empty">Здесь пока пусто.</td></tr>`;
+  }).join("") : `<tr><td colspan="14" class="empty">Здесь пока пусто.</td></tr>`;
   $("#cards").innerHTML = rows.length ? rows.map((r) => {
-    const cls = LIVE.includes(r.stage) ? "live" : WAIT.includes(r.stage) ? "wait" : "off";
-    return `<div class="sc" data-id="${esc(r.id)}"><div class="top"><div class="name"><b>${esc(r.title)}${r.benchmark ? `<span class="tag">эталон</span>` : ""}</b>
-        <small>${esc(r.timeframe)} · ${esc(r.pairs.slice(0, 4).map(coin).join(", "))}${r.pairs.length > 4 ? ` +${r.pairs.length - 4}` : ""}</small></div>
+    const cls = pillCls(r), coins = (r.desk || []).length ? r.desk : r.pairs;
+    return `<div class="sc" data-id="${esc(r.id)}"><div class="top"><div class="name"><b>#${esc(r.code ?? "—")} · ${esc(r.method)}${r.benchmark ? `<span class="tag">эталон</span>` : ""}</b>
+        <small>${esc(coins.slice(0, 4).map(coin).join(", "))}${coins.length > 4 ? ` +${coins.length - 4}` : ""}</small></div>
         <span class="pill ${cls}">${esc(r.status)}</span></div>
       <div class="three"><div><b>История</b>${r.research.trades ?? "—"} сд. · PF ${pf(r.research.pf)}</div>
         <div><b>Форвард</b>${r.forward.trades ? `${r.forward.trades} сд. · ${sg(r.forward.pnl_pct, 1, "%")}` : "—"}</div>
@@ -230,7 +237,8 @@ function box(title, rows) {
 }
 function renderDetail(pairs) {
   const d = DET, r = d.row, c = d.card || {}, rs = d.research || {}, oos = rs.oos || {}, mk = rs.market || {};
-  $("#dTitle").innerHTML = `${esc(r.title)} <span class="pill ${LIVE.includes(r.stage) ? "live" : WAIT.includes(r.stage) ? "wait" : "off"}">${esc(r.status)}</span>`;
+  $("#dTitle").innerHTML = `#${esc(r.code ?? "—")} · ${esc(r.method)} <span class="pill ${pillCls(r)}">${esc(r.status)}</span>`;
+  try { history.replaceState(null, "", "#" + r.id); } catch (e) { /* ignore */ }
   const tr = d.trades || [], closed = tr.filter((t) => t.close_date);
   const fw = d.forward_trades || [];
   let cum = 0; const fwLine = fw.slice().sort((a, b) => (a[0] > b[0] ? 1 : -1)).map((t, i) => [i, (cum += +t[1]) * 100]);
@@ -303,14 +311,10 @@ document.addEventListener("click", (e) => {  // tap on a trade marker (phones ha
   const m = e.target.closest && e.target.closest("#chart [data-tip]"); const tip = $("#tip");
   if (m && tip) tip.textContent = m.dataset.tip;
 });
-function closeDrawer() { document.body.classList.remove("open"); SEL = null; }
+function closeDrawer() { document.body.classList.remove("open"); SEL = null; try { history.replaceState(null, "", location.pathname); } catch (e) { /* ignore */ } }
 
 // ------------------------------------------------------------------ wiring
-for (const b of document.querySelectorAll("#seg button")) b.onclick = () => {
-  for (const x of document.querySelectorAll("#seg button")) x.classList.toggle("on", x === b);
-  const was = VIEW; VIEW = b.dataset.v; if ((was === "retired") !== (VIEW === "retired")) loadList(); else renderList();
-};
-$("#q").oninput = renderList; $("#sort").onchange = renderList;
+$("#q").oninput = renderList; $("#sort").onchange = renderList; $("#view").onchange = renderList;
 $("#rows").onclick = (e) => { const tr = e.target.closest("tr[data-id]"); if (tr) openStrategy(tr.dataset.id); };
 $("#cards").onclick = (e) => { const c = e.target.closest(".sc[data-id]"); if (c) openStrategy(c.dataset.id); };
 $("#dClose").onclick = closeDrawer; $("#shade").onclick = closeDrawer;

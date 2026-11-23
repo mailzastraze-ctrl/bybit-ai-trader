@@ -7,7 +7,7 @@ from __future__ import annotations
 
 from aitrader.registry import Registry
 from aitrader.util import iso, parse_dt
-from aitrader.web import cards
+from aitrader.web import cards, names
 
 STAGE_ORDER = {"production": 0, "eligible": 1, "incubation": 2, "exploration": 3, "closing": 4, "validated": 5,
                "exploratory": 6, "rejected": 7, "retired": 8}
@@ -31,45 +31,67 @@ def _board(reg: Registry) -> dict:
     return {b["id"]: b for b in ((reg.kv_get("forward") or {}).get("best") or [])}
 
 
-def _row(st: dict, fwd: dict, board: dict) -> dict:
+def desk_coins(reg: Registry) -> dict[str, list[str]]:
+    """Strategy id → the coins it trades on demo as a coin desk."""
+    from aitrader import desks as D
+    out: dict[str, list[str]] = {}
+    for pair, d in ((reg.kv_get("desks") or {}).get("coins") or {}).items():
+        for x in D.picks(d):
+            out.setdefault(x["strategy"], []).append(pair)
+    return out
+
+
+def _row(st: dict, fwd: dict, board: dict, code: int | None = None, desk: list[str] | None = None) -> dict:
     o, live = st.get("oos") or {}, st.get("live") or {}
     hist = st.get("history") or []
     b = board.get(st.get("experiment_id") or "") or board.get(st["id"]) or {}
     alpha = live.get("alpha") or {}
+    tf = o.get("timeframe") or "1h"
+    days = float(o.get("n_days") or o.get("days") or 0) or None
+    status = cards.STATUS_RU.get(st["stage"], st["stage"])
+    if desk:
+        status = "Торгует: " + ", ".join(p.split("/")[0] for p in desk)
+    elif st["stage"] == "exploratory":
+        status = "В базе"
     return {
-        "id": st["id"], "title": cards.TITLE.get(st["family"], st["family"]), "family": st["family"],
+        "id": st["id"], "code": code, "method": names.method(st["family"], tf),
+        "title": cards.TITLE.get(st["family"], st["family"]), "family": st["family"], "desk": desk or [],
         "variant": o.get("variant") or st["family"], "stage": st["stage"],
-        "status": cards.STATUS_RU.get(st["stage"], st["stage"]), "timeframe": o.get("timeframe") or "1h",
+        "status": status, "timeframe": tf,
         "pairs": st.get("pairs") or [], "score": round(float(st.get("score") or 0), 3),
         "autopilot": bool(o.get("autopilot")), "benchmark": bool(o.get("benchmark")), "external": bool(o.get("external")),
         "why": (hist[-1].get("reason") if hist else st.get("note")) or "",
         "since": st.get("stage_since"),
         "research": {"trades": o.get("trades"), "pf": o.get("profit_factor"), "sharpe": o.get("sharpe"),
-                     "dd": o.get("max_drawdown"), "ret": o.get("total_return")},
+                     "dd": o.get("max_drawdown"), "ret": o.get("total_return"),
+                     "per_month": round(o["trades"] / (days / 30.44), 2) if days and o.get("trades") else None},
         "forward": {**_forward(fwd, st), "p_pos": b.get("p_pos")},
         "demo": {"trades": live.get("trades", 0), "pf": live.get("profit_factor"), "pnl": live.get("pnl"),
                  "win_rate": live.get("win_rate"), "alpha_ann": alpha.get("alpha_ann"), "beta": alpha.get("beta")},
     }
 
 
-def listing(reg: Registry, show: str = "active") -> dict:
+def listing(reg: Registry, show: str = "all") -> dict:
+    """One base of every strategy (owner, 23.11): code, method, status, research / forward / demo."""
     fwd = reg.kv_get("forward_results") or {}
     board = _board(reg)
     sig = (reg.kv_get("signals") or {}).get("per_sleeve") or {}
+    cs, desks = names.codes(reg), desk_coins(reg)
     rows = []
     for st in reg.strategies():
         if show == "active" and st["stage"] in ("rejected", "retired"):
             continue
         if show == "retired" and st["stage"] != "retired":
             continue
-        rows.append({**_row(st, fwd, board), "signals": sig.get(st["id"])})
-    rows.sort(key=lambda r: (STAGE_ORDER.get(r["stage"], 9), -(r["demo"]["trades"] or 0), -r["score"]))
+        rows.append({**_row(st, fwd, board, cs.get(st["id"]), desks.get(st["id"])), "signals": sig.get(st["id"])})
+    rows.sort(key=lambda r: (0 if r["desk"] else 1, STAGE_ORDER.get(r["stage"], 9), r["code"] or 0))
     counts: dict[str, int] = {}
     for st in reg.strategies():
         counts[st["stage"]] = counts.get(st["stage"], 0) + 1
     return {"strategies": rows, "counts": counts,
-            "groups": {"live": sum(counts.get(s, 0) for s in LIVE_STAGES), "waiting": sum(counts.get(s, 0) for s in WAITING),
-                       "retired": counts.get("retired", 0)}}
+            "groups": {"live": sum(1 for r in rows if r["desk"]) or sum(counts.get(s, 0) for s in LIVE_STAGES),
+                       "waiting": sum(counts.get(s, 0) for s in WAITING),
+                       "retired": counts.get("retired", 0) + counts.get("rejected", 0)}}
 
 
 # Neutral names for the research checks (cards.GATE_RU names the *failure*, which reads oddly next to a ✅).
@@ -103,7 +125,8 @@ def detail(reg: Registry, sid: str) -> dict | None:
     pm = (reg.kv_get("postmortem") or {}).get("trades") or {}
     for t in trades:
         t["after"] = pm.get(str(t.get("trade_id")))
-    return {"row": {**_row(st, fwd_all, _board(reg)), "signals": sig}, "card": card, "gates": gate_rows,
+    row = _row(st, fwd_all, _board(reg), names.codes(reg).get(sid), desk_coins(reg).get(sid))
+    return {"row": {**row, "signals": sig}, "card": card, "gates": gate_rows,
             "history": (st.get("history") or [])[-12:],
             "research": {k: (res or {}).get(k) for k in ("oos", "stress", "mc", "market", "wfe", "robust_frac", "fold_pos",
                                                          "dsr", "clean_oos", "verdict", "replication", "parity")} if res else {"oos": st.get("oos")},

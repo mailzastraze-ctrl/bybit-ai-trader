@@ -153,6 +153,7 @@ body.t-office main{display:none}
 .spark{height:46px;width:100%}
 .drawer{position:fixed;top:0;right:0;bottom:0;width:min(760px,100vw);background:#141413;border-left:1px solid var(--line2);z-index:40;overflow:auto;padding:20px 22px;display:none;box-shadow:-20px 0 40px rgba(0,0,0,.4)}
 .drawer.open{display:block}
+.drawer.wide{width:min(1120px,100vw)}
 .drawer .x{position:absolute;top:14px;right:16px;background:var(--card2);border:1px solid var(--line);color:var(--text);border-radius:7px;padding:4px 10px;cursor:pointer;font:inherit}
 .drawer h3{margin:0 0 4px;font-size:18px}
 .drawer h2{font-size:12px;font-weight:600;letter-spacing:.5px;text-transform:uppercase;color:var(--text2)}
@@ -190,15 +191,19 @@ details.more[open] summary{margin-bottom:10px}
 @media (max-width:1200px){.kpis{grid-template-columns:repeat(3,1fr)}}
 @media (max-width:640px){.kpis{grid-template-columns:repeat(2,1fr)}.kpi .v{font-size:19px}}
 @media (max-width:900px){header{flex-wrap:wrap}.tabs{order:3;width:100%;overflow-x:auto}}
+.btn{display:inline-block;padding:6px 12px;border:1px solid var(--line2);border-radius:8px;background:var(--card2);color:var(--text);font:inherit;font-size:12.5px;cursor:pointer;text-decoration:none}
+.btn:hover{border-color:var(--text2)}
+.btn.on{background:#2b3a2b;border-color:#3fc23f}
+.opt td{vertical-align:middle}
 </style>
 </head>
 <body class="t-overview">
 <header>
   <div class="brand"><div class="logo">AI</div><div>AI Trader<small>Bybit Demo · автономная исследовательская компания</small></div></div>
   <nav class="tabs" id="tabs">
-    <button data-t="overview" class="on">Обзор</button><button data-t="strategies">Стратегии</button>
+    <button data-t="overview" class="on">Обзор</button><button data-t="strategies">Монеты</button>
     <button data-t="lab">Лаборатория</button><button data-t="trades">Сделки</button><button data-t="office">3D-офис</button>
-    <a href="/explorer" style="padding:7px 12px;font-weight:600;white-space:nowrap">Все стратегии подробно ↗</a>
+    <a href="/explorer" style="padding:7px 12px;font-weight:600;white-space:nowrap">База стратегий ↗</a>
   </nav>
   <div class="chips">
     <div class="chip" id="chBot"><i></i><span>Бот</span></div>
@@ -240,13 +245,17 @@ details.more[open] summary{margin-bottom:10px}
   </section>
 
   <!-- ======================= СТРАТЕГИИ ======================= -->
-  <section class="c12" data-tab="strategies">
-    <div class="autopilot" id="autopilot"></div>
-    <div class="filters" id="filters"></div>
-    <div class="cards" id="cards"></div>
+  <section class="card c12" data-tab="strategies">
+    <h2>Монеты и их стратегии <span class="sub" id="deskSub"></span></h2>
+    <p class="dim" style="margin:0 0 10px;font-size:12.5px;line-height:1.5">На каждой монете торгует лучшая на ней стратегия из прошедших проверки на истории (прибыль на этой монете с поправкой на просадку),
+      у каждой монеты своя. Набор заморожен на весь эксперимент: по каждой монете копится чистая статистика. «Выбрать» — поставить на монету любые стратегии из списка лучших для неё.
+      Сортировка — по клику на заголовок любой колонки, во всех таблицах.</p>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px"><button class="btn" id="addCoin">+ Добавить монету</button><a class="btn" href="/explorer">Вся база стратегий ↗</a></div>
+    <div class="scroll" id="desks"></div>
   </section>
 
   <!-- ======================= ЛАБОРАТОРИЯ ======================= -->
+  <section class="c12" data-tab="lab"><div class="autopilot" id="autopilot"></div></section>
   <section class="card c12" data-tab="lab">
     <h2>Вычислители на GitHub · сейчас <span class="sub" id="labSub"></span></h2>
     <div class="lanes" id="lanes"></div>
@@ -287,6 +296,7 @@ details.more[open] summary{margin-bottom:10px}
 <section class="office" data-tab="office"><iframe id="officeFrame" title="3D-офис компании" allow="fullscreen"></iframe></section>
 <aside class="drawer" id="drawer"><button class="x" id="dx">Закрыть ✕</button><div id="dbody"></div></aside>
 <div class="tip" id="tip"></div>
+<script src="/static/ui.js"></script>
 <script src="/static/control.js"></script>
 </body>
 </html>

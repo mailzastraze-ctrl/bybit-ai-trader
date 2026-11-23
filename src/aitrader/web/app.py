@@ -123,8 +123,12 @@ def overview() -> dict:
     up = c.ping()
     eq = reg().q("SELECT ts, equity, open_trades FROM equity ORDER BY ts DESC LIMIT 4000")[::-1]
     man = Manifest.load(S.manifest_path)
-    closed = reg().q("SELECT profit_abs, close_date FROM live_trades ORDER BY close_date")
+    closed = reg().q("SELECT profit_abs, close_date, open_date FROM live_trades ORDER BY close_date")
+    since = (reg().kv_get("desks") or {}).get("created")
+    exp = [r for r in closed if since and (parse_dt(r.get("open_date")) or parse_dt("1970-01-01")) >= parse_dt(since)]
     return {
+        "experiment": {"since": since, "epoch": (reg().kv_get("desks") or {}).get("epoch"), "closed_count": len(exp),
+                       "closed_pnl": round(sum(float(r["profit_abs"] or 0) for r in exp), 2)},
         "bot_up": up,
         "balance": _safe(c.balance) if up else None,
         "profit": _safe(c.profit) if up else None,
@@ -161,7 +165,7 @@ def explorer_page() -> FileResponse:
 
 
 @app.get("/api/explorer", dependencies=[Depends(auth)])
-def explorer_list(show: str = "active") -> dict:
+def explorer_list(show: str = "all") -> dict:
     from aitrader.web import explorer
     return explorer.listing(reg(), show)
 
@@ -195,6 +199,53 @@ def explorer_detail(sid: str) -> dict:
     if c.ping():
         d["trades"] += explorer.open_trades(_safe(c.status, []), sid)
     return d
+
+
+@app.get("/api/names", dependencies=[Depends(auth)])
+def strategy_names() -> dict:
+    """Code (name) and method of every strategy id that can appear on a page."""
+    from aitrader.web import names
+    return names.names(reg())
+
+
+def _life():
+    from aitrader.lifecycle import Lifecycle
+    return Lifecycle(S, reg())
+
+
+@app.get("/api/desks", dependencies=[Depends(auth)])
+def desks_overview() -> dict:
+    """Coin desks: the strategy (or the owner's strategies) on each coin and its live record there."""
+    from aitrader.web import desks_api
+    c = ft()
+    return desks_api.overview(reg(), _safe(c.status, []) if c.ping() else [])
+
+
+@app.get("/api/desks/options", dependencies=[Depends(auth)])
+def desk_options(pair: str) -> dict:
+    from aitrader.web import desks_api
+    return desks_api.options(_life(), pair)
+
+
+@app.get("/api/desks/coins", dependencies=[Depends(auth)])
+def desk_coins() -> dict:
+    from aitrader.web import desks_api
+    return {"coins": desks_api.coins(_life())}
+
+
+@app.post("/api/desks/set", dependencies=[Depends(auth)])
+async def desk_set(request: Request) -> dict:
+    """The owner's choice for one coin: any strategies from its list of best (empty = no entries)."""
+    from aitrader.web import desks_api
+    body = await request.json()
+    pair, ids = body.get("pair"), body.get("strategies")
+    if not isinstance(pair, str) or not isinstance(ids, list) or not all(isinstance(x, str) for x in ids) or len(ids) > 10:
+        raise HTTPException(400, "pair and a list of at most 10 strategy ids are required")
+    try:
+        d = desks_api.set_desk(_life(), pair, ids)
+    except ValueError as e:
+        raise HTTPException(400, str(e)) from e
+    return {"ok": True, "desk": d, "note": "the bot picks it up within ~2 minutes"}
 
 
 @app.get("/api/strategies", dependencies=[Depends(auth)])
