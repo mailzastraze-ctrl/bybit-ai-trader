@@ -22,7 +22,10 @@ judge later", §12). A rule here changes only for a documented measurement or da
   book retention used results of the day being decided; the return sum (one 10k wallet per
   strategy) and the daily t (equal weight) are different economic models; the anytime-valid
   boundary assumes independent normal days, which nothing checked.
-- From 25.11.2026 v2 decides nothing; it stays visible as a diagnostic.
+- From 25.11.2026 the v2 statistical verdict is not evidence for v3; it stays visible as a
+  diagnostic. The existing promotion of demo strategies by their v2 forward record
+  (`forward._promote`: ≥ 20 forward trades, PF ≥ 1.3) stays active: it changes demo position size
+  only, and no v3 statement relies on it.
 
 ## 2. Three separate lines, three separate questions
 - **A. Research Q1:** does the shadow portfolio of Q1 strategies earn? (§5)
@@ -48,18 +51,25 @@ For a strategy `s` and a complete UTC day `d`, with the research wallet `W = 10 
   (a uniform spread is allowed only in a separate retrospective diagnostic).
 - A force-exit at the data end is an open position, never a realised result.
 - Only complete UTC days, from the first full day after the freeze to the last complete day before
-  the test. Trades opened before the first full day are not part of the record.
+  the test. Every trade opened after the freeze counts; one opened on the freeze day enters at its
+  liquidation value at that day's close (nothing from before the observation is counted).
 - A day without the full candle set of every pair of the strategy is **missing** (never 0). The
   next valid day carries a multi-day change and is a **jump**: kept in cumulative values, excluded
-  from daily statistics.
+  from daily statistics. A close on a missing day is realised on the next valid day. A trade that
+  cannot be valued (no size, prices or dates, or no complete freeze day to start from) makes its
+  days missing.
 - The per-trade days sum exactly to `real_pnl`, and every day depends only on what was known at
   its end: re-testing later never changes a published day.
 - The server ledger is append-only. A run that computes a different value for a published day is a
   **revision**: counted, the published value kept. A missing day may be published later. A
   correction of a data error is a recorded decision in this file, never automatic.
-- Provenance per record: `exchange` (Bybit only; other sources are ignored and stop the clock),
-  `code_sha`, Freqtrade version. A record without `exchange` is accepted only if tested before
-  23.11.2026 18:00 UTC (runs of the lab code before the stamp).
+- Provenance per record: result `format` 3, `exchange` (Bybit only; other sources are ignored and
+  stop the clock), `code_sha`, Freqtrade version. The source rule follows the format, not a date: a
+  format-3 result without `exchange` is of unknown source and ignored; older results (the lab code
+  before 23.11 carries neither) are accepted by an explicit migration rule (every lab import since
+  20.11 was on Bybit; run 45048047056 checked by ChatGPT) and counted as `legacy_source`.
+- The recording has its own status: the time of the last stored v3 record, the last error (lab or
+  server), red flags `v3 error` and `v3 > 24h`. A fresh v2 import proves nothing about v3.
 
 ## 4. Q1 membership (line A)
 - Decided once, when the strategy first appears in the ledger, from data that existed before its
@@ -137,8 +147,13 @@ This is a synthetic shadow portfolio, not a proven executable result on Bybit.
   each leg is reported).
 
 ## 10. Calendar
-- V3_START 25.11.2026: the owner decided on 22.11 to deploy the recording before his absence
-  (instead of 03.01.2027), which starts the primary sample about six weeks earlier.
+- Deploy: the owner decided on 22.11 (22:47) and confirmed on 23.11 (07:24, Oslo) to deploy the
+  recording now, before his absence, instead of in the 03.01.2027 window. It is a separate owner
+  decision; it starts the primary sample about six weeks earlier.
+- V3_START 25.11.2026: not earlier than reliable recording exists — the first v3 records arrive
+  with the first lab run after the deploy of 23.11, and the two-day-lagged retention needs the
+  promising set recorded on 23.11. If the first stored v3 record is later than 23.11, V3_START
+  moves to that day + 2 (recorded here, before any v3 result is read).
 - Line A/B look 1 ≈ 23.02.2027 and look 2 ≈ 24.05.2027 at full coverage; gaps move them later.
 - H1 look 1 ≈ 20.02.2027, look 2 ≈ 21.05.2027 under the same conditions.
 - 19.02.2027 (PLAN §6) stays an interim resource decision on diagnostics only (v2 and v3 data
