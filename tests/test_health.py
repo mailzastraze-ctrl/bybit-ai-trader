@@ -171,3 +171,17 @@ def test_a_partially_filled_entry_without_stop_is_never_hidden():
               {"pair": "F/USDT:USDT", "open_date": iso(now - timedelta(seconds=90)), "orders": [young]}]
     assert observe.health(trades, 50_000, now)["no_exchange_stop"] == ["E/USDT:USDT"]
 
+
+
+def test_an_entry_with_nothing_filled_is_no_position_even_without_order_details():
+    """23.11: a pending BTC entry (amount 0) was flagged "no exchange stop" and counted at the
+    −30 % guard stop in HEALTH risk. Amount 0 means nothing is filled: no position, no risk."""
+    from aitrader import observe
+    from aitrader.util import parse_dt
+    now = parse_dt("2026-11-23T17:05:05Z")
+    t = {"pair": "BTC/USDT:USDT", "open_date": "2026-11-23 17:00:06", "amount": 0, "is_short": True,
+         "open_rate": 62213.6, "stop_loss_abs": 80877.7, "stake_amount": 987.0, "orders": []}
+    h = observe.health([t], 46_000.0, now)
+    assert h["no_exchange_stop"] == [] and h["risk_pct"] == 0.0
+    later = parse_dt("2026-11-23T17:20:05Z")  # still nothing after 20 min: a stuck entry is reported
+    assert observe.health([t], 46_000.0, later)["no_exchange_stop"] == ["BTC/USDT:USDT"]

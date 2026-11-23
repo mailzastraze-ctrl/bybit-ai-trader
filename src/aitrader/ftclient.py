@@ -79,7 +79,7 @@ class FtClient:
         return out
 
     def pair_candles(self, pair: str, timeframe: str = "1h", limit: int = 96) -> dict:
-        return self._get("/api/v1/pair_candles", pair=pair, timeframe=timeframe, limit=limit)
+        return self._get("pair_candles", pair=pair, timeframe=timeframe, limit=limit)
 
     def start(self) -> Any:
         return self._post("start")

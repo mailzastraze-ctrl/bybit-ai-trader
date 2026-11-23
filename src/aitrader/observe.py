@@ -407,6 +407,9 @@ def _entry_state(t: dict) -> tuple[bool, object]:
     filled = [o for o in entries if (o.get("filled") or 0) > 0]
     # only an entry with nothing filled yet is "no position": a partial fill is a position to protect
     working = not filled and any(o.get("is_open") or o.get("status") in ("open", "new") for o in entries)
+    if not filled and t.get("amount") is not None and float(t.get("amount") or 0) <= 0:
+        working = True  # nothing filled (amount 0) even if the order list is missing or unlabelled (23.11: a
+        # pending BTC entry was flagged "no exchange stop" and counted at Freqtrade's −30 % guard)
     fills = [parse_dt(o.get("order_filled_date") or o.get("order_filled_timestamp") or o.get("order_date")
                       or o.get("order_timestamp")) for o in filled]
     began = parse_dt(t.get("open_fill_date") or t.get("open_fill_timestamp")) or \
@@ -418,16 +421,17 @@ def health(open_trades: list[dict], equity: float | None, now=None) -> dict:
     """Positions, how many lack a stop order on the exchange (after a short grace period), and
     the money at risk to the stops as % of equity. Observation only."""
     now = now or utcnow()
-    bare = []
+    bare, risk = [], 0.0
     for t in open_trades or []:
         od = parse_dt(t.get("open_date") or t.get("open_timestamp"))
         working, began = _entry_state(t)
+        if not working:
+            risk += _risk(t)  # an entry still working is no position: nothing at risk yet
         if working and not (od is not None and (now - od).total_seconds() > ENTRY_STUCK_S):
             continue  # the entry order is still working: no position yet (or a stuck one after 15 min)
         young = began is not None and (now - began).total_seconds() < STOP_GRACE_S
         if not young and not _has_exchange_stop(t):
             bare.append(t.get("pair"))
-    risk = sum(_risk(t) for t in open_trades or [])
     return {"ts": now.strftime("%Y-%m-%dT%H:%M:%SZ"), "positions": len(open_trades or []), "no_exchange_stop": bare,
             "risk_pct": round(100 * risk / equity, 2) if equity else None}
 
