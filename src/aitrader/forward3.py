@@ -96,38 +96,74 @@ def _span(a: str, b: str) -> list[str]:
     return [(da + timedelta(days=i)).isoformat() for i in range((db - da).days + 1)] if db >= da else []
 
 
+TOL = 1e-8  # share of the wallet (1e-8 × 10 000 = 0.0001 USDT): rounding of a few summed days
+
+
+def _next_day(d: str) -> str:
+    return (datetime.fromisoformat(d).date() + timedelta(days=1)).isoformat()
+
+
+def _prev_day(d: str) -> str:
+    return (datetime.fromisoformat(d).date() - timedelta(days=1)).isoformat()
+
+
 def merge(entry: dict | None, v3: dict, sha: str | None, now: datetime) -> tuple[dict, int]:
-    """Append a lab run's v3 record to a strategy's ledger. Returns the entry and the number of
-    published days this run disagreed with (revisions; the published value is kept)."""
+    """Append a lab run's v3 record to a strategy's ledger (DECISIONS §3). Returns the entry and the
+    number of published days this run disagreed with (revisions; the published value is kept).
+
+    * Published days never change. A later run is checked against them at common checkpoints (days
+      valid in both): the change since the previous common checkpoint must agree. So the same total
+      split differently (a gap later refilled: D and D+1 instead of one jump on D+1) is not a revision;
+      a different total is, and is counted at every run that sees it.
+    * A missing day may be published later only while no later day has been published. Once a later
+      day is published, that day's jump already carries the missing day's change: the day stays
+      missing and is recorded as `refilled` (publishing it would count its change twice).
+    * New days are appended after the last published valid day, which must be valid in the run too
+      (the anchor of the change). If it is not, the run adds nothing (`anchor_missing`) rather than
+      guessing which part of its change belongs to days already published."""
     if entry is None:
         entry = {"from": v3["from"], "until": None, "values": {}, "missing": [], "jumps": [],
                  "recorded_since": now.date().isoformat(), "sha_first": sha, "revisions": 0, "revised_days": []}
     vals, miss, jumps = entry["values"], set(entry["missing"]), set(entry["jumps"])
-    inc_vals = {d: x for d, x in v3.get("values") or []}
+    refilled = set(entry.get("refilled_days") or [])
+    inc_vals = {d: round(float(x), 10) for d, x in v3.get("values") or []}
     inc_miss, inc_jumps = set(v3.get("missing") or []), set(v3.get("jumps") or [])
-    until = entry["until"]
+    frm, until = entry["from"], entry["until"]
+    inc_valid = {d for d in _span(v3["from"], v3["until"]) if d >= frm and d not in inc_miss}
+    published = [d for d in _span(frm, until) if d not in miss] if until else []
+    last = published[-1] if published else None
     revisions = 0
-    for d in _span(v3["from"], v3["until"]):
-        if d < entry["from"]:
-            continue
-        if d in inc_miss:
-            if until is None or d > until:
-                miss.add(d)  # missing so far; a later run may still publish it
-            continue
-        x = round(float(inc_vals.get(d, 0.0)), 10)
-        if until is not None and d <= until and d not in miss:  # already published: never rewritten
-            if abs(round(float(vals.get(d, 0.0)), 10) - x) > 1e-9:
+    # 1. the published part: checked at common checkpoints, never rewritten
+    acc_pub = acc_in = 0.0
+    for d in _span(frm, last) if last else []:
+        is_pub, is_in = d not in miss, d in inc_valid
+        acc_pub += float(vals.get(d, 0.0)) if is_pub else 0.0
+        acc_in += inc_vals.get(d, 0.0) if is_in else 0.0
+        if not is_pub and is_in:
+            refilled.add(d)  # valid now, but its change is inside the next published day
+        if is_pub and is_in:
+            if abs(acc_pub - acc_in) > TOL:
                 revisions += 1
                 if d not in entry["revised_days"]:
                     entry["revised_days"] = sorted(entry["revised_days"] + [d])[-50:]
-            continue
-        miss.discard(d)  # first publication (or a late one)
-        if x != 0.0:
-            vals[d] = x
-        if d in inc_jumps:
-            jumps.add(d)
-    entry["until"] = max(filter(None, [until, v3["until"]])) if (until or v3["until"]) else None
+            acc_pub = acc_in = 0.0
+    # 2. after the last published valid day: late and new days, anchored on that day
+    if last is not None and last <= v3["until"] and last not in inc_valid:
+        entry["anchor_missing"] = int(entry.get("anchor_missing") or 0) + 1
+    else:
+        start = _next_day(last) if last else frm
+        for d in _span(start, v3["until"]):
+            if d not in inc_valid:
+                miss.add(d)  # missing so far; a later run may still publish it
+                continue
+            miss.discard(d)
+            if inc_vals.get(d, 0.0) != 0.0:
+                vals[d] = inc_vals[d]
+            if d in inc_jumps or (d > frm and _prev_day(d) in miss):
+                jumps.add(d)  # the change since the last valid day, not one day's change
+        entry["until"] = max(filter(None, [until, v3["until"]]))
     entry["missing"], entry["jumps"] = sorted(miss), sorted(jumps)
+    entry["refilled_days"] = sorted(refilled)[-50:]
     entry["sha_last"], entry["revisions"] = sha, entry["revisions"] + revisions
     entry["diag"] = v3.get("diag") or {}
     return entry, revisions
