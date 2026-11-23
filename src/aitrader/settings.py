@@ -99,6 +99,15 @@ class Lifecycle:
     # (red flag), and the lab's Bybit candles for these contracts are unproven – switch on after the
     # observation period, once the lane has traded on demo.
     tradfi_forward_book: bool = False
+    # What trades on demo (owner, 2026-11-23): "desks" – top coins, on each coin the one strategy that
+    # is best on that coin, frozen for the whole experiment (aitrader.desks); "lanes" – the earlier
+    # exploration lanes with queue and rotation. Env DEMO_MODE.
+    demo_mode: str = "desks"
+    desk_coins: int = 30   # env DESK_COINS (owner: top 25–30 coins)
+    desk_epoch: int = 1    # env DESK_EPOCH: a new number starts a new experiment with a fresh choice
+    # the monthly TSMOM set as an always-on demo core (22.11). Off since 23.11 (owner: "месячные тренды –
+    # бред" for an active demo); it stays the forward book's benchmark. Env DEMO_CORE=1 turns it back on.
+    demo_core: bool = False
 
 
 @dataclass
@@ -171,6 +180,10 @@ class Settings:
         lc.daily_loss_limit = _f("DAILY_LOSS_LIMIT", lc.daily_loss_limit)
         lc.tradfi_enabled = _on("TRADFI_ENABLED", lc.tradfi_enabled)
         lc.tradfi_forward_book = _on("TRADFI_FORWARD_BOOK", lc.tradfi_forward_book)
+        lc.demo_mode = _env("DEMO_MODE", lc.demo_mode).strip().lower()
+        lc.desk_coins = _i("DESK_COINS", lc.desk_coins)
+        lc.desk_epoch = _i("DESK_EPOCH", lc.desk_epoch)
+        lc.demo_core = _on("DEMO_CORE", lc.demo_core)
 
     # ---- derived paths -------------------------------------------------
     @property

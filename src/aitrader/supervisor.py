@@ -189,6 +189,7 @@ def main() -> None:
                 if now - last_disk_line > 3600:
                     last_disk_line = now
                     log.info("%s", observe.disk_line(reg))  # what fills the volume, what the janitor freed
+                    log.info("%s", observe.signals_line(reg))  # signals of the last 7 days and why some were not taken
             except Exception as e:  # noqa: BLE001
                 log.warning("status line failed: %s", e)
         for p in procs:

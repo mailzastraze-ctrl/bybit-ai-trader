@@ -165,6 +165,7 @@ def main() -> None:
                 detail.update(equity=round(equity, 2), open_trades=len(open_trades))
                 try:  # one-line health for the supervisor's STATUS (observation only)
                     reg.kv_set("health", observe.health(open_trades, equity))
+                    reg.kv_set("activity", observe.activity(reg, open_trades))  # entries 24 h, alarm when none for 6 h
                 except Exception as e:  # noqa: BLE001
                     log.info("health summary failed: %s", e)
             paused = False
