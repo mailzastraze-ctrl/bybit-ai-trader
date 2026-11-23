@@ -488,11 +488,13 @@ def status_line(reg, now=None) -> str:
     bench = (fw.get("benchmark") or {}).get("trades")
     vs = (fw.get("vs_benchmark") or {}).get("p_top_better")
     v3 = fw.get("v3") or {}
-    ok = parse_dt((v3.get("status") or {}).get("last_ok"))
+    v3st = v3.get("status") or {}
+    ok = parse_dt(v3st.get("last_ok"))
     age = f"{(now - ok).total_seconds() / 3600:.1f}h" if ok else "never"
+    part = f", failed {v3st['last_failures']}" if v3st.get("last_failures") else ""  # this import only
     v3s = ("error" if v3.get("error") else
            f"records {v3.get('records', 0)}, q1 {v3.get('q1_members', 0)}, cov {v3.get('coverage_q1')}, "
-           f"rev {v3.get('revisions', 0)}, ok {age}") if v3 else "none"
+           f"rev {v3.get('revisions', 0)}, ok {age}{part}") if v3 else "none"
     flags = red_flags(reg, now)
     return (f"HEALTH positions={h.get('positions', '?')} no_exchange_stop={len(h.get('no_exchange_stop') or [])} "
             f"risk={h.get('risk_pct', '?')}% import_age={imp} disk=[{disk}] "

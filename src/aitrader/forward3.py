@@ -180,18 +180,31 @@ def apply(reg: Registry, results: list[dict], now: datetime | None = None) -> di
 
 # ---------------------------------------------------------------------------- recording status
 def record_status(reg: Registry, results: list[dict], error: Exception | None, now: datetime | None = None) -> dict:
-    """When v3 last recorded something, and the last error. A fresh v2 forward import proves nothing
-    about v3: `last_ok` moves only when at least one result carried a v3 record and it was stored."""
+    """When v3 last recorded something, and the last error. `results` are this import's Bybit results,
+    failed forward tests (`ok=False`) included. A fresh v2 forward import proves nothing about v3.
+
+    * `ok` — every result that should carry a v3 record did, and it was stored: `last_ok` moves.
+    * `partial` — some did, others failed (no v3 record, or the whole forward test failed):
+      `last_partial` moves, `last_ok` does not, so a partial import never looks like a healthy one.
+    * `error` — the server could not store the records, or nothing carried a v3 record and something failed."""
     now = now or utcnow()
     st = reg.kv_get(K_STATUS) or {"since": iso(now)}
-    with_v3 = [r for r in results if isinstance(r.get("v3"), dict) and r["v3"].get("from")]
-    lab_err = [r["v3"]["error"] for r in results if isinstance(r.get("v3"), dict) and r["v3"].get("error")]
+    done = [r for r in results if r.get("ok", True)]
+    failed = [r.get("error") or "forward test failed" for r in results if not r.get("ok", True)]
+    with_v3 = [r for r in done if isinstance(r.get("v3"), dict) and r["v3"].get("from")]
+    lab_err = [r["v3"]["error"] for r in done if isinstance(r.get("v3"), dict) and r["v3"].get("error")]
+    errors = [f"lab: {e}" for e in lab_err] + [f"forward test: {e}" for e in failed]
     st["last_attempt"] = iso(now)
-    st["last_results"], st["last_with_v3"], st["last_lab_errors"] = len(results), len(with_v3), len(lab_err)
+    st["last_results"], st["last_with_v3"] = len(results), len(with_v3)
+    st["last_lab_errors"], st["last_failed"] = len(lab_err), len(failed)
+    st["last_failures"] = f"{len(errors)}/{len(errors) + len(with_v3)}" if errors else None
     if error is not None:
         st["last_error"], st["error_at"], st["state"] = str(error)[:200], iso(now), "error"
-    elif lab_err and not with_v3:
-        st["last_error"], st["error_at"], st["state"] = f"lab: {lab_err[0]}", iso(now), "error"
+    elif errors and not with_v3:
+        st["last_error"], st["error_at"], st["state"] = str(errors[0])[:200], iso(now), "error"
+    elif errors:
+        st["last_error"], st["error_at"] = str(errors[0])[:200], iso(now)
+        st["last_partial"], st["state"] = iso(now), "partial"
     elif with_v3:
         st["last_ok"], st["state"] = iso(now), "ok"
     reg.kv_set(K_STATUS, st)
@@ -199,6 +212,7 @@ def record_status(reg: Registry, results: list[dict], error: Exception | None, n
 
 
 def status_flags(reg: Registry, now: datetime | None = None) -> list[str]:
+    """`v3 error`, `v3 partial F/N` (the last import), `v3 > 24h` (no fully successful import for a day)."""
     now = now or utcnow()
     st = reg.kv_get(K_STATUS)
     if not st:
@@ -207,6 +221,8 @@ def status_flags(reg: Registry, now: datetime | None = None) -> list[str]:
     ok = parse_dt(st.get("last_ok"))
     if st.get("state") == "error":  # the last attempt that concerned v3 failed
         out.append("v3 error")
+    elif st.get("state") == "partial":
+        out.append(f"v3 partial {st.get('last_failures')}")
     ref = ok or parse_dt(st.get("since"))
     if ref is not None and (now - ref).total_seconds() > STALE_H * 3600:
         out.append("v3 > 24h")

@@ -456,7 +456,7 @@ def apply(reg: Registry, payload: dict) -> dict:
         log.warning("forward v3 recording failed: %s", ex)
         summ["v3"] = {"error": str(ex)[:200]} | {k: v for k, v in (old_summ.get("v3") or {}).items() if k != "error"}
     try:
-        summ["v3"]["status"] = F3.record_status(reg, accepted, err, now)
+        summ["v3"]["status"] = F3.record_status(reg, results, err, now)  # failed forward tests included
     except Exception as ex:  # noqa: BLE001
         log.warning("forward v3: status not stored: %s", ex)
     old = old_summ.get("verdict")
