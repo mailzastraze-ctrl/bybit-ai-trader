@@ -82,6 +82,7 @@ def add(reg, sid, stage, pair_stats, tf="1h", dd=0.05, family="rsi_revert", days
 
 def test_manifest_is_one_strategy_per_coin_frozen_for_the_experiment(env):
     s, reg = env
+    s.lifecycle.desk_all_coins = False  # the desks alone (guests: next test)
     life = Lifecycle(s, reg)
     reg.kv_set("universe", {"pairs": ["BTC/USDT:USDT", "ETH/USDT:USDT", "SOL/USDT:USDT"]})
     reg.kv_set("lab", {"last_import": "t1"})
@@ -195,6 +196,7 @@ def test_a_new_experiment_starts_flat_once(env):
 
 def test_owner_picks_any_strategies_from_the_coins_list_of_best(env):
     s, reg = env
+    s.lifecycle.desk_all_coins = False
     life = Lifecycle(s, reg)
     reg.kv_set("universe", {"pairs": ["BTC/USDT:USDT", "ETH/USDT:USDT"]})
     add(reg, "a", "exploratory", {"BTC/USDT:USDT": {"pnl": 300, "trades": 20}, "ETH/USDT:USDT": {"pnl": 120, "trades": 9}})
@@ -213,3 +215,69 @@ def test_owner_picks_any_strategies_from_the_coins_list_of_best(env):
     reg.kv_set("lab", {"last_import": "later"})
     man = life.build_manifest([], set(), False)
     assert {x.id: x.pairs for x in man.sleeves} == {"a": ["BTC/USDT:USDT"]}
+
+
+def test_desk_strategies_also_trade_their_proven_coins_and_go_first_on_their_own(env):
+    """Owner, 23.11: a strategy trades far more than once a month – across its coins. Each desk
+    strategy also trades the other coins where it proved itself (≥ 3 trades, profit), as a guest:
+    the desk owner goes first on its coin, at most `desk_max_per_coin` strategies per coin."""
+    s, reg = env
+    s.lifecycle.desk_max_per_coin = 2
+    life = Lifecycle(s, reg)
+    reg.kv_set("universe", {"pairs": ["BTC/USDT:USDT", "ETH/USDT:USDT", "SOL/USDT:USDT"]})
+    add(reg, "a", "exploratory", {"BTC/USDT:USDT": {"pnl": 300, "trades": 20}, "ETH/USDT:USDT": {"pnl": 120, "trades": 9},
+                                  "SOL/USDT:USDT": {"pnl": 90, "trades": 8}, "DOGE/USDT:USDT": {"pnl": 50, "trades": 6},
+                                  "PEPE/USDT:USDT": {"pnl": 80, "trades": 2}, "XRP/USDT:USDT": {"pnl": -30, "trades": 9}})
+    add(reg, "b", "exploratory", {"ETH/USDT:USDT": {"pnl": 200, "trades": 12}, "SOL/USDT:USDT": {"pnl": 100, "trades": 9}})
+    add(reg, "c", "exploratory", {"SOL/USDT:USDT": {"pnl": 400, "trades": 15}, "BTC/USDT:USDT": {"pnl": 30, "trades": 4}})
+    man = life.build_manifest([], set(), False)
+    by = {x.id: x for x in man.sleeves}
+    assert by["a"].lead == ["BTC/USDT:USDT"] and by["b"].lead == ["ETH/USDT:USDT"] and by["c"].lead == ["SOL/USDT:USDT"]
+    # a: its desk + proven coins (not PEPE: too few trades; not XRP: lost there); SOL is full (2 per coin)
+    assert sorted(by["a"].pairs) == ["BTC/USDT:USDT", "DOGE/USDT:USDT", "ETH/USDT:USDT"]
+    assert sorted(by["b"].pairs) == ["ETH/USDT:USDT", "SOL/USDT:USDT"] and "SOL/USDT:USDT" not in by["a"].pairs
+    assert [x.id for x in man.sleeves_for("ETH/USDT:USDT")] == ["b", "a"]  # the desk owner first
+    assert [x.id for x in man.sleeves_for("BTC/USDT:USDT")] == ["a", "c"]
+    assert man.owner_of("SOL/USDT:USDT").id == "c"
+    assert sorted(by["c"].pairs) == ["BTC/USDT:USDT", "SOL/USDT:USDT"]
+    # the proven coins are frozen with the desk
+    st = reg.kv_get("desks")
+    assert st["coins"]["BTC/USDT:USDT"]["coin_scores"]["DOGE/USDT:USDT"] > 0
+
+
+def test_signal_check_finds_signals_the_bot_never_acted_on(env):
+    """Owner, 23.11: "entries without stalls". Signals on the bot's own analysed candles since the
+    experiment start are compared with its entries: taken, coin busy, or missed (red flag)."""
+    s, reg = env
+    now = utcnow().replace(second=0, microsecond=0)
+    start = now - timedelta(hours=6)
+
+    def row(minutes_ago, tag, long=True):
+        d = (now - timedelta(minutes=minutes_ago)).strftime("%Y-%m-%d %H:%M:%S")
+        return [d, 1 if long else 0, 0 if long else 1, tag]
+
+    cols = ["date", "enter_long", "enter_short", "enter_tag"]
+    candles = {"BNB/USDT:USDT": {"columns": cols, "data": [row(120, "a"), row(500, "a")]},  # second: before the start
+               "ETH/USDT:USDT": {"columns": cols, "data": [row(200, "b", False), row(100, "b")]},
+               "SOL/USDT:USDT": {"columns": cols, "data": [row(60, "c"), row(45, "c"), row(30, "c")]},
+               "XRP/USDT:USDT": {"columns": cols, "data": [row(0, "d")]}}  # too fresh to judge
+    trades = [{"sleeve_id": "a", "pair": "BNB/USDT:USDT", "open_date": iso(now - timedelta(minutes=104))},  # taken
+              {"sleeve_id": "b", "pair": "ETH/USDT:USDT", "open_date": iso(now - timedelta(minutes=184)),
+               "close_date": iso(now - timedelta(minutes=50))}]  # ETH 200: taken; ETH 100: busy (b's own trade open)
+    out = observe.signal_check(candles, trades, iso(start), now)
+    assert (out["signals"], out["taken"], out["busy"], out["missed"]) == (6, 2, 1, 3)
+    assert out["missed_by"] == {"SOL:c": 3}
+    reg.kv_set("sigcheck", out)
+    assert "signals not acted on 3" in observe.red_flags(reg, now)
+    assert observe.sigcheck_line(reg).startswith("SIGCHECK since=") and "SOL:c 3" in observe.sigcheck_line(reg)
+
+    class FT:
+        def pair_candles(self, pair, tf, limit):
+            assert tf == "15m" and 8 < limit <= 700
+            if pair == "XRP/USDT:USDT":
+                raise RuntimeError("bot busy")
+            return candles[pair]
+
+    reg.kv_set("desks", {"created": iso(start), "coins": {}})
+    res = observe.run_signal_check(reg, FT(), list(candles), [], now)
+    assert res["coins"] == 3 and reg.kv_get("sigcheck")["signals"] == res["signals"]

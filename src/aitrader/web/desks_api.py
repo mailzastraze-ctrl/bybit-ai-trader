@@ -48,17 +48,23 @@ def _label(nm: dict, sid: str) -> dict:
     return {"code": n.get("code"), "method": n.get("method") or sid}
 
 
-def overview(reg: Registry, open_trades: list[dict]) -> dict:
+def overview(reg: Registry, open_trades: list[dict], sleeve_pairs: dict[str, list[str]] | None = None) -> dict:
     st = reg.kv_get("desks") or {}
     nm = N.names(reg)
     live = _live(reg, st.get("created"))
     pos = {t.get("pair"): t for t in open_trades or [] if isinstance(t, dict)}
+    sleeve_pairs = sleeve_pairs or {}
+    mine = {x["strategy"] for d in (st.get("coins") or {}).values() for x in D.picks(d)}
     rows = []
     for pair, d in (st.get("coins") or {}).items():
         ps = []
         for x in D.picks(d):
             xs = live.get((x["strategy"], pair), [])
+            every = [v for (sid, _p), vs in live.items() if sid == x["strategy"] for v in vs]
+            coins = sleeve_pairs.get(x["strategy"]) or [pair]
             ps.append({"id": x["strategy"], **_label(nm, x["strategy"]), "timeframe": x.get("timeframe"),
+                       "coins": [D.coin_name(c) for c in coins],
+                       "demo_all": {"trades": len(every), "pnl": round(sum(every), 2), "pf": _pf(every)},
                        "bucket": x.get("bucket"), "per_month": x.get("per_month"), "pnl_month": x.get("pnl_month"),
                        "max_dd": x.get("max_dd"), "oos_trades": x.get("oos_trades"), "manual": bool(x.get("manual")),
                        "demo": {"trades": len(xs), "pnl": round(sum(xs), 2), "pf": _pf(xs),
@@ -67,6 +73,7 @@ def overview(reg: Registry, open_trades: list[dict]) -> dict:
         rows.append({"pair": pair, "coin": D.coin_name(pair), "picks": ps, "manual": bool(d.get("manual")),
                      "position": None if not t else {
                          "side": "short" if t.get("is_short") else "long", "tag": t.get("enter_tag"),
+                         "guest": (t.get("enter_tag") in mine) and t.get("enter_tag") not in {p["id"] for p in ps},
                          **_label(nm, t.get("enter_tag") or ""), "profit_abs": t.get("profit_abs"),
                          "profit_ratio": t.get("profit_ratio"), "open_date": t.get("open_date")}})
     return {"epoch": st.get("epoch"), "created": st.get("created"), "summary": D.summary(st.get("coins") or {}),

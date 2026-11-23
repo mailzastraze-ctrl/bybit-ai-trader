@@ -30,6 +30,7 @@ class Sleeve:
     score: float = 0.0
     note: str = ""
     timeframe: str = ""  # candles the strategy was researched on; "" = the bot's own timeframe
+    lead: list[str] = field(default_factory=list)  # coins where it goes first (its coin desks)
 
     @property
     def accept_entries(self) -> bool:
@@ -62,8 +63,8 @@ class Manifest:
         best = None
         for s in self.sleeves:
             if s.accept_entries and pair in s.pairs:
-                if best is None or (STAGE_PRIORITY[s.stage], s.score) > (
-                    STAGE_PRIORITY[best.stage], best.score
+                if best is None or (STAGE_PRIORITY[s.stage], pair in s.lead, s.score) > (
+                    STAGE_PRIORITY[best.stage], pair in best.lead, best.score
                 ):
                     best = s
         return best
@@ -72,7 +73,7 @@ class Manifest:
         """All entry-accepting sleeves trading this pair, highest priority first. Several
         independent strategies may share a pair; the first one that signals takes the trade."""
         xs = [s for s in self.sleeves if s.accept_entries and pair in s.pairs]
-        return sorted(xs, key=lambda s: (STAGE_PRIORITY[s.stage], s.score), reverse=True)
+        return sorted(xs, key=lambda s: (STAGE_PRIORITY[s.stage], pair in s.lead, s.score), reverse=True)
 
     def all_pairs(self) -> list[str]:
         seen: dict[str, None] = {}

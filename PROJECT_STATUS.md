@@ -12,7 +12,7 @@ _Last updated: 2026-11-23 evening (demo = coin desks, monthly core off, no-entry
 - **Coin desks – one experiment** (`aitrader/desks.py`): up to 30 top coins, on each coin the one tested strategy that is best on that coin (walk-forward profit per month on the coin with a drawdown discount), every desk a different strategy, trade frequencies mixed (active / medium / rare), 0.1 % risk.
   - Frozen for the whole experiment: no queue, no rotation, no retirement; open coins are filled on a later lab import. A new choice only with the owner (`DESK_EPOCH`).
   - The assignment: control room → «Монеты» (owner can pick any strategies from each coin's list of best), `DESKS` log line; per coin the live record is the strategy's record. One strategy base with codes: `/explorer`.
-  - By history ≈ 30 trades a month in total (0.4–2.5 per coin): tested strategies trade rarely per coin.
+  - Each desk strategy also trades, as a guest, the other coins where it proved itself on history (desk owner first on its coin, ≤ 6 strategies per coin, ≤ 45 coins). By history ≈ 5 entries a day (desks alone ≈ 1: 0.4–2.5 a month per coin).
 - **Monthly TSMOM core:** off on demo (owner, 23.11); stays the forward benchmark and H1.
 - **Fresh start (owner, 23.11: "the previous stage failed, everything starts anew"):** the experiment started flat – the previous stage's 5 positions were closed at market at 15:56 UTC; the first desk entry followed at 16:00 UTC (BNB). The control room counts the experiment's result from its start.
 - **TradFi lane** (owner, 23.11; `docs/TRADFI.md`): Bybit's gold and S&P 500 perpetuals in the same bot, entries only while the underlying market is open, ≤ 2 positions, ≤ 0.5 % at stops, 0.1 % risk × BTC-correlation scale.
@@ -38,9 +38,9 @@ _Last updated: 2026-11-23 evening (demo = coin desks, monthly core off, no-entry
   - lab import age, disk free + MB/day + days to full;
   - forward summary and `v3=[…]` (data quality of the v3 recording, no returns);
   - `flags=` red flags.
-- **Activity:** `HEALTH … entries_24h=N (L/S) desks=[…]`; hourly `SIGNALS` line (signals of 7 days, taken, why not).
+- **Activity:** `HEALTH … entries_24h=N (L/S) desks=[…]`; hourly `SIGNALS` line (signal journal: signals of 7 days, taken, why not) and `SIGCHECK` line (every signal on the bot's own candles since the experiment start: taken / coin busy / missed).
 - **Red flags:**
-  - `no entry > 6h` (the demo stopped entering);
+  - `no entry > 6h` (the demo stopped entering); `signals not acted on N` (≥ 3 signals on the bot's own candles without an entry or a busy coin);
   - manager not `ok` / silent > 15 min;
   - a position without an exchange stop;
   - lab import > 24 h or > 20 % failed experiments in a run;
