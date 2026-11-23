@@ -317,11 +317,47 @@ class AIBase(IStrategy):
         out = pd.DataFrame(index=dataframe.index)
         for c in ("long_sig", "short_sig"):
             out[c] = m[f"{c}_{tf}"].fillna(False).astype(bool).to_numpy() & fresh
+        if self._live():
+            self._htf_catch_up(out, m, tf, sleeve.id, pair)
         for c in ("exit_long_sig", "exit_short_sig"):
             out[c] = m[f"{c}_{tf}"].fillna(False).astype(bool).to_numpy()
         out["conviction"] = m[f"conviction_{tf}"].fillna(1.0).to_numpy()
         out["atr"] = m[f"atr_{tf}"].to_numpy()
         return out
+
+    HTF_GRACE_ROWS = 2  # bot candles after a higher candle's close in which its late-arriving signal still counts
+
+    def _htf_catch_up(self, out: pd.DataFrame, m: pd.DataFrame, tf: str, sid: str, pair: str) -> None:
+        """Live only. A higher-timeframe signal fires on the first bot candle after that candle's
+        close. If the higher candle reached the bot a moment late, that first bot candle was
+        analysed without it, and the next analysis finds the signal one row back – it would never
+        be acted on. Here the newest higher candle's signal still fires on the last row within
+        `HTF_GRACE_ROWS` bot candles, once per (strategy, coin, candle): a signal the bot already
+        acted on is never repeated."""
+        try:
+            fired = self.__dict__.setdefault("_htf_fired", set())
+            ds = m[f"date_{tf}"]
+            n = len(ds)
+            if n < 2 or pd.isna(ds.iloc[-1]):
+                return
+            last = ds.iloc[-1]
+            same = (ds == last).to_numpy()[::-1]
+            run = int(same.argmin()) if not same.all() else n  # bot candles that already show the newest higher candle
+            late = run - 1  # how many of them came after the one it should have fired on
+            for c in ("long_sig", "short_sig"):
+                key = (sid, pair, str(last), c)
+                if bool(out[c].iloc[-1]):
+                    fired.add(key)  # fired on time
+                elif 0 < late <= self.HTF_GRACE_ROWS and key not in fired \
+                        and bool(m[f"{c}_{tf}"].fillna(False).astype(bool).iloc[-1]):
+                    out.iloc[-1, out.columns.get_loc(c)] = True  # late candle: act on it now
+                    fired.add(key)
+                    logger.info("late %s candle for %s on %s: %s acted on %d bot candle(s) after its close",
+                                tf, sid, pair, c, late)
+            if len(fired) > 20000:
+                fired.clear()
+        except Exception as e:  # noqa: BLE001 – never break signal computation
+            logger.debug("htf catch-up: %s", e)
 
     def _merge_funding(self, dataframe: pd.DataFrame, pair: str) -> pd.DataFrame:
         """Last known funding rate at each candle (backward as-of join: no look-ahead)."""

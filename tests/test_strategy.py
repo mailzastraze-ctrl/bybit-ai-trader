@@ -390,3 +390,53 @@ def test_signal_journal_records_decisions_without_changing_them(tmp_path, monkey
     lines = [json.loads(x) for x in (tmp_path / "signals.jsonl").read_text().splitlines()]
     assert [(x["k"], x["o"]) for x in lines] == [("cfm", "explore_count"), ("cfm", "accepted"), ("sig", "pair_busy")]
     assert lines[-1]["d"] == "long" and lines[-1]["s"] == "ex"
+
+
+def test_late_higher_timeframe_candle_is_still_acted_on_once_live(tmp_path):
+    """Live: if the hourly candle reached the bot after the first 15m candle that should carry its
+    signal was analysed, the next analysis still acts on it (within 2 bot candles), and a signal
+    the bot already acted on is never repeated."""
+    from AIPortfolio import AIPortfolio
+
+    from aitrader.families import get_family
+    pair = "BTC/USDT:USDT"
+    h1 = ohlcv(1500, seed=11, vol=0.012)
+    rows = []
+    for _, r in h1.iterrows():
+        for q in range(4):
+            rows.append({"date": r["date"] + pd.Timedelta(minutes=15 * q), "open": r["open"], "high": r["high"],
+                         "low": r["low"], "close": r["close"], "volume": r["volume"] / 4})
+    m15 = pd.DataFrame(rows)
+    ref = get_family("trend_ema").populate(h1, {})
+    k = int(ref.index[ref["long_sig"] & (ref.index > 1100)][0])  # an hourly candle with a long signal
+    due = h1["date"].iloc[k] + pd.Timedelta(minutes=45)  # the 15m candle that closes with it
+
+    def bot(path_name):
+        m = Manifest(sleeves=[Sleeve(id="h", family="trend_ema", params={}, pairs=[pair], stage="exploration",
+                                     risk=0.001, timeframe="1h")])
+        path = tmp_path / path_name
+        m.save(path)
+        st = AIPortfolio({"aitrader": {"manifest_path": str(path)}, "runmode": "live",
+                          "exchange": {"demo_trading": True}})
+        st.timeframe = "15m"
+        st.bot_start()
+        return st
+
+    def analyse(st, upto_15m, hours):
+        st.dp = SimpleNamespace(get_pair_dataframe=lambda p, tf, **kw: h1.iloc[:hours].reset_index(drop=True)
+                                if tf == "1h" else m15, current_whitelist=lambda: [pair])
+        df = m15[m15["date"] <= upto_15m].reset_index(drop=True)
+        return _populate(st, df, pair)
+
+    # on time: fires on the 15m candle that closes with the hourly candle, and only there
+    st = bot("on_time.json")
+    assert analyse(st, due, k + 1)["enter_long"].iloc[-1] == 1
+    assert analyse(st, due + pd.Timedelta(minutes=15), k + 1)["enter_long"].iloc[-1] != 1
+    # late: the hourly candle was not there yet at the first analysis – the next one acts on it
+    st = bot("late.json")
+    assert analyse(st, due, k)["enter_long"].iloc[-1] != 1
+    assert analyse(st, due + pd.Timedelta(minutes=15), k + 1)["enter_long"].iloc[-1] == 1
+    assert analyse(st, due + pd.Timedelta(minutes=30), k + 1)["enter_long"].iloc[-1] != 1  # once only
+    # too late (beyond the grace of 2 bot candles): not chased
+    st = bot("too_late.json")
+    assert analyse(st, due + pd.Timedelta(minutes=45), k + 1)["enter_long"].iloc[-1] != 1
