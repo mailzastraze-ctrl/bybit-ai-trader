@@ -9,8 +9,11 @@ What is recorded, from the first lab run after the deploy of 23.11.2026:
     freeze: Q1 = score at or above the 75th percentile of the scores of every eligible experiment
     frozen in the 30 days before it (weak and evicted ones included). Fewer than Q1_MIN_REF
     reference experiments: `burn_in`, no membership. Never recomputed afterwards.
-  * the days each strategy was scheduled (in the book served to the lab), the denominator of
-    coverage: a scheduled day without a valid published value is missing, whatever the reason.
+  * a daily snapshot of the book served to the lab: the days each strategy was scheduled for. They
+    fix the composition of line A per day and are the denominator of coverage: a scheduled day
+    without a valid published value is missing, whatever the reason. A strategy that leaves the book
+    and returns is not scheduled for the days in between; values the lab publishes for them are a
+    diagnostic and never enter line A.
   * the "promising" set by day: the book decides which forward-promising strategies keep their
     place with the set from two days before, so whether a strategy is observed on day D never
     depends on day D's own results (DECISIONS.md, condition 1).
@@ -34,6 +37,7 @@ EVIDENCE_EXCHANGE = "bybit"        # forward evidence is Bybit prices only (live
 RESULT_FORMAT = 3                  # lab results of this format always carry `exchange`
 STALE_H = 24
 K_LEDGER, K_Q1, K_SCHED, K_PROM, K_STATUS = "fw3_ledger", "fw3_q1", "fw3_scheduled", "fw3_promising", "fw3_status"
+K_BOOKDAYS = "fw3_book_days"
 
 
 # ---------------------------------------------------------------------------- source of the data
@@ -188,6 +192,12 @@ def _line(r: dict) -> str:
     return "research"
 
 
+def eligible(entry: dict) -> bool:
+    """Primary sample of lines A/B: research strategies frozen on or after V3_START (DECISIONS §4).
+    Always computed from the freeze and the current V3_START, so moving the date moves every entry."""
+    return entry.get("line") != "research" or str(entry.get("freeze") or "")[:10] >= V3_START
+
+
 def apply(reg: Registry, results: list[dict], now: datetime | None = None) -> dict:
     """Store the v3 records of one lab run; returns data-quality diagnostics (no returns)."""
     now = now or utcnow()
@@ -200,12 +210,13 @@ def apply(reg: Registry, results: list[dict], now: datetime | None = None) -> di
     revisions = 0
     for r in todo:  # strategies without a complete day yet have nothing to record
         entry, n = merge(ledger.get(r["id"]), r["v3"], r.get("code_sha"), now)
-        entry |= {"line": _line(r), "freeze": r.get("freeze"), "score": r.get("score"),
-                  "eligible": _line(r) != "research" or str(r.get("freeze") or "")[:10] >= V3_START}
+        entry |= {"line": _line(r), "freeze": r.get("freeze"), "score": r.get("score")}
         ledger[r["id"]] = entry
         revisions += n
         if entry["line"] == "research" and r["id"] not in q1:
             q1[r["id"]] = q1_decide(ref, r, now)
+    for v in ledger.values():  # stored flags follow the current V3_START, also for strategies no longer re-tested
+        v["eligible"] = eligible(v)
     keep = iso(now - timedelta(days=LEDGER_KEEP_DAYS))
     ledger = {k: v for k, v in ledger.items() if str(v.get("freeze") or "9") >= keep or v.get("line") != "research"}
     q1 = {k: v for k, v in q1.items() if str(v.get("freeze") or "9") >= keep}
@@ -266,59 +277,102 @@ def status_flags(reg: Registry, now: datetime | None = None) -> list[str]:
 
 
 # ---------------------------------------------------------------------------- schedule and coverage
+def _served(s: dict) -> list[str]:
+    """UTC days on which the strategy was in a book served to the lab. Entries stored before 23.11
+    (09:00 UTC) carry only first/last time; both fall on the deploy day, so the span is exact."""
+    if s.get("days"):
+        return list(s["days"])
+    first, last = parse_dt(s.get("first_seen")), parse_dt(s.get("last_seen"))
+    return _span(first.date().isoformat(), last.date().isoformat()) if first and last else []
+
+
 def note_scheduled(reg: Registry, book: list[dict], now: datetime | None = None) -> None:
-    """The book served to the lab: every entry is scheduled for the complete days it can cover."""
+    """The book served to the lab, kept as an immutable daily snapshot: per strategy, the UTC days it
+    was served on, and the days on which any book was served (DECISIONS §5, §6)."""
     now = now or utcnow()
+    today = now.date().isoformat()
     sched = reg.kv_get(K_SCHED) or {}
+    book_days = reg.kv_get(K_BOOKDAYS) or sorted({d for s in sched.values() for d in _served(s)})
     for e in book:
         fz = parse_dt(e.get("freeze"))
         if fz is None:
             continue
         s = sched.get(e["id"]) or {"freeze": e.get("freeze"), "first_seen": iso(now)}
+        days = _served(s)
+        s["days"] = sorted(set(days) | {today})[-(LEDGER_KEEP_DAYS + 10):]
         s["last_seen"] = iso(now)
         sched[e["id"]] = s
+    book_days = sorted(set(book_days) | {today})[-(LEDGER_KEEP_DAYS + 10):]
+    reg.kv_set(K_BOOKDAYS, book_days)
     keep, recent = iso(now - timedelta(days=LEDGER_KEEP_DAYS)), iso(now - timedelta(days=3))
     # entries that never covered a complete day are dropped after 3 days (most new experiments leave
     # the book within hours); the rest stay as long as the ledger keeps the strategy
     reg.kv_set(K_SCHED, {k: v for k, v in sched.items()
                          if (str(v.get("freeze") or "9") >= keep or k.startswith(("benchmark", "h1-")))
-                         and (scheduled_days(v) or str(v.get("last_seen") or "") >= recent)})
+                         and (scheduled_days(v, book_days) or str(v.get("last_seen") or "") >= recent)})
 
 
-def scheduled_days(s: dict) -> list[str]:
-    """Complete days a strategy should have been observed: from the first full day after its freeze
-    (and after it was first served) to the day before the last run that had it in the book."""
+def scheduled_days(s: dict, book_days: list[str] | None = None) -> list[str]:
+    """Complete days the strategy is scheduled for (DECISIONS §5, §6): from the first full day after
+    its freeze, the days d on which it was in the served book and still in it on d+1, the day whose
+    runs first value d. A day without any lab run keeps the previous day's book (an outage counts
+    against coverage; it never removes a day). Fixed once the book of d+1 was served: a strategy
+    that leaves the book and returns later is not scheduled for the days in between."""
     from aitrader.research.marks import first_full_day
-    fz, first, last = parse_dt(s.get("freeze")), parse_dt(s.get("first_seen")), parse_dt(s.get("last_seen"))
-    if fz is None or first is None or last is None:
+    fz, served = parse_dt(s.get("freeze")), set(_served(s))
+    if fz is None or not served:
         return []
-    a = max(first_full_day(fz), first.date())
-    b = last.date() - timedelta(days=1)
-    return _span(a.isoformat(), b.isoformat()) if b >= a else []
+    start = min(served)
+    bd = served | set(book_days) if book_days is not None else set(_span(start, max(served)))
+    days, present, cur = _span(start, max(bd)), [], False
+    for d in days:
+        if d in bd:
+            cur = d in served
+        present.append(cur)
+    a = max(first_full_day(fz).isoformat(), start)
+    return [d for i, d in enumerate(days[:-1]) if d >= a and present[i] and present[i + 1]]
+
+
+def composition(reg: Registry, day: str) -> dict:
+    """Who makes up line A on `day` (DECISIONS §5): eligible Q1 members scheduled for it, and those
+    of them with a valid published value (M(d)). No returns are computed here. A value published for
+    a day the strategy was not scheduled for (e.g. after a return to the book) is a diagnostic only."""
+    ledger, q1, sched = (reg.kv_get(k) or {} for k in (K_LEDGER, K_Q1, K_SCHED))
+    bd = reg.kv_get(K_BOOKDAYS) or []
+    ids = sorted(k for k, d in q1.items() if d.get("member") and k in ledger
+                 and ledger[k].get("line") == "research" and eligible(ledger[k]))
+    sch = [k for k in ids if day in set(scheduled_days(sched.get(k) or {}, bd))]
+    return {"scheduled": sch, "members": [k for k in sch if day in set(valid_days(ledger[k]))]}
 
 
 def diagnostics(reg: Registry, now: datetime | None = None) -> dict:
     ledger, q1, sched = (reg.kv_get(k) or {} for k in (K_LEDGER, K_Q1, K_SCHED))
-    elig = {k: v for k, v in ledger.items() if v.get("line") == "research" and v.get("eligible")}
+    bd = reg.kv_get(K_BOOKDAYS) or []
+    elig = {k: v for k, v in ledger.items() if v.get("line") == "research" and eligible(v)}
     members = [k for k, d in q1.items() if d.get("member") and k in elig]
 
-    def coverage(ids) -> float | None:
-        want = got = 0
+    def coverage(ids) -> tuple[float | None, int]:
+        want = got = off = 0
         for k in ids:
-            days = scheduled_days(sched.get(k) or {})
+            days = set(scheduled_days(sched.get(k) or {}, bd))
             ok = set(valid_days(ledger.get(k) or {"from": "", "until": None}))
             want += len(days)
-            got += sum(1 for d in days if d in ok)
-        return round(got / want, 3) if want else None
+            got += len(days & ok)
+            off += len(ok - days)
+        return (round(got / want, 3) if want else None), off
     bench = [k for k, v in ledger.items() if v.get("line") == "benchmark"]
     diag = [v.get("diag") or {} for v in ledger.values()]
+    cov_q1, off_q1 = coverage(members)
     return {"start": V3_START, "records": len(ledger), "research_eligible": len(elig), "q1_members": len(members),
             "burn_in": sum(1 for d in q1.values() if d.get("status") == "burn_in"),
             "valid_days": sum(len(valid_days(v)) for v in ledger.values()),
             "missing_days": sum(len(v.get("missing") or []) for v in ledger.values()),
             "jumps": sum(len(v.get("jumps") or []) for v in ledger.values()),
             "revisions": sum(int(v.get("revisions") or 0) for v in ledger.values()),
-            "coverage_q1": coverage(members), "coverage_benchmark": coverage(bench),
+            "refilled_days": sum(len(v.get("refilled_days") or []) for v in ledger.values()),
+            "anchor_missing": sum(int(v.get("anchor_missing") or 0) for v in ledger.values()),
+            "coverage_q1": cov_q1, "coverage_benchmark": coverage(bench)[0],
+            "q1_off_schedule_days": off_q1,  # valid days outside the schedule: diagnostic, never in R_Q1
             "fees_unknown": sum(int(d.get("fees_unknown") or 0) for d in diag),
             "funding_mismatch": sum(int(d.get("funding_mismatch") or 0) for d in diag)}
 
