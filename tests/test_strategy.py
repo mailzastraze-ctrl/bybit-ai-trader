@@ -440,3 +440,133 @@ def test_late_higher_timeframe_candle_is_still_acted_on_once_live(tmp_path):
     # too late (beyond the grace of 2 bot candles): not chased
     st = bot("too_late.json")
     assert analyse(st, due + pd.Timedelta(minutes=45), k + 1)["enter_long"].iloc[-1] != 1
+
+
+def _hourly_on_15m(h1):
+    rows = []
+    for _, r in h1.iterrows():  # 4 quarter-hours per hour, same OHLC path
+        for q in range(4):
+            rows.append({"date": r["date"] + pd.Timedelta(minutes=15 * q), "open": r["open"], "high": r["high"],
+                         "low": r["low"], "close": r["close"], "volume": r["volume"] / 4})
+    return pd.DataFrame(rows)
+
+
+GUEST = {"rsi_len": 9, "rsi_lower": 37.3, "rsi_exit": -10.0, "rsi_trend": 0}  # exit (RSI ≤ 60) below entry (62.7)
+
+
+def _owner_and_guest(tmp_path, runmode):
+    from AIPortfolio import AIPortfolio
+    pair = "BTC/USDT:USDT"
+    m = Manifest(sleeves=[
+        Sleeve(id="own", family="trend_ema", params={"adx_min": 35.0}, pairs=[pair], stage="exploration", risk=0.001,
+               score=0.9, timeframe="1h", lead=[pair]),
+        Sleeve(id="guest", family="rsi_revert", params=GUEST, pairs=[pair], stage="exploration", risk=0.001,
+               score=0.1, timeframe="1h")])
+    path = tmp_path / f"m_{runmode}.json"
+    m.save(path)
+    st = AIPortfolio({"aitrader": {"manifest_path": str(path)}, "runmode": runmode, "exchange": {"demo_trading": True}})
+    st.timeframe = "15m"
+    st.bot_start()
+    return st, pair
+
+
+def test_a_guest_enters_only_where_its_own_backtest_would(tmp_path):
+    """23.11, BTC: a guest strategy shorted on an hourly candle that already carried its own exit
+    (Freqtrade checked the coin owner's exit columns) and left 3 minutes later. Each strategy's
+    entries now obey Freqtrade's rule with its own columns: no entry on a candle with the same
+    side's exit or the opposite entry – exactly the candles its single-strategy backtest trades."""
+    from aitrader.families import get_family
+    h1 = ohlcv(1500, seed=11, vol=0.012)
+    m15 = _hourly_on_15m(h1)
+    ref = get_family("rsi_revert").populate(h1, GUEST)
+    both = ref["short_sig"] & ref["exit_short_sig"]
+    assert both.sum() > 0  # the case of 23.11 exists in this data
+    bt_short = set(h1.loc[ref["short_sig"] & ~ref["exit_short_sig"] & ~ref["long_sig"], "date"])
+    bt_long = set(h1.loc[ref["long_sig"] & ~ref["exit_long_sig"] & ~ref["short_sig"], "date"])
+    for runmode in ("backtest", "live"):
+        st, pair = _owner_and_guest(tmp_path, runmode)
+        st.dp = SimpleNamespace(get_pair_dataframe=lambda p, tf, **kw: h1 if tf == "1h" else m15,
+                                current_whitelist=lambda pr=pair: [pr])
+        df = _populate(st, m15, pair)
+        g = df["enter_tag"] == "guest"
+        shorts = set(df.loc[g & (df["enter_short"] == 1), "date"] - pd.Timedelta(minutes=45))
+        longs = set(df.loc[g & (df["enter_long"] == 1), "date"] - pd.Timedelta(minutes=45))
+        own_rows = set(df.loc[df["enter_tag"] == "own", "date"] - pd.Timedelta(minutes=45))
+        assert shorts == bt_short - own_rows and longs == bt_long - own_rows  # never a candle its backtest skips
+        assert not (df.loc[g & (df["enter_short"] == 1), "xs:guest"]).any()
+        assert not (df.loc[g & (df["enter_long"] == 1), "xl:guest"]).any()
+        if runmode == "live":  # no open trade: no exit column can veto (or speak for) another strategy
+            assert "exit_short" not in df or df["exit_short"].fillna(0).sum() == 0
+
+
+def test_an_open_trade_is_never_vetoed_by_another_strategys_entry(tmp_path, monkeypatch):
+    """Live, one trade per coin: Freqtrade lets an exit signal through only without an entry flag
+    on the trade's side. Another strategy's entry flag must not hold the trade (its backtest has
+    no such veto); the trade's own exit columns drive its exit."""
+    h1 = ohlcv(1500, seed=11, vol=0.012)
+    m15 = _hourly_on_15m(h1)
+    st, pair = _owner_and_guest(tmp_path, "live")
+    st.dp = SimpleNamespace(get_pair_dataframe=lambda p, tf, **kw: h1 if tf == "1h" else m15,
+                            current_whitelist=lambda: [pair])
+    monkeypatch.setattr(st, "_open_trade", lambda p: SimpleNamespace(enter_tag="guest"))
+    df = _populate(st, m15, pair)
+    assert set(df["enter_tag"].dropna()) <= {"guest"}  # the owner's entries are not written while the guest holds
+    assert (df["exit_short"].fillna(0) == df["xs:guest"].astype(int)).all()
+
+
+def test_maker_wait_is_over_after_3_min_and_the_new_order_crosses(portfolio):
+    """Freqtrade moves a resting order only on a new bot candle (15 min), after the 12-min unfilled
+    timeout – the 3-minute cross never ran (23.11, BTC entry 0.53 % late). The order is now
+    cancelled when its maker wait is over and the re-placed one crosses the spread, once."""
+    from datetime import datetime, timezone
+    portfolio.config["runmode"] = "live"
+    portfolio.dp = SimpleNamespace(orderbook=lambda pair, n: {"bids": [[99.9, 1]], "asks": [[100.1, 1]]})
+    t0 = datetime(2026, 1, 1, tzinfo=timezone.utc)
+    tr = SimpleNamespace(enter_tag="s1", is_short=False)
+    order = SimpleNamespace(order_date_utc=t0, filled=0.0)
+    pair = "BTC/USDT:USDT"
+    assert portfolio.check_entry_timeout(pair, tr, order, t0 + timedelta(seconds=120)) is False  # still a maker
+    assert portfolio.custom_entry_price(pair, None, t0, 99.9, "s1", "long") == 99.9  # first order rests
+    assert portfolio.check_entry_timeout(pair, tr, order, t0 + timedelta(seconds=181)) is True
+    t1 = t0 + timedelta(seconds=182)
+    assert portfolio.custom_entry_price(pair, None, t1, 99.9, "s1", "long") == pytest.approx(100.1 * 1.0005)
+    assert portfolio.custom_entry_price(pair, None, t1, 99.9, "s1", "long") == 99.9  # the mark is used once
+    assert portfolio.check_entry_timeout(pair, tr, order, t1) is True
+    assert portfolio.custom_entry_price(pair, None, t1, 100.1, "s1", "short") == pytest.approx(99.9 * 0.9995)
+    # a partly filled order keeps resting; exits cross after 90 s the same way
+    assert portfolio.check_entry_timeout(pair, tr, SimpleNamespace(order_date_utc=t0, filled=0.5), t1) is False
+    assert portfolio.check_exit_timeout(pair, tr, order, t0 + timedelta(seconds=60)) is False
+    assert portfolio.check_exit_timeout(pair, tr, order, t0 + timedelta(seconds=91)) is True
+    assert portfolio.custom_exit_price(pair, tr, t1, 100.1, 0.01, "exit_signal") == pytest.approx(99.9 * 0.9995)
+    assert portfolio.custom_exit_price(pair, tr, t1, 100.1, 0.01, "exit_signal") == 100.1
+    portfolio.config["runmode"] = "backtest"
+    assert portfolio.check_entry_timeout(pair, tr, order, t1) is False  # backtests: Freqtrade's own fills
+
+
+def test_a_pending_entry_counts_at_its_sized_risk_not_at_the_guard_stop(portfolio):
+    """An entry that has not filled carries Freqtrade's −30 % guard as its stop. Counted at that,
+    one pending entry weighed ~6× its real risk and could block other entries at the side cap."""
+    df = _populate(portfolio, ohlcv(800, seed=3))
+    portfolio.dp = FakeDP(df)
+    atr = float(df["at:s1"].iloc[-1])
+    sl_atr = 2.0  # trend_ema default
+    stake, rate = 500.0, 100.0
+    pending = SimpleNamespace(pair="BTC/USDT:USDT", enter_tag="s1", open_rate=rate, stop_loss=rate * 1.3, is_short=True,
+                              stake_amount=stake, leverage=1.0, amount=0.0)
+    sized = max(0.01 * 10_000, stake / rate * sl_atr * atr)
+    assert portfolio._trade_risk(pending, 10_000.0) == pytest.approx(min(0.3 * stake, sized))
+    filled = SimpleNamespace(**{**pending.__dict__, "amount": 5.0, "stop_loss": rate * 1.02})
+    assert portfolio._trade_risk(filled, 10_000.0) == pytest.approx(0.02 * stake)  # a real stop counts as it is
+    unknown = SimpleNamespace(**{**pending.__dict__, "enter_tag": "gone"})
+    portfolio.sleeve_for_trade = lambda t: None
+    assert portfolio._trade_risk(unknown, 10_000.0) == pytest.approx(0.3 * stake)  # unknown strategy: stricter guard
+
+
+def test_the_bot_client_asks_for_candles_at_the_right_address():
+    from aitrader.ftclient import FtClient as FTClient
+    c = FTClient("http://127.0.0.1:8080", "u", "p")
+    seen = []
+    c.session.get = lambda url, **kw: (seen.append(url), SimpleNamespace(raise_for_status=lambda: None,
+                                                                         json=lambda: {}))[1]
+    c.pair_candles("BTC/USDT:USDT", "15m", 13)
+    assert seen == ["http://127.0.0.1:8080/api/v1/pair_candles"]  # was /api/v1//api/v1/… → 404 since 22.11

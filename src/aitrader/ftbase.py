@@ -417,6 +417,10 @@ class AIBase(IStrategy):
                 dataframe[f"xs:{exit_only.id}"] = res["exit_short_sig"].values
                 dataframe[f"at:{exit_only.id}"] = res["atr"].values
         paused = self.entries_paused()
+        # live: the strategy of the coin's open trade (one trade per coin). Another strategy's
+        # entry flag on the trade's side would veto that trade's exit signal in Freqtrade
+        # (`should_exit`: exit only without an entry) – a veto its backtest never had.
+        held = self._open_tag(metadata["pair"]) if self._live() else None
         free = pd.Series(True, index=dataframe.index)  # rows not yet claimed by a higher-priority sleeve
         for i, sleeve in enumerate(sleeves):
             res = self._sleeve_signals(dataframe, metadata["pair"], sleeve, cols)
@@ -431,10 +435,15 @@ class AIBase(IStrategy):
             dataframe[f"at:{sleeve.id}"] = res["atr"].values  # ATR on the sleeve's own timeframe
             ls = pd.Series(res["long_sig"].values, index=dataframe.index).fillna(False).astype(bool)
             ss = pd.Series(res["short_sig"].values, index=dataframe.index).fillna(False).astype(bool)
+            xl = pd.Series(res["exit_long_sig"].values, index=dataframe.index).fillna(False).astype(bool)
+            xs = pd.Series(res["exit_short_sig"].values, index=dataframe.index).fillna(False).astype(bool)
+            ls, ss = self._own_entry_rule(sleeve, ls, ss, xl, xs)
             if paused:
                 self._journal_signals(dataframe, metadata["pair"], sleeve, ls, ss, free, paused=True)
                 continue
             self._journal_signals(dataframe, metadata["pair"], sleeve, ls, ss, free)
+            if held is not None and held != sleeve.id:
+                continue  # the coin is busy with another strategy's trade (journalled as pair_busy)
             if "long" in sleeve.sides:
                 take = ls & free
                 dataframe.loc[take, ["enter_long", "enter_tag"]] = (1, sleeve.id)
@@ -444,6 +453,20 @@ class AIBase(IStrategy):
                 dataframe.loc[take, ["enter_short", "enter_tag"]] = (1, sleeve.id)
                 free &= ~take
         return dataframe
+
+    def _own_entry_rule(self, sleeve: Sleeve, ls: pd.Series, ss: pd.Series, xl: pd.Series,
+                        xs: pd.Series) -> tuple[pd.Series, pd.Series]:
+        """Freqtrade's entry rule, applied to each strategy with its OWN columns: no entry on a
+        candle that also carries the same side's exit or the opposite entry (backtesting
+        `check_for_trade_entry`, live `get_entry_signal`). Freqtrade checks the dataframe's exit
+        columns, and on a coin with several strategies those were the coin owner's: on 23.11 a
+        guest (RSI reversion, 1h) shorted BTC on an hourly candle that already carried its own
+        exit – a candle its backtest never trades – and left on the next 15m candle (−3 USDT).
+        Backtests are unchanged (single strategy: Freqtrade applies the same rule)."""
+        off = pd.Series(False, index=ls.index)
+        lo = ls if "long" in sleeve.sides else off
+        sh = ss if ("short" in sleeve.sides and self.can_short) else off
+        return lo & ~xl & ~sh, sh & ~xs & ~lo
 
     # ------------------------------------------------------------------ signal journal
     # Observation only (aitrader.observe): what happened to each new entry signal of the live
@@ -511,7 +534,13 @@ class AIBase(IStrategy):
             cl, cs, owner = f"xl:{tag}", f"xs:{tag}", tag
         elif tag:
             cl, cs, owner = "", "", None
-        else:  # no open trade (or a backtest): the primary sleeve's columns
+        elif self._live():
+            # live without an open trade there is nothing to exit: Freqtrade would read these
+            # columns only to veto an entry – with the coin owner's exit even for a guest's entry.
+            # Each strategy's entries already respect its own exit (`_own_entry_rule`). A trade
+            # that opens before the next analysis gets its own exit columns from that analysis.
+            cl, cs, owner = "", "", None
+        else:  # a backtest: the primary sleeve's columns
             first = self.sleeves_for_pair(pair)
             cl, cs, owner = "exit_long_sig", "exit_short_sig", (first[0].id if first else None)
         if cl and cl in dataframe:
@@ -714,7 +743,7 @@ class AIBase(IStrategy):
         as maker orders (0.02% vs 0.055% taker); a stop-type exit crosses immediately."""
         if self.config.get("runmode") not in (RunMode.LIVE, RunMode.DRY_RUN):
             return proposed_rate
-        if (exit_tag or "") in self.URGENT_EXITS:
+        if (exit_tag or "") in self.URGENT_EXITS or self._take_cross(pair, "exit", current_time):
             return self._cross_price(pair, not trade.is_short) or proposed_rate
         return self._not_below_tp(pair, trade, proposed_rate, exit_tag)
 
@@ -749,6 +778,48 @@ class AIBase(IStrategy):
             px = (proposed_rate or current_order_rate) * (0.998 if not trade.is_short else 1.002)
         return px
 
+    # The two hooks above run only when a new bot candle arrives (Freqtrade `replace_order`): on
+    # the 15m bot up to 15 minutes after the order, after the 12-minute unfilled timeout. So the
+    # "cross after 3 min / 90 s" never happened: on 23.11 a BTC short entry rested 12 min, was
+    # cancelled and re-entered 0.53 % lower. Now a resting order is cancelled when its maker wait
+    # is over; Freqtrade re-places it in the same loop (the signal / exit still stands) and
+    # `custom_entry_price` / `custom_exit_price` put the new order across the spread.
+    CROSS_MARK_S = 600  # a cross mark is used by the next order on that coin within 10 minutes
+
+    def check_entry_timeout(self, pair: str, trade: Trade, order, current_time: datetime, **kwargs) -> bool:
+        return self._maker_wait_over(pair, trade, order, current_time, "entry")
+
+    def check_exit_timeout(self, pair: str, trade: Trade, order, current_time: datetime, **kwargs) -> bool:
+        return self._maker_wait_over(pair, trade, order, current_time, "exit")
+
+    def _maker_wait_over(self, pair: str, trade, order, current_time: datetime, kind: str) -> bool:
+        if not self._live() or (getattr(trade, "enter_tag", None) or "").startswith(EXEC_TEST_TAG):
+            return False
+        placed = getattr(order, "order_date_utc", None) if order is not None else None
+        if placed is None:
+            return False
+        wait = self.MAKER_WAIT_S if kind == "entry" else self.MAKER_EXIT_WAIT_S
+        if (current_time - placed).total_seconds() < wait:
+            return False
+        if float(getattr(order, "filled", 0) or 0) > 0:
+            return False  # partly filled: the rest keeps resting (Freqtrade's unfilled timeout still applies)
+        self.__dict__.setdefault("_cross_next", {})[(pair, kind)] = current_time
+        logger.info("maker wait over: %s order on %s rested %ds unfilled – re-placed across the spread",
+                    kind, pair, int((current_time - placed).total_seconds()))
+        return True
+
+    def _take_cross(self, pair: str, kind: str, current_time: datetime) -> bool:
+        at = (self.__dict__.get("_cross_next") or {}).pop((pair, kind), None)
+        return at is not None and (current_time - at).total_seconds() <= self.CROSS_MARK_S
+
+    def custom_entry_price(self, pair: str, trade: Trade | None, current_time: datetime, proposed_rate: float,
+                           entry_tag: str | None, side: str, **kwargs) -> float:
+        if not self._live() or not self._take_cross(pair, "entry", current_time):
+            return proposed_rate
+        long = side == "long"
+        px = self._cross_price(pair, closing_long=not long)  # opening a long buys like closing a short
+        return px if px is not None else proposed_rate * (1.002 if long else 0.998)
+
     # ------------------------------------------------------------------ portfolio limits
     def confirm_trade_entry(self, pair: str, order_type: str, amount: float, rate: float,
                             time_in_force: str, current_time: datetime, entry_tag: str | None,
@@ -779,12 +850,7 @@ class AIBase(IStrategy):
                 return self._decline(entry_tag, pair, side, "explore_count")
         equity = float(self.wallets.get_total_stake_amount()) if self.wallets else 0.0
         if equity > 0:
-            open_risk = 0.0
-            for t in trades:
-                if not t.open_rate or not t.stop_loss:
-                    continue
-                loss_frac = (t.stop_loss - t.open_rate) / t.open_rate if t.is_short else (t.open_rate - t.stop_loss) / t.open_rate
-                open_risk += max(loss_frac, 0.0) * float(t.stake_amount or 0) * float(t.leverage or 1)
+            open_risk = sum(self._trade_risk(t, equity) for t in trades)
             sleeve = self.sleeve_by_tag(pair, entry_tag)
             new_risk = self._entry_risk(pair, sleeve, amount, equity)
             if open_risk + new_risk > max_risk * equity:
@@ -792,9 +858,7 @@ class AIBase(IStrategy):
                             100 * open_risk / equity, 100 * max_risk)
                 return self._decline(entry_tag, pair, side, "open_risk")
             # one direction is close to one bet (crypto moves together): cap the risk per side too
-            side_risk = sum(max(((t.stop_loss - t.open_rate) / t.open_rate if t.is_short else (t.open_rate - t.stop_loss) / t.open_rate), 0.0)
-                            * float(t.stake_amount or 0) * float(t.leverage or 1)
-                            for t in trades if t.open_rate and t.stop_loss and bool(t.is_short) == short)
+            side_risk = sum(self._trade_risk(t, equity) for t in trades if bool(t.is_short) == short)
             max_side_risk = float(cfg.get("max_side_risk", max_risk / 2))
             if side_risk + new_risk > max_side_risk * equity:
                 logger.info("portfolio limit: %s %s skipped (%s risk %.2f%% of equity, cap %.1f%% per side)", side, pair,
@@ -802,9 +866,7 @@ class AIBase(IStrategy):
                 return self._decline(entry_tag, pair, side, "side_risk")
             if new_sleeve is not None and new_sleeve.stage == "exploration":
                 max_ex_risk = float(cfg.get("max_explore_risk", max_risk * 0.375))
-                ex_risk = sum(max(((t.stop_loss - t.open_rate) / t.open_rate if t.is_short else (t.open_rate - t.stop_loss) / t.open_rate), 0.0)
-                              * float(t.stake_amount or 0) * float(t.leverage or 1)
-                              for t in explore if t.open_rate and t.stop_loss)
+                ex_risk = sum(self._trade_risk(t, equity) for t in explore)
                 if ex_risk + new_risk > max_ex_risk * equity:
                     logger.info("portfolio limit: %s %s skipped (exploration risk %.2f%% of equity, cap %.1f%% – room "
                                 "kept for proven strategies)", side, pair, 100 * ex_risk / equity, 100 * max_ex_risk)
@@ -837,8 +899,7 @@ class AIBase(IStrategy):
             logger.info("TradFi limit: %s %s skipped (%d TradFi positions open)", side, pair, len(mine))
             return "tradfi_count"
         if equity > 0:
-            risk = sum(max(((t.stop_loss - t.open_rate) / t.open_rate if t.is_short else (t.open_rate - t.stop_loss) / t.open_rate), 0.0)
-                       * float(t.stake_amount or 0) * float(t.leverage or 1) for t in mine if t.open_rate and t.stop_loss)
+            risk = sum(self._trade_risk(t, equity) for t in mine)
             new_risk = self._entry_risk(pair, self.sleeve_by_tag(pair, entry_tag), amount, equity)
             cap = float(cfg.get("max_tradfi_risk", 0.005))
             if risk + new_risk > cap * equity:
@@ -871,6 +932,36 @@ class AIBase(IStrategy):
     def order_filled(self, pair: str, trade: Trade, order, current_time: datetime, **kwargs) -> None:
         if tradfi.is_tradfi(pair):
             self.__dict__.setdefault("_tradfi_attempts", {}).pop(pair, None)
+
+    GUARD_STOP_FRAC = 0.25  # a stop this far away is Freqtrade's −30 % guard, not the strategy's stop
+
+    def _trade_risk(self, t, equity: float) -> float:
+        """Money at the stop of an open trade, for the account caps. An entry still working
+        (nothing filled yet) and a fresh position before its own stop is set carry Freqtrade's
+        −30 % guard as their stop; counted at that, one pending entry weighed ~0.6 % of equity
+        instead of ~0.1 % (23.11) and a few at the top of the hour could block every other entry
+        on that side. Such a trade counts like a new entry: at its strategy's sized risk, never
+        less than nominal (`_entry_risk`). With its strategy unknown, the guard stays (stricter)."""
+        try:
+            o, sl = float(t.open_rate or 0), float(t.stop_loss or 0)
+        except (TypeError, ValueError):
+            return 0.0
+        if o <= 0 or sl <= 0:
+            return 0.0
+        frac = max(((sl - o) / o) if t.is_short else ((o - sl) / o), 0.0)
+        stake, lev = float(t.stake_amount or 0), float(t.leverage or 1)
+        at_stop = frac * stake * lev
+        amount = getattr(t, "amount", None)
+        pending = amount is not None and float(amount or 0) <= 0
+        if not (pending or frac >= self.GUARD_STOP_FRAC) or equity <= 0:
+            return at_stop
+        try:
+            sleeve = self.sleeve_for_trade(t)
+        except Exception:  # noqa: BLE001 – a lookup problem keeps the stricter guard
+            sleeve = None
+        if sleeve is None:
+            return at_stop
+        return min(at_stop, self._entry_risk(t.pair, sleeve, stake * lev / o, equity))
 
     def _entry_risk(self, pair: str, sleeve: Sleeve | None, amount: float, equity: float) -> float:
         """Money at the initial stop for a new entry, for the account caps: the larger of the
