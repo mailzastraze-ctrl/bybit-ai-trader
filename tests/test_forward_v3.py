@@ -392,3 +392,23 @@ def test_a_stalled_forward_is_a_red_flag_while_imports_look_fresh(tmp_path):
     reg.kv_set("forward", {"last_accepted": iso(utcnow() - timedelta(hours=2)), "ts": iso()})
     assert "forward > 24h" not in observe.red_flags(reg)
     assert "v3=[" in observe.status_line(reg)
+
+
+def test_a_partial_import_is_flagged_and_never_counts_as_fully_ok(env):
+    """ChatGPT 23.11 (round 2): failed v3 records and failed forward tests are counted; the last fully
+    successful import and the last partial one are kept apart."""
+    _, reg = env
+    v = {"from": day(0), "until": day(1), "values": [], "missing": [], "jumps": [], "diag": {}}
+    t0 = utcnow() - timedelta(hours=30)
+    forward3.record_status(reg, [result("a", v)], None, t0)
+    st = forward3.record_status(reg, [result("a", v), result("b", {"error": "boom"}),
+                                      {"id": "c", "ok": False, "error": "ft crashed", "exchange": "bybit"}], None)
+    assert st["state"] == "partial" and st["last_failures"] == "2/3" and st["last_ok"] == iso(t0)
+    assert st["last_lab_errors"] == 1 and st["last_failed"] == 1 and st["last_partial"]
+    assert forward3.status_flags(reg) == ["v3 partial 2/3", "v3 > 24h"]  # no fully ok import for 30 h
+    forward3.record_status(reg, [result("a", v)], None)
+    assert forward3.status_flags(reg) == []
+    forward.apply(reg, {"results": [result("a", v, tested_until=iso(utcnow())),
+                                    {"id": "c", "ok": False, "error": "ft crashed", "exchange": "bybit", "format": 3}]})
+    assert reg.kv_get(forward3.K_STATUS)["state"] == "partial" and "v3 partial 1/2" in observe.red_flags(reg)
+    assert "failed 1/2" in observe.status_line(reg)
