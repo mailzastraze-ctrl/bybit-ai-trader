@@ -144,3 +144,30 @@ def test_registry_pruning_by_age_and_disk_pressure(tmp_path):
     assert out["candidates_slimmed"] == 1
     res = {r["id"]: r["result"] for r in reg.q("SELECT id, result FROM experiments")}
     assert "curve" in res["e1"] and res["e2"].get("slim") and res["e2"]["verdict"] == "exploratory"
+
+
+def test_a_working_limit_entry_is_not_a_position_without_stop():
+    now = utcnow()
+    entry_open = {"ft_order_side": "buy", "ft_is_entry": True, "status": "open", "is_open": True, "filled": 0}
+    filled_now = {"ft_order_side": "buy", "ft_is_entry": True, "status": "closed", "is_open": False, "filled": 1,
+                  "order_filled_date": iso(now - timedelta(seconds=60))}
+    filled_old = filled_now | {"order_filled_date": iso(now - timedelta(minutes=10))}
+    trades = [
+        {"pair": "A/USDT:USDT", "open_date": iso(now - timedelta(minutes=8)), "orders": [entry_open]},  # waiting
+        {"pair": "B/USDT:USDT", "open_date": iso(now - timedelta(minutes=8)), "orders": [filled_now]},  # stop on its way
+        {"pair": "C/USDT:USDT", "open_date": iso(now - timedelta(minutes=12)), "orders": [filled_old]},  # bare
+        {"pair": "D/USDT:USDT", "open_date": iso(now - timedelta(minutes=20)), "orders": [entry_open]},  # stuck
+    ]
+    assert observe.health(trades, 50_000, now)["no_exchange_stop"] == ["C/USDT:USDT", "D/USDT:USDT"]
+
+
+def test_a_partially_filled_entry_without_stop_is_never_hidden():
+    """ChatGPT 23.11 (3): ignoring an unfilled order is fine; a filled amount without a stop is not."""
+    now = utcnow()
+    partial = {"ft_order_side": "sell", "ft_is_entry": True, "status": "open", "is_open": True, "filled": 0.4,
+               "order_filled_date": None, "order_date": iso(now - timedelta(minutes=6))}
+    young = partial | {"order_date": iso(now - timedelta(seconds=90))}
+    trades = [{"pair": "E/USDT:USDT", "open_date": iso(now - timedelta(minutes=6)), "orders": [partial]},
+              {"pair": "F/USDT:USDT", "open_date": iso(now - timedelta(seconds=90)), "orders": [young]}]
+    assert observe.health(trades, 50_000, now)["no_exchange_stop"] == ["E/USDT:USDT"]
+

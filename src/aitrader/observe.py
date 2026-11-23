@@ -389,11 +389,28 @@ def postmortem(reg, ft, now=None) -> dict:
 
 # ---------------------------------------------------------------------------- health line
 STOP_GRACE_S = 180  # a fresh position gets its exchange stop within a minute or two
+ENTRY_STUCK_S = 15 * 60  # config/trade.json unfilledtimeout entry 12 min + the stop grace
 
 
 def _has_exchange_stop(t: dict) -> bool:
     return any(o.get("ft_order_side") == "stoploss" and o.get("status") in ("open", "new", None)
                for o in t.get("orders") or [])
+
+
+def _entry_state(t: dict) -> tuple[bool, object]:
+    """(entry working with nothing filled, time the position began). A limit entry can wait up to 12
+    minutes (unfilledtimeout) and Freqtrade places the exchange stop once it has filled, so while
+    nothing is filled there is no position to protect (audit 22.11, A2). Any filled amount is a
+    position: the grace runs from the first fill. Without Freqtrade's entry flags: as before."""
+    entries = [o for o in t.get("orders") or [] if o.get("ft_is_entry")]
+    filled = [o for o in entries if (o.get("filled") or 0) > 0]
+    # only an entry with nothing filled yet is "no position": a partial fill is a position to protect
+    working = not filled and any(o.get("is_open") or o.get("status") in ("open", "new") for o in entries)
+    fills = [parse_dt(o.get("order_filled_date") or o.get("order_filled_timestamp") or o.get("order_date")
+                      or o.get("order_timestamp")) for o in filled]
+    began = parse_dt(t.get("open_fill_date") or t.get("open_fill_timestamp")) or \
+        min((f for f in fills if f is not None), default=None) or parse_dt(t.get("open_date") or t.get("open_timestamp"))
+    return working, began
 
 
 def health(open_trades: list[dict], equity: float | None, now=None) -> dict:
@@ -403,7 +420,10 @@ def health(open_trades: list[dict], equity: float | None, now=None) -> dict:
     bare = []
     for t in open_trades or []:
         od = parse_dt(t.get("open_date") or t.get("open_timestamp"))
-        young = od is not None and (now - od).total_seconds() < STOP_GRACE_S
+        working, began = _entry_state(t)
+        if working and not (od is not None and (now - od).total_seconds() > ENTRY_STUCK_S):
+            continue  # the entry order is still working: no position yet (or a stuck one after 15 min)
+        young = began is not None and (now - began).total_seconds() < STOP_GRACE_S
         if not young and not _has_exchange_stop(t):
             bare.append(t.get("pair"))
     risk = sum(_risk(t) for t in open_trades or [])
@@ -430,6 +450,15 @@ def red_flags(reg, now=None) -> list[str]:
         out.append("lab import > 24h")
     if lab.get("last_batch_total") and lab.get("last_batch_failed", 0) > 0.2 * lab["last_batch_total"]:
         out.append(f"lab failures {lab['last_batch_failed']}/{lab['last_batch_total']}")
+    fw = reg.kv_get("forward") or {}
+    fa = parse_dt(fw.get("last_accepted") or fw.get("ts"))  # imports can be fresh while the forward test stalls
+    if fa is not None and (now - fa).total_seconds() > 24 * 3600:
+        out.append("forward > 24h")
+    try:
+        from aitrader import forward3
+        out += forward3.status_flags(reg, now)  # the v3 recording can stop while v2 still arrives
+    except Exception:  # noqa: BLE001
+        out.append("v3 status unreadable")
     d = reg.kv_get("disk") or {}
     if d.get("free_pct") is not None and d["free_pct"] < 0.2:
         out.append(f"disk free {d['free_pct']:.0%}")
@@ -458,11 +487,17 @@ def status_line(reg, now=None) -> str:
         (f", {g['mb_per_day']:+.0f} MB/d, full in {g['days_to_full']:.0f} d" if g.get("days_to_full") else "")
     bench = (fw.get("benchmark") or {}).get("trades")
     vs = (fw.get("vs_benchmark") or {}).get("p_top_better")
+    v3 = fw.get("v3") or {}
+    ok = parse_dt((v3.get("status") or {}).get("last_ok"))
+    age = f"{(now - ok).total_seconds() / 3600:.1f}h" if ok else "never"
+    v3s = ("error" if v3.get("error") else
+           f"records {v3.get('records', 0)}, q1 {v3.get('q1_members', 0)}, cov {v3.get('coverage_q1')}, "
+           f"rev {v3.get('revisions', 0)}, ok {age}") if v3 else "none"
     flags = red_flags(reg, now)
     return (f"HEALTH positions={h.get('positions', '?')} no_exchange_stop={len(h.get('no_exchange_stop') or [])} "
             f"risk={h.get('risk_pct', '?')}% import_age={imp} disk=[{disk}] "
             f"forward=[{fw.get('verdict', '?')}, days {fw.get('forward_days', '?')}, benchmark trades {bench}, "
-            f"P(top>bench) {vs}] flags={flags or 'none'}")
+            f"P(top>bench) {vs}] v3=[{v3s}] flags={flags or 'none'}")
 
 
 def disk_line(reg) -> str:
