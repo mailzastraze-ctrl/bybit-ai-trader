@@ -112,7 +112,7 @@ def test_coin_desks_api_lists_best_and_takes_the_owners_choice(client):
     btc = d["desks"][0]
     assert btc["coin"] == "BTC" and btc["picks"][0]["id"] == "good" and btc["picks"][0]["code"] == names["good"]["code"]
     assert btc["picks"][0]["demo"] == {"trades": 1, "pnl": 7.5, "pf": 99.0, "wins": 1}
-    assert btc["picks"][0]["demo_all"]["trades"] == 1 and btc["picks"][0]["coins"] == ["BTC"]
+    assert "demo_all" not in btc["picks"][0] and btc["guests"] == []  # every figure on this coin only (owner, 23.11)
     o = client.get("/api/desks/options", params={"pair": "BTC/USDT:USDT"}, auth=a).json()
     assert [x["id"] for x in o["options"]] == ["good", "ok"]  # "thin" has too few trades on BTC
     assert o["options"][0]["chosen"] and not o["options"][1]["chosen"]
@@ -126,3 +126,21 @@ def test_coin_desks_api_lists_best_and_takes_the_owners_choice(client):
     assert coins[0]["coin"] == "BTC" and coins[0]["options"] == 2 and coins[0]["desk"]
     ov = client.get("/api/overview", auth=a).json()
     assert ov["experiment"]["closed_count"] == 1 and ov["experiment"]["closed_pnl"] == 7.5
+
+
+def test_chart_endpoints_candles_and_every_trade_on_a_coin(client, monkeypatch):
+    """One chart everywhere: Bybit candles of any timeframe (bad ones refused) and the coin's trades."""
+    import aitrader.web.app as webapp
+    from aitrader.registry import Registry
+    from aitrader.web import chart
+    a = ("admin", "pw")
+    chart._cache.clear()
+    monkeypatch.setattr(chart, "_fetch", lambda sym, iv, end, limit: [[1000 * i, 1, 2, 0.5, 1.5, 1] for i in range(limit)])
+    r = client.get("/api/chart/candles", params={"pair": "BTC/USDT:USDT", "tf": "4h", "limit": 20}, auth=a)
+    assert r.status_code == 200 and len(r.json()["candles"]) == 20
+    assert client.get("/api/chart/candles", params={"pair": "BTC/USDT:USDT", "tf": "7m"}, auth=a).status_code == 400
+    reg = Registry(webapp.S.registry_path)
+    reg.upsert("live_trades", {"trade_id": 5, "sleeve_id": "s", "pair": "BTC/USDT:USDT", "is_short": 1, "open_date": "2026-11-23T17:12:11Z",
+                               "close_date": "2026-11-23T17:15:06Z", "open_rate": 61883.0, "close_rate": 62032.9, "profit_abs": -3.02}, key="trade_id")
+    d = client.get("/api/chart/trades", params={"pair": "BTC/USDT:USDT", "sid": "s"}, auth=a).json()
+    assert [t["id"] for t in d["demo"]] == [5] and "s" in d["history"] and d["strategies"] == ["s"]
