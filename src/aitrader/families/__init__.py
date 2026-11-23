@@ -526,11 +526,17 @@ RESEARCH_CLASS: dict[str, str] = {
 }
 
 
+# TradFi lane (gold, S&P 500): pre-registered families, resolvable but never searched – the lab's
+# bandit, generator, screener and explorers iterate FAMILIES only (families/tradfi.py)
+from aitrader.families.tradfi import NEEDS_PEER, TRADFI_FAMILIES  # noqa: E402
+
+
 def get_family(name: str) -> Family:
     try:
-        return FAMILIES[name]
+        return FAMILIES[name] if name in FAMILIES else TRADFI_FAMILIES[name]
     except KeyError as e:
-        raise ValueError(f"unknown family {name!r}; known: {sorted(FAMILIES)}") from e
+        raise ValueError(f"unknown family {name!r}; known: {sorted(FAMILIES) + sorted(TRADFI_FAMILIES)}") from e
 
 
-__all__ = ["EXIT_PARAMS", "FAMILIES", "MARKET_PAIR", "NEEDS_FUNDING", "NEEDS_MARKET", "NEEDS_OI", "RESEARCH_CLASS", "Family", "Param", "get_family"]
+__all__ = ["EXIT_PARAMS", "FAMILIES", "MARKET_PAIR", "NEEDS_FUNDING", "NEEDS_MARKET", "NEEDS_OI", "NEEDS_PEER",
+           "RESEARCH_CLASS", "TRADFI_FAMILIES", "Family", "Param", "get_family"]

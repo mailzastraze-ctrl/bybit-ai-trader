@@ -3,9 +3,12 @@ kill-switch, runs the learning loop and the strategy lifecycle, and rewrites the
 
 from __future__ import annotations
 
+import json
+import os
+import threading
 import time
 
-from aitrader import context, memguard, observe, readiness, storage
+from aitrader import context, memguard, observe, readiness, selftest, storage, tradfi
 from aitrader.ftclient import FtClient
 from aitrader.learner import Learner
 from aitrader.lifecycle import Lifecycle
@@ -139,10 +142,11 @@ def main() -> None:
     life.import_external(s.app_dir / "research" / "external")
     life.import_hypotheses(s.app_dir / "research" / "hypotheses")  # shadow: the forward book's own copies
     life.import_core(s.app_dir / "research" / "external", s.app_dir / "research" / "hypotheses")  # demo core
+    life.import_tradfi(s.app_dir / "research" / "tradfi")  # TradFi lane: gold, S&P 500 (pre-registered)
     # make sure the bot has a manifest + pairlist before it starts trading
     startup_manifest(life, s, set(scanner.excluded_pairs()))
     reg.event("manager", "manager started")
-    last_learn = last_ready = last_ctx = last_disk = 0.0
+    last_learn = last_ready = last_ctx = last_disk = last_tradfi = 0.0
     while True:
         t0 = time.time()
         detail: dict = {}
@@ -184,6 +188,25 @@ def main() -> None:
                                   "warning")
                 except Exception as e:  # noqa: BLE001
                     log.info("context refresh failed: %s", e)
+            if time.time() - last_tradfi > 900:  # TradFi lane: tradable on the account? sessions, correlation
+                last_tradfi = time.time()
+                try:
+                    try:
+                        listed = json.loads(s.pairlist_path.read_text()).get("pairs") or []
+                    except (OSError, ValueError):
+                        listed = []
+                    st = tradfi.refresh(reg, ft if up else None, life.tradfi_pairs(), s.lifecycle.tradfi_enabled,
+                                        listed=listed)
+                    if s.lifecycle.tradfi_enabled:
+                        if s.lifecycle.tradfi_forward_book:  # hypothesis TF1 in the lab's forward book (opt-in)
+                            life.register_tradfi_hypotheses(st)
+                        if up and os.environ.get("EXEC_TEST", "1") == "1" and selftest.tradfi_execution_test_due(reg) \
+                                and not any(t.name == "tradfi-exec-test" and t.is_alive() for t in threading.enumerate()):
+                            # orders and the exchange stop on gold / S&P 500 (minutes; never blocks the loop)
+                            threading.Thread(target=selftest.run_tradfi_execution_test, args=(s,), daemon=True,
+                                             name="tradfi-exec-test").start()
+                except Exception as e:  # noqa: BLE001 – the lane must never break the crypto book
+                    log.info("tradfi refresh failed: %s", e)
             # safety: no new entries on coins Bybit has announced to delist (open trades keep their exits)
             excluded = set(scanner.excluded_pairs()) | context.delisted_pairs(reg)
             man = refresh_manifest(life, up, open_trades, excluded, paused)

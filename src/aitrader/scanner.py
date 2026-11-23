@@ -11,6 +11,7 @@ import numpy as np
 import pandas as pd
 
 from aitrader import indicators as ta
+from aitrader import tradfi
 from aitrader.registry import Registry
 from aitrader.research.ftrunner import (
     FreqtradeError,
@@ -85,7 +86,9 @@ class Scanner:
             self.reg.event("scanner", f"pairlist scan failed, fallback universe: {e}"[:400], "warning")
             liquid, source = list(FALLBACK_UNIVERSE), "fallback"
         excluded = set(self.excluded_pairs())
-        liquid = [p for p in liquid if p.endswith(":USDT") and p not in excluded]
+        # gold / S&P 500 perpetuals are high-volume too, but they are the TradFi lane's universe
+        # (`tradfi_universe`), never crypto research pairs
+        liquid = [p for p in liquid if p.endswith(":USDT") and p not in excluded and not tradfi.is_tradfi(p)]
         liquid = liquid[: self.s.research.universe_size]
 
         rs = self.s.research
@@ -117,6 +120,18 @@ class Scanner:
         self.reg.kv_set("universe", {"ts": now, "pairs": universe, "source": source})
         self.reg.event("scanner", f"universe refreshed: {len(universe)} pairs ({source})")
         return universe
+
+    def tradfi_universe(self) -> dict:
+        """The independent TradFi universe (gold, S&P 500): fixed instruments, not ranked by volume.
+        Which of them the demo account can trade, whether their market is open and how they
+        move with BTC comes from the live bot (`tradfi.refresh`, every 15 minutes)."""
+        st = self.reg.kv_get(tradfi.K_STATE) or {}
+        av = st.get("available") or {}
+        return {"pairs": [p for p in tradfi.TRADFI_PAIRS if av.get(p) is not False],
+                "instruments": {p: {**v, "available": av.get(p), "open_now": (st.get("open_now") or {}).get(p),
+                                    "corr_btc": ((st.get("corr") or {}).get("vs_btc") or {}).get(p)}
+                                for p, v in tradfi.INSTRUMENTS.items()},
+                "not_tradfi": dict(tradfi.NOT_TRADFI), "ts": st.get("ts")}
 
     def excluded_pairs(self) -> list[str]:
         rows = self.reg.q("SELECT adjustment, expires FROM learnings WHERE active=1 AND scope='pair'")

@@ -94,7 +94,8 @@ def cleanup_test_trades(ft: FtClient, sleep=time.sleep) -> list[int]:
     return closed
 
 
-def execution_test(ft: FtClient, stake: float = 30.0, sleep=time.sleep, timeout_s: int = 240) -> dict:
+def execution_test(ft: FtClient, stake: float = 30.0, sleep=time.sleep, timeout_s: int = 240,
+                   pairs: list[str] | None = None) -> dict:
     """End-to-end order test on Bybit Demo: market entry → fill → stop-loss order on the
     exchange → market exit. Proves the full execution path, not just connectivity."""
     steps: dict[str, dict] = {}
@@ -105,7 +106,7 @@ def execution_test(ft: FtClient, stake: float = 30.0, sleep=time.sleep, timeout_
         sleep(10)
     tag = f"{EXEC_TAG}-{int(time.time())}"
     try:
-        return _execution_test(ft, stake, sleep, timeout_s, steps, res, tag)
+        return _execution_test(ft, stake, sleep, timeout_s, steps, res, tag, pairs or EXEC_PAIRS)
     except Exception as e:  # noqa: BLE001 – never leave a test position behind
         steps["error"] = {"ok": False, "detail": str(e)[:300]}
         try:
@@ -115,11 +116,11 @@ def execution_test(ft: FtClient, stake: float = 30.0, sleep=time.sleep, timeout_
         return res
 
 
-def _execution_test(ft, stake, sleep, timeout_s, steps, res, tag) -> dict:
+def _execution_test(ft, stake, sleep, timeout_s, steps, res, tag, pairs=EXEC_PAIRS) -> dict:
     status = lambda: _retry(ft.status, sleep=sleep)  # noqa: E731
     wl = _retry(ft.whitelist, sleep=sleep).get("whitelist", [])
     open_pairs = {t["pair"] for t in status()}
-    pair = next((p for p in EXEC_PAIRS if p in wl and p not in open_pairs), None)
+    pair = next((p for p in pairs if p in wl and p not in open_pairs), None)
     if pair is None:
         steps["pick_pair"] = {"ok": False, "detail": "no free pair for the test"}
         return res
@@ -184,6 +185,46 @@ def run_execution_test_if_due(s: Settings, max_age_days: float = 7.0) -> dict | 
                                                if res["ok"] else "FAILED: " + json.dumps(res["steps"])[:400]),
               "info" if res["ok"] else "error")
     print(json.dumps(res, indent=2))
+    return res
+
+
+TRADFI_EXEC_STAKE = 60.0  # above the contract minimums of XAUUSDT / SPYUSDT at 1x (raised to the minimum if needed)
+
+
+def tradfi_execution_test_due(reg: Registry, now=None, ok_days: float = 7.0, retry_h: float = 6.0) -> bool:
+    last = reg.kv_get("tradfi_exec_test") or {}
+    ts = parse_dt(last.get("ts"))
+    if ts is None:
+        return True
+    age = ((now or utcnow()) - ts).total_seconds()
+    return age >= (ok_days * 86400 if last.get("ok") else retry_h * 3600)
+
+
+def run_tradfi_execution_test(s: Settings, reg: Registry | None = None, ft: FtClient | None = None,
+                              sleep=time.sleep, now=None, timeout_s: int = 240) -> dict | None:
+    """The same end-to-end order test on the TradFi lane (gold, S&P 500): entry → fill → stop
+    order on the exchange → exit, on a pair the bot has on its whitelist and whose underlying
+    market is open now. Weekly when it passed, every 6 h after a failure. Run by the manager in a
+    background thread once the lane is confirmed tradable."""
+    from aitrader import tradfi
+    reg = reg or Registry(s.registry_path)
+    if not tradfi_execution_test_due(reg, now):
+        return None
+    st = reg.kv_get(tradfi.K_STATE) or {}
+    pairs = [p for p in tradfi.TRADFI_PAIRS if (st.get("available") or {}).get(p) and tradfi.is_open_now(p, now)]
+    if not pairs:
+        return None
+    ft = ft or FtClient(s.ft_api_url, s.ft_api_user, s.ft_api_password, timeout=20)
+    try:  # another execution test (the crypto one at start-up) is running: its trade is not ours to close
+        if any((t.get("enter_tag") or "").startswith(EXEC_TAG) for t in ft.status() or []):
+            return None
+    except Exception:  # noqa: BLE001 – bot unreachable: try again at the next refresh
+        return None
+    res = execution_test(ft, stake=TRADFI_EXEC_STAKE, sleep=sleep, timeout_s=timeout_s, pairs=pairs)
+    reg.kv_set("tradfi_exec_test", res)
+    reg.event("selftest", "TradFi execution test " + ("PASSED: entry filled, stop-loss on exchange, exit filled"
+                                                      if res["ok"] else "FAILED: " + json.dumps(res["steps"])[:400]),
+              "info" if res["ok"] else "error")
     return res
 
 

@@ -21,6 +21,10 @@ def _i(name: str, default: int) -> int:
     return int(os.environ.get(name, default))
 
 
+def _on(name: str, default: bool) -> bool:
+    return os.environ.get(name, "1" if default else "0").strip().lower() not in ("0", "false", "no", "off", "")
+
+
 @dataclass
 class Gates:
     """Validation thresholds a candidate must pass (all on walk-forward out-of-sample data)."""
@@ -87,6 +91,14 @@ class Lifecycle:
     # real money (claude/PLAN.md, stage D); env DAILY_LOSS_LIMIT.
     daily_loss_limit: float = 0.0
     kill_cooldown_hours: float = 48.0
+    # TradFi lane (owner, 2026-11-23): gold and the S&P 500 perpetuals with pre-registered strategies
+    # (research/tradfi/*.json) at exploration risk; env TRADFI_ENABLED=0 switches the lane off
+    tradfi_enabled: bool = True
+    # … and its configurations as hypothesis TF1 in the lab's forward book (env TRADFI_FORWARD_BOOK=1).
+    # Off by default: under DECISIONS §3 any failed forward test marks the whole v3 recording `partial`
+    # (red flag), and the lab's Bybit candles for these contracts are unproven – switch on after the
+    # observation period, once the lane has traded on demo.
+    tradfi_forward_book: bool = False
 
 
 @dataclass
@@ -157,6 +169,8 @@ class Settings:
         lc.risk_incubation = _f("RISK_INCUBATION", lc.risk_incubation)
         lc.risk_exploration = _f("RISK_EXPLORATION", lc.risk_exploration)
         lc.daily_loss_limit = _f("DAILY_LOSS_LIMIT", lc.daily_loss_limit)
+        lc.tradfi_enabled = _on("TRADFI_ENABLED", lc.tradfi_enabled)
+        lc.tradfi_forward_book = _on("TRADFI_FORWARD_BOOK", lc.tradfi_forward_book)
 
     # ---- derived paths -------------------------------------------------
     @property

@@ -1,0 +1,51 @@
+{
+  "id": "tf-trend-4h-30d",
+  "registered": "2026-11-23",
+  "lane": "tradfi",
+  "source": "Owner's request 23.11.2026 (ChatGPT recommendation, reviewed by Claude): gold and the S&P 500 on Bybit Demo. Pre-registered: parameters fixed from the literature before any TradFi result was looked at.",
+  "rank": 0,
+  "hypothesis": "TF1",
+  "title": "Trend Following (TSMOM 30d) – gold & S&P 500",
+  "family": "tsmom",
+  "timeframe": "4h",
+  "pairs": [
+    "XAU/USDT:USDT",
+    "SPY/USDT:USDT"
+  ],
+  "sides": [
+    "long",
+    "short"
+  ],
+  "params": {
+    "lookback": 180,
+    "vol_len": 180,
+    "z_entry": 0.5,
+    "z_exit": 0.0,
+    "confirm_len": 20,
+    "exit_mode": 1,
+    "sl_atr": 4.0,
+    "lab_tp": 0.0,
+    "lab_trail": 0.0,
+    "max_hold": 500,
+    "htf_trend": 0,
+    "vol_regime": 0,
+    "session": 0,
+    "no_weekend": 0,
+    "event_guard": 0,
+    "tp_near": 0,
+    "event_lock": 0,
+    "vol_shock": 0,
+    "conv_w": 0.0
+  },
+  "preregistration": {
+    "hypothesis": "TF1a: gold and the S&P 500 trend at the monthly horizon (time-series momentum, Moskowitz/Ooi/Pedersen 2012; Hurst/Ooi/Pedersen 2017 – a century of evidence in commodities and equity indices).",
+    "why_these_parameters": "Exactly the system's pre-registered crypto benchmark (benchmark-tsmom-4h-30d): 30-day return in 30-day volatility units on 4h candles, entry at ±0.5, exit when momentum turns, 4×ATR catastrophic stop, no take profit. Same rule in a new asset class – nothing chosen for gold or the S&P 500.",
+    "decision_rule": "Forward book from the first registration (hypothesis TF1, shadow only). Judged against buy & hold of the same instrument over the same days, not against BTC. No verdict before 180 forward days; with 2 instruments and multi-week holds expect ~10–25 trades a year: years, not weeks, for a statistical answer.",
+    "stop_rule": "Stop if forward drawdown exceeds 3× the backtest's 95th percentile or the instruments are delisted; record it, never tune it."
+  },
+  "provenance": {
+    "seen_data": [],
+    "frozen": "2026-11-23 (file); forward record from the first registration on the server",
+    "clean_evidence": "Only the forward test from the freeze. Bybit's TradFi perpetuals have too little history (gold since spring 2026, SPY since May 2026) for the system's walk-forward (≥ 120-day warm-up + training + ≥ 4 test quarters); a replication on them can reject, never validate."
+  }
+}

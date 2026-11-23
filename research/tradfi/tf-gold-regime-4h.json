@@ -1,0 +1,50 @@
+{
+  "id": "tf-gold-regime-4h",
+  "registered": "2026-11-23",
+  "lane": "tradfi",
+  "source": "Owner's request 23.11.2026 (ChatGPT recommendation, reviewed by Claude): gold and the S&P 500 on Bybit Demo. Pre-registered: parameters fixed from the literature before any TradFi result was looked at.",
+  "rank": 1,
+  "hypothesis": "TF1",
+  "title": "Gold Regime – gold only",
+  "family": "gold_regime",
+  "timeframe": "4h",
+  "pairs": [
+    "XAU/USDT:USDT"
+  ],
+  "sides": [
+    "long",
+    "short"
+  ],
+  "params": {
+    "regime_len": 300,
+    "fast_len": 60,
+    "slope_len": 30,
+    "pullback_len": 20,
+    "vol_cap": 1.5,
+    "exit_mode": 1,
+    "sl_atr": 3.0,
+    "lab_tp": 0.0,
+    "lab_trail": 4.0,
+    "max_hold": 500,
+    "htf_trend": 0,
+    "vol_regime": 0,
+    "session": 0,
+    "no_weekend": 0,
+    "event_guard": 0,
+    "tp_near": 0,
+    "event_lock": 0,
+    "vol_shock": 0,
+    "conv_w": 0.0
+  },
+  "preregistration": {
+    "hypothesis": "TF1b: gold moves in long regimes; buying the end of pullbacks inside a bull regime of the ≈50-day trend (selling rallies in a bear regime) and skipping volatility shocks earns more per unit of risk than holding through them.",
+    "why_these_parameters": "Round conventional horizons on 24/7 4h candles: slow EMA ≈ 50 days (300), medium ≈ 10 days (60), slope over ≈ 5 days (30), pullback EMA ≈ 3.3 days (20); no entries while ATR% > 1.5× its 60-day median. Stop 3×ATR, dynamic chandelier trail 4× current ATR from the best price, no fixed target, exit when the 10-day trend crosses back. Not fitted.",
+    "decision_rule": "As TF1a; also compared with tf-trend-4h-30d on gold over the same days (does the regime/pullback logic add anything over plain TSMOM?).",
+    "stop_rule": "As TF1a."
+  },
+  "provenance": {
+    "seen_data": [],
+    "frozen": "2026-11-23 (file); forward record from the first registration on the server",
+    "clean_evidence": "Only the forward test from the freeze. Bybit's TradFi perpetuals have too little history (gold since spring 2026, SPY since May 2026) for the system's walk-forward (≥ 120-day warm-up + training + ≥ 4 test quarters); a replication on them can reject, never validate."
+  }
+}

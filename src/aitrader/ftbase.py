@@ -27,12 +27,14 @@ from freqtrade.strategy import (
 
 from aitrader import indicators as ta
 from aitrader import oi as oimod
+from aitrader import tradfi
 from aitrader.families import (
     EXIT_PARAMS,
     MARKET_PAIR,
     NEEDS_FUNDING,
     NEEDS_MARKET,
     NEEDS_OI,
+    NEEDS_PEER,
     get_family,
 )
 from aitrader.manifest import ManifestWatcher, Sleeve
@@ -186,6 +188,8 @@ class AIBase(IStrategy):
             tf = self._tf(sl)
             if tf != self.timeframe:
                 out += [(p, tf) for p in sl.pairs if p in wl]
+            if sl.family in NEEDS_PEER:  # TradFi rotation: the other instrument's candles
+                out += [(q, tf) for p in sl.pairs if (q := tradfi.peer_of(p, sl.pairs)) and q in wl]
         if self._needs_funding():
             ftf = self._funding_tf()
             out += [(p, ftf, "funding_rate") for p in wl]
@@ -218,6 +222,8 @@ class AIBase(IStrategy):
                 out.append((t.pair, tf))
             if sl.family in NEEDS_MARKET:
                 out.append((MARKET_PAIR, tf))
+            if sl.family in NEEDS_PEER and (q := tradfi.peer_of(t.pair)) and q in wl:
+                out.append((q, tf))
         return out
 
     def _needs_oi(self) -> bool:
@@ -259,6 +265,24 @@ class AIBase(IStrategy):
             dataframe["mkt_close"] = float("nan")
         return dataframe
 
+    def _merge_peer(self, dataframe: pd.DataFrame, pair: str, sleeve: Sleeve, tf: str) -> pd.DataFrame:
+        """TradFi rotation: the other instrument's close of the same candle (`peer_close`; known
+        at the same moment, no look-ahead). Missing data → NaN → the family stays silent."""
+        dataframe = dataframe.copy()
+        try:
+            peer = tradfi.peer_of(pair, sleeve.pairs)
+            m = self.dp.get_pair_dataframe(peer, tf) if (self.dp and peer) else None
+            if m is None or m.empty:
+                dataframe["peer_close"] = float("nan")
+                return dataframe
+            pk = m[["date", "close"]].rename(columns={"close": "peer_close"})
+            out = dataframe.drop(columns=["peer_close"], errors="ignore").merge(pk, on="date", how="left")
+            dataframe["peer_close"] = out["peer_close"].values
+        except Exception as e:  # noqa: BLE001 – missing peer data must never break trading
+            logger.warning("peer data unavailable for %s: %s", pair, e)
+            dataframe["peer_close"] = float("nan")
+        return dataframe
+
     def _sleeve_signals(self, dataframe: pd.DataFrame, pair: str, sleeve: Sleeve, cols: list[str]) -> pd.DataFrame | None:
         """Signals of one sleeve aligned to the bot's candles. A sleeve researched on a higher
         timeframe is computed on those candles and merged without look-ahead: the higher
@@ -267,7 +291,11 @@ class AIBase(IStrategy):
         fam = get_family(sleeve.family)
         tf = self._tf(sleeve)
         if tf == self.timeframe:
-            return fam.populate(dataframe[cols], sleeve.params)
+            d = dataframe[cols]
+            if sleeve.family in NEEDS_PEER:
+                d = self._merge_peer(d, pair, sleeve, tf)
+            # TradFi pairs: entries only while the underlying market is open (crypto unchanged)
+            return tradfi.gate_entries(fam.populate(d, sleeve.params), pair)
         if not self.dp:
             return None
         inf = self.dp.get_pair_dataframe(pair, tf)
@@ -280,7 +308,9 @@ class AIBase(IStrategy):
             inf = self._merge_market(inf, tf)
         if sleeve.family in NEEDS_OI:
             inf = self._merge_oi(inf, pair, tf)
-        res = fam.populate(inf, sleeve.params)
+        if sleeve.family in NEEDS_PEER:
+            inf = self._merge_peer(inf, pair, sleeve, tf)
+        res = tradfi.gate_entries(fam.populate(inf, sleeve.params), pair)  # TradFi: underlying session only
         keep = res[["date", "atr", "long_sig", "short_sig", "exit_long_sig", "exit_short_sig", "conviction"]].copy()
         m = merge_informative_pair(dataframe[["date"]].copy(), keep, self.timeframe, tf, ffill=True)
         fresh = (m[f"date_{tf}"] != m[f"date_{tf}"].shift(1)).to_numpy()
@@ -743,8 +773,68 @@ class AIBase(IStrategy):
                     logger.info("portfolio limit: %s %s skipped (exploration risk %.2f%% of equity, cap %.1f%% – room "
                                 "kept for proven strategies)", side, pair, 100 * ex_risk / equity, 100 * max_ex_risk)
                     return self._decline(entry_tag, pair, side, "explore_risk")
+        if tradfi.is_tradfi(pair):  # TradFi lane: its own, stricter limits on top of the account caps
+            why = self._tradfi_check(pair, side, entry_tag, amount, trades, equity, current_time)
+            if why:
+                return self._decline(entry_tag, pair, side, why)
         self._journal("cfm", entry_tag, pair, side, "accepted")
         return True
+
+    # ------------------------------------------------------------------ TradFi lane (gold, S&P 500)
+    TRADFI_PAUSE_S = 24 * 3600
+
+    def _tradfi_check(self, pair: str, side: str, entry_tag: str | None, amount: float, trades: list,
+                      equity: float, current_time: datetime | None) -> str | None:
+        """Extra limits for gold and the S&P 500 (`aitrader.tradfi`); each can only refuse:
+          * the underlying market must be open now (no fills on a stale off-hours price);
+          * at most `max_tradfi_trades` TradFi positions and `max_tradfi_risk` of equity at their stops;
+          * circuit breaker: entries pause for 24 h on a pair whose orders or exchange stops Bybit
+            refuses (≥ 2 emergency exits in 24 h, or ≥ 3 attempts in 24 h without a fill) –
+            Freqtrade would otherwise retry the refused order on every candle."""
+        cfg = self.config.get("aitrader", {})
+        now = current_time or datetime.now(UTC)
+        if not tradfi.is_open_now(pair, now):
+            return "tradfi_closed"
+        # a trade on this pair is the entry being placed/replaced (one trade per pair): not counted
+        mine = [t for t in trades if tradfi.is_tradfi(getattr(t, "pair", None)) and t.pair != pair]
+        if len(mine) >= int(cfg.get("max_tradfi_trades", 2)):
+            logger.info("TradFi limit: %s %s skipped (%d TradFi positions open)", side, pair, len(mine))
+            return "tradfi_count"
+        if equity > 0:
+            risk = sum(max(((t.stop_loss - t.open_rate) / t.open_rate if t.is_short else (t.open_rate - t.stop_loss) / t.open_rate), 0.0)
+                       * float(t.stake_amount or 0) * float(t.leverage or 1) for t in mine if t.open_rate and t.stop_loss)
+            new_risk = self._entry_risk(pair, self.sleeve_by_tag(pair, entry_tag), amount, equity)
+            cap = float(cfg.get("max_tradfi_risk", 0.005))
+            if risk + new_risk > cap * equity:
+                logger.info("TradFi limit: %s %s skipped (TradFi risk %.2f%% of equity, cap %.1f%%)", side, pair,
+                            100 * risk / equity, 100 * cap)
+                return "tradfi_risk"
+        ts = now.timestamp()
+        paused = self.__dict__.setdefault("_tradfi_paused", {})
+        if paused.get(pair, 0) > ts:
+            return "tradfi_breaker"
+        attempts = self.__dict__.setdefault("_tradfi_attempts", {}).setdefault(pair, [])
+        closed = []
+        try:
+            for t in Trade.get_trades_proxy(pair=pair, is_open=False) or []:
+                cd = getattr(t, "close_date_utc", None) or getattr(t, "close_date", None)
+                closed.append({"exit_reason": getattr(t, "exit_reason", None),
+                               "close_ts": cd.timestamp() if cd is not None else 0})
+        except Exception:  # noqa: BLE001 – the breaker is an extra guard; a lookup problem is no reason to trade blind
+            closed = []
+        why = tradfi.breaker_state(closed, attempts, ts)
+        if why:
+            paused[pair] = ts + self.TRADFI_PAUSE_S
+            attempts.clear()
+            logger.warning("TradFi circuit breaker: no new %s entries for 24 h – %s", pair, why)
+            return "tradfi_breaker"
+        if not attempts or ts - attempts[-1] >= 1800:  # an order replacement re-confirms: one attempt per 30 min
+            attempts.append(ts)  # cleared when an entry order fills (order_filled)
+        return None
+
+    def order_filled(self, pair: str, trade: Trade, order, current_time: datetime, **kwargs) -> None:
+        if tradfi.is_tradfi(pair):
+            self.__dict__.setdefault("_tradfi_attempts", {}).pop(pair, None)
 
     def _entry_risk(self, pair: str, sleeve: Sleeve | None, amount: float, equity: float) -> float:
         """Money at the initial stop for a new entry, for the account caps: the larger of the

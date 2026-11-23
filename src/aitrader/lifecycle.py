@@ -8,6 +8,7 @@ import logging
 from datetime import timedelta
 
 from aitrader import evidence as EV
+from aitrader import tradfi
 from aitrader.families import FAMILIES
 from aitrader.learner import live_metrics
 from aitrader.manifest import STAGE_PRIORITY, Manifest, Sleeve, write_pairlist
@@ -155,6 +156,86 @@ class Lifecycle:
                               sides=c.get("sides") or ["long", "short"], score=self.CORE_SCORE,
                               timeframe=c.get("timeframe") or "", note="core"))
         return out
+
+    # ------------------------------------------------------------------ the TradFi lane (gold, S&P 500)
+    TRADFI_SCORE = 9.0  # order among the lane's own sleeves on a shared instrument (minus 0.1 per rank)
+
+    def import_tradfi(self, directory) -> int:
+        """Pre-registered TradFi configurations (research/tradfi/*.json, owner's request of
+        2026-11-23): gold and the S&P 500 perpetuals. An independent lane next to the crypto book:
+        never a strategy row (no rotation, no promotion, no crypto slot), always on while the lane
+        is enabled and the instrument is tradable on the account, at exploration risk scaled by the
+        instrument's correlation with BTC. The files are the source of truth: rebuilt at every start."""
+        import json
+        from pathlib import Path
+
+        from aitrader.families import get_family
+        cfg = {}
+        for f in sorted(Path(directory).glob("*.json")) if Path(directory).is_dir() else []:
+            try:
+                d = json.loads(f.read_text())
+                fam = get_family(d["family"])
+            except (OSError, json.JSONDecodeError, KeyError, ValueError):
+                continue
+            pairs = [p for p in d.get("pairs") or [] if tradfi.is_tradfi(p)]  # never a crypto pair (or SPX6900)
+            if not d.get("id") or not pairs:
+                continue
+            cfg[d["id"]] = {"id": d["id"], "family": fam.name, "params": fam.normalize(d.get("params")),
+                            "pairs": pairs, "sides": d.get("sides") or ["long", "short"],
+                            "timeframe": d.get("timeframe") or "4h", "rank": int(d.get("rank", 0)),
+                            "hypothesis": d.get("hypothesis"), "title": d.get("title") or fam.title,
+                            "registered": d.get("registered")}
+        if cfg != (self.reg.kv_get("tradfi_cfg") or {}):
+            self.reg.kv_set("tradfi_cfg", cfg)
+            self.reg.event("lifecycle", f"TradFi lane: {', '.join(sorted(cfg)) or 'none'} – gold and S&P 500 "
+                           "perpetuals, pre-registered, exploration risk", data={"tradfi": sorted(cfg)})
+        return len(cfg)
+
+    def tradfi_pairs(self) -> list[str]:
+        return sorted({p for c in (self.reg.kv_get("tradfi_cfg") or {}).values() for p in c.get("pairs") or []})
+
+    def tradfi_sleeves(self, excluded: set[str], scale: float = 1.0) -> list[Sleeve]:
+        """The lane's sleeves for the manifest (empty when the lane is off). Pairs Bybit does not
+        list on the account are left out (re-probed daily, `tradfi.usable_pairs`); the per-trade
+        risk is exploration risk × volatility targeting × the correlation scale (≤ 1)."""
+        if not self.lc.tradfi_enabled:
+            return []
+        state = self.reg.kv_get(tradfi.K_STATE) or {}
+        corr = state.get("scale") or {}
+        out = []
+        for c in (self.reg.kv_get("tradfi_cfg") or {}).values():
+            pairs = [p for p in tradfi.usable_pairs(state, c.get("pairs") or []) if p not in excluded]
+            if not pairs:
+                continue
+            k = min(float(corr.get(p, 1.0) or 1.0) for p in pairs)
+            out.append(Sleeve(id=c["id"], family=c["family"], params=c["params"], pairs=pairs, stage="exploration",
+                              risk=round(self.risk_for("exploration") * scale * min(k, 1.0), 6),
+                              leverage=self.lc.leverage, sides=c.get("sides") or ["long", "short"],
+                              score=round(self.TRADFI_SCORE - 0.1 * int(c.get("rank", 0)), 2),
+                              timeframe=c.get("timeframe") or "4h", note="tradfi"))
+        return out
+
+    def register_tradfi_hypotheses(self, state: dict) -> int:
+        """The lane's configurations enter the forward book as pre-registered hypotheses (shadow
+        only, like H1: frozen at the first registration, never promoted, reported apart from the
+        research verdict) once every instrument they need is tradable – the lab can then fetch
+        their Bybit candles. Demo results never replace that forward record."""
+        known = self.reg.kv_get("hypotheses") or {}
+        av = (state or {}).get("available") or {}
+        n = 0
+        for c in (self.reg.kv_get("tradfi_cfg") or {}).values():
+            if not c.get("hypothesis") or c["id"] in known or not all(av.get(p) for p in c.get("pairs") or [None]):
+                continue
+            known[c["id"]] = {"id": c["id"], "hypothesis": c["hypothesis"], "family": c["family"], "params": c["params"],
+                              "pairs": c["pairs"], "sides": c.get("sides") or ["long", "short"],
+                              "timeframe": c.get("timeframe") or "4h", "freeze": iso(), "registered": c.get("registered"),
+                              "source": "research/tradfi (TradFi lane)"}
+            self.reg.event("research", f"{c['id']}: TradFi hypothesis {c['hypothesis']} enters the forward book "
+                           "(shadow only)", data={"hypothesis": c["id"]})
+            n += 1
+        if n:
+            self.reg.kv_set("hypotheses", known)
+        return n
 
     def import_hypotheses(self, directory) -> int:
         """Pre-registered hypotheses (research/hypotheses/*.json, e.g. H1 TSMOM legs): shadow
@@ -624,6 +705,8 @@ class Lifecycle:
             for p in r.get("pairs") or []:
                 if p in excluded or per_pair.get(p, 0) >= self.lc.max_sleeves_per_pair:
                     continue
+                if tradfi.is_tradfi(p):  # gold / S&P 500 belong to the TradFi lane only
+                    continue
                 if p not in union and len(union) >= self.lc.max_whitelist:
                     continue
                 mine.append(p)
@@ -643,10 +726,19 @@ class Lifecycle:
                                   leverage=self.lc.leverage, sides=r.get("sides") or ["long", "short"],
                                   score=float(r.get("score") or 0.0), timeframe=self.strategy_tf(r)))
         sleeves += core
+        sleeves += self.tradfi_sleeves(excluded, scale)  # independent lane: its own instruments, outside the crypto slots
         # retired sleeves that still hold positions keep managing them (no new entries)
         live_ids = {s.id for s in sleeves}
+        tf_cfg = self.reg.kv_get("tradfi_cfg") or {}
         for t in open_trades:
             tag = t.get("enter_tag")
+            if tag and tag not in live_ids and tag in tf_cfg:  # TradFi lane off or instrument gone: manage to the end
+                c = tf_cfg[tag]
+                sleeves.append(Sleeve(id=tag, family=c["family"], params=c["params"], pairs=[], stage="closing",
+                                      risk=0.0, leverage=self.lc.leverage, sides=c.get("sides") or ["long", "short"],
+                                      timeframe=c.get("timeframe") or "4h", note="tradfi"))
+                live_ids.add(tag)
+                continue
             if tag and tag not in live_ids:
                 r = self.reg.one("SELECT * FROM strategies WHERE id=?", (tag,))
                 if r:

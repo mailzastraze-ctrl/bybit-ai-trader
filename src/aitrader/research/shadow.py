@@ -8,6 +8,7 @@ import os
 from concurrent.futures import ThreadPoolExecutor
 from datetime import timedelta
 
+from aitrader import tradfi
 from aitrader.families import MARKET_PAIR, NEEDS_OI
 from aitrader.manifest import Manifest, Sleeve
 from aitrader.realism import real_pnl
@@ -101,8 +102,18 @@ def run(s: Settings, entries: list[dict], out, workers: int = 4, ft: FreqtradeRu
         from aitrader.research.screen import warmup_days
         start = min(parse_dt(e["freeze"]) for e in group) - timedelta(days=warmup_days(tf))  # + indicator warm-up
         dl = Job(root / f"_download-{tf}")
+        # TradFi instruments (gold, S&P 500) in their own call: a problem with them must never cost the
+        # benchmark, H1 or the research strategies of the same timeframe their candles
+        tf_pairs = [p for p in pairs if tradfi.is_tradfi(p)]
+        pairs = [p for p in pairs if not tradfi.is_tradfi(p)]
         cfg = ft.write_config(dl, "config.json", research_config(s, pairs, timeframe=tf))
         ft.download(dl, cfg, pairs, f"{start:%Y%m%d}-", timeframe=tf)
+        if tf_pairs:
+            try:
+                tcfg = ft.write_config(dl, "config-tradfi.json", research_config(s, tf_pairs, timeframe=tf))
+                ft.download(dl, tcfg, tf_pairs, f"{start:%Y%m%d}-", timeframe=tf)
+            except Exception as e:  # noqa: BLE001 – their forward tests then fail alone, visibly
+                log.warning("TradFi candles (%s) not downloaded: %s", ", ".join(tf_pairs), str(e)[:200])
         oi_pairs = sorted({p for e in group if e.get("family") in NEEDS_OI for p in e["pairs"]})
         if oi_pairs:
             from aitrader import oi as oimod

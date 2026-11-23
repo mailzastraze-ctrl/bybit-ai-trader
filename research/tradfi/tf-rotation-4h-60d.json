@@ -1,0 +1,49 @@
+{
+  "id": "tf-rotation-4h-60d",
+  "registered": "2026-11-23",
+  "lane": "tradfi",
+  "source": "Owner's request 23.11.2026 (ChatGPT recommendation, reviewed by Claude): gold and the S&P 500 on Bybit Demo. Pre-registered: parameters fixed from the literature before any TradFi result was looked at.",
+  "rank": 2,
+  "hypothesis": "TF1",
+  "title": "Momentum Rotation gold ↔ S&P 500",
+  "family": "tradfi_rotation",
+  "timeframe": "4h",
+  "pairs": [
+    "XAU/USDT:USDT",
+    "SPY/USDT:USDT"
+  ],
+  "sides": [
+    "long"
+  ],
+  "params": {
+    "rot_lookback": 360,
+    "rot_vol_len": 180,
+    "rot_band": 0.25,
+    "abs_min": 0.0,
+    "exit_mode": 1,
+    "sl_atr": 4.0,
+    "lab_tp": 0.0,
+    "lab_trail": 0.0,
+    "max_hold": 500,
+    "htf_trend": 0,
+    "vol_regime": 0,
+    "session": 0,
+    "no_weekend": 0,
+    "event_guard": 0,
+    "tp_near": 0,
+    "event_lock": 0,
+    "vol_shock": 0,
+    "conv_w": 0.0
+  },
+  "preregistration": {
+    "hypothesis": "TF1c: dual momentum (Antonacci 2014) between gold and the S&P 500 – hold the one with the stronger risk-adjusted 60-day momentum if that momentum is positive, else stay flat – beats holding either one.",
+    "why_these_parameters": "Classic dual momentum uses 12 months; the Bybit perpetuals have ~6–8 months of history, so 60 days (360 × 4h) with 30-day volatility, a hysteresis band of 0.25 volatility units against flip-flopping, long only, 4×ATR catastrophic stop. Not fitted.",
+    "decision_rule": "As TF1a, against an equal-weight buy & hold of both instruments.",
+    "stop_rule": "As TF1a."
+  },
+  "provenance": {
+    "seen_data": [],
+    "frozen": "2026-11-23 (file); forward record from the first registration on the server",
+    "clean_evidence": "Only the forward test from the freeze. Bybit's TradFi perpetuals have too little history (gold since spring 2026, SPY since May 2026) for the system's walk-forward (≥ 120-day warm-up + training + ≥ 4 test quarters); a replication on them can reject, never validate."
+  }
+}

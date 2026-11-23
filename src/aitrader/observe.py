@@ -499,7 +499,23 @@ def status_line(reg, now=None) -> str:
     return (f"HEALTH positions={h.get('positions', '?')} no_exchange_stop={len(h.get('no_exchange_stop') or [])} "
             f"risk={h.get('risk_pct', '?')}% import_age={imp} disk=[{disk}] "
             f"forward=[{fw.get('verdict', '?')}, days {fw.get('forward_days', '?')}, benchmark trades {bench}, "
-            f"P(top>bench) {vs}] v3=[{v3s}] flags={flags or 'none'}")
+            f"P(top>bench) {vs}] v3=[{v3s}] tradfi=[{tradfi_part(reg)}] flags={flags or 'none'}")
+
+
+def tradfi_part(reg) -> str:
+    """TradFi lane in the HEALTH line: per instrument tradable on the account (ok / n/a / ?) and
+    whether its underlying market is open now; 'off' when the lane is switched off."""
+    t = reg.kv_get("tradfi") or {}
+    if not t:
+        return "?"
+    if not t.get("enabled"):
+        return "off"
+    out = []
+    for p in t.get("pairs") or []:
+        a = (t.get("available") or {}).get(p)
+        st = "ok" if a else ("n/a" if a is False else "?")
+        out.append(f"{p.split('/')[0]} {st}{' open' if (t.get('open_now') or {}).get(p) else ''}")
+    return ", ".join(out) or "none"
 
 
 def disk_line(reg) -> str:
