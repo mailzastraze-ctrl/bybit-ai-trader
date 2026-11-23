@@ -230,6 +230,55 @@ def test_a_missing_day_may_be_published_later_but_a_valid_day_never_changes(env)
     assert led["missing"] == [] and dict(forward3.valid_days_values(led))[day(2)] == 0.002 and led["revisions"] == 0
 
 
+def test_a_refilled_gap_is_neither_counted_twice_nor_a_repeating_revision(env):
+    """ChatGPT 23.11 (round 2): import with day 2 missing → import with day 2's candles restored → two
+    more imports. The published cumulative value stays exact, day 2 stays missing (its change is in
+    day 3's jump), and the different split of the same total is never a revision."""
+    _, reg = env
+    t = trade(0, 9, 107.0, reason="force_exit", o_hour=1)  # open after the freeze, open at every data end
+    cl = {0: 100.0, 1: 101.0, 2: 103.0, 3: 104.0, 4: 105.0, 5: 106.0, 6: 107.0}
+    r1 = rec([t], cl, now_day=4, gaps=(2,))
+    assert r1["missing"] == [day(2)] and r1["jumps"] == [day(3)]
+    for i, r in enumerate([r1, rec([t], cl, now_day=5), rec([t], cl, now_day=6), rec([t], cl, now_day=7)]):
+        forward3.apply(reg, [result("x", r)], at(4 + i, 4))
+    led = reg.kv_get(forward3.K_LEDGER)["x"]
+    assert sum(x for _, x in forward3.valid_days_values(led)) * BAL == pytest.approx(liquidation(t, 107.0))
+    assert dict(forward3.valid_days_values(led))[day(3)] * BAL == pytest.approx(
+        liquidation(t, 104.0) - liquidation(t, 101.0))  # the published jump, unchanged
+    assert led["missing"] == [day(2)] and led["jumps"] == [day(3)] and led["until"] == day(6)
+    assert led["revisions"] == 0 and led["revised_days"] == [] and led["refilled_days"] == [day(2)]
+
+
+def test_a_real_divergence_behind_a_refilled_gap_is_still_a_revision(env):
+    """The same refill with day 3's close changed in the data: a different total, a revision, and the
+    published value is kept."""
+    _, reg = env
+    t = trade(0, 9, 107.0, reason="force_exit", o_hour=1)
+    cl = {0: 100.0, 1: 101.0, 2: 103.0, 3: 104.0, 4: 105.0}
+    forward3.apply(reg, [result("x", rec([t], cl, now_day=4, gaps=(2,)))], at(4, 4))
+    published = dict(forward3.valid_days_values(reg.kv_get(forward3.K_LEDGER)["x"]))
+    forward3.apply(reg, [result("x", rec([t], cl | {3: 104.5}, now_day=5))], at(5, 4))
+    led = reg.kv_get(forward3.K_LEDGER)["x"]
+    assert led["revisions"] == 1 and led["revised_days"] == [day(3)]
+    assert {d: x for d, x in forward3.valid_days_values(led) if d in published} == published
+
+
+def test_a_run_that_lost_the_anchor_day_appends_nothing(env):
+    """The last published day is missing in a later run: its next value would mix days already
+    published with new ones, so nothing is appended until a run has the anchor again."""
+    _, reg = env
+    t = trade(0, 9, 107.0, reason="force_exit", o_hour=1)
+    cl = {0: 100.0, 1: 101.0, 2: 103.0, 3: 104.0, 4: 105.0, 5: 106.0}
+    forward3.apply(reg, [result("x", rec([t], cl, now_day=3))], at(3, 4))  # days 0–2 published
+    forward3.apply(reg, [result("x", rec([t], cl, now_day=5, gaps=(2,)))], at(5, 4))
+    led = reg.kv_get(forward3.K_LEDGER)["x"]
+    assert led["until"] == day(2) and led["anchor_missing"] == 1 and led["revisions"] == 0
+    forward3.apply(reg, [result("x", rec([t], cl, now_day=6))], at(6, 4))
+    led = reg.kv_get(forward3.K_LEDGER)["x"]
+    assert led["until"] == day(5) and led["missing"] == [] and led["revisions"] == 0
+    assert sum(x for _, x in forward3.valid_days_values(led)) * BAL == pytest.approx(liquidation(t, 106.0))
+
+
 def _ref(reg, n, freeze, scores=None, prefix="r"):
     for i in range(n):
         fin = iso(freeze - timedelta(hours=6 * (i + 1)))
