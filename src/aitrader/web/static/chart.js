@@ -238,9 +238,11 @@
     addEventListener("mouseup", () => { st.drag = null; cv.style.cursor = "crosshair"; });
     cv.addEventListener("wheel", (e) => {
       if (!geo) return; e.preventDefault();
-      const p = pos(e), at = st.i0 + Math.min(p.x, geo.pw) / geo.pw * geo.span, k = Math.exp(e.deltaY * 0.0015);
+      const p = pos(e), k = Math.exp(e.deltaY * 0.0015);
       const span = Math.max(15, Math.min(st.candles.length + 60, geo.span * k));
-      st.i0 = at - (at - st.i0) * span / geo.span; st.i1 = st.i0 + span; draw();
+      if (st.i1 >= st.candles.length - 1) { st.i0 = st.i1 - span; }  // the newest candle on screen: keep the right edge (as TradingView)
+      else { const at = st.i0 + Math.min(p.x, geo.pw) / geo.pw * geo.span; st.i0 = at - (at - st.i0) * span / geo.span; st.i1 = st.i0 + span; }
+      draw();
     }, {passive: false});
     // touch: one finger scrolls, two fingers zoom, a tap shows the nearest trade
     let tch = null;
@@ -254,8 +256,8 @@
       if (ts.length === 1 && tch.ts.length === 1) { const di = (ts[0].x - tch.ts[0].x) / geo.pw * (tch.i1 - tch.i0); st.i0 = tch.i0 - di; st.i1 = tch.i1 - di; }
       else if (ts.length === 2 && tch.ts.length === 2) {
         const d0 = Math.abs(tch.ts[0].x - tch.ts[1].x) || 1, d1 = Math.abs(ts[0].x - ts[1].x) || 1, span = Math.max(15, (tch.i1 - tch.i0) * d0 / d1);
-        const mid = tch.i0 + ((tch.ts[0].x + tch.ts[1].x) / 2) / geo.pw * (tch.i1 - tch.i0);
-        st.i0 = mid - span / 2; st.i1 = mid + span / 2;
+        if (tch.i1 >= st.candles.length - 1) { st.i1 = tch.i1; st.i0 = tch.i1 - span; }
+        else { const mid = tch.i0 + ((tch.ts[0].x + tch.ts[1].x) / 2) / geo.pw * (tch.i1 - tch.i0); st.i0 = mid - span / 2; st.i1 = mid + span / 2; }
       }
       draw();
     }, {passive: false});
