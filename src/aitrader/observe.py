@@ -430,6 +430,15 @@ def red_flags(reg, now=None) -> list[str]:
         out.append("lab import > 24h")
     if lab.get("last_batch_total") and lab.get("last_batch_failed", 0) > 0.2 * lab["last_batch_total"]:
         out.append(f"lab failures {lab['last_batch_failed']}/{lab['last_batch_total']}")
+    fw = reg.kv_get("forward") or {}
+    fa = parse_dt(fw.get("last_accepted") or fw.get("ts"))  # imports can be fresh while the forward test stalls
+    if fa is not None and (now - fa).total_seconds() > 24 * 3600:
+        out.append("forward > 24h")
+    try:
+        from aitrader import forward3
+        out += forward3.status_flags(reg, now)  # the v3 recording can stop while v2 still arrives
+    except Exception:  # noqa: BLE001
+        out.append("v3 status unreadable")
     d = reg.kv_get("disk") or {}
     if d.get("free_pct") is not None and d["free_pct"] < 0.2:
         out.append(f"disk free {d['free_pct']:.0%}")
@@ -458,11 +467,17 @@ def status_line(reg, now=None) -> str:
         (f", {g['mb_per_day']:+.0f} MB/d, full in {g['days_to_full']:.0f} d" if g.get("days_to_full") else "")
     bench = (fw.get("benchmark") or {}).get("trades")
     vs = (fw.get("vs_benchmark") or {}).get("p_top_better")
+    v3 = fw.get("v3") or {}
+    ok = parse_dt((v3.get("status") or {}).get("last_ok"))
+    age = f"{(now - ok).total_seconds() / 3600:.1f}h" if ok else "never"
+    v3s = ("error" if v3.get("error") else
+           f"records {v3.get('records', 0)}, q1 {v3.get('q1_members', 0)}, cov {v3.get('coverage_q1')}, "
+           f"rev {v3.get('revisions', 0)}, ok {age}") if v3 else "none"
     flags = red_flags(reg, now)
     return (f"HEALTH positions={h.get('positions', '?')} no_exchange_stop={len(h.get('no_exchange_stop') or [])} "
             f"risk={h.get('risk_pct', '?')}% import_age={imp} disk=[{disk}] "
             f"forward=[{fw.get('verdict', '?')}, days {fw.get('forward_days', '?')}, benchmark trades {bench}, "
-            f"P(top>bench) {vs}] flags={flags or 'none'}")
+            f"P(top>bench) {vs}] v3=[{v3s}] flags={flags or 'none'}")
 
 
 def disk_line(reg) -> str:
