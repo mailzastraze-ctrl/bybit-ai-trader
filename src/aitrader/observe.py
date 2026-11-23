@@ -468,7 +468,7 @@ def status_line(reg, now=None) -> str:
     bench = (fw.get("benchmark") or {}).get("trades")
     vs = (fw.get("vs_benchmark") or {}).get("p_top_better")
     v3 = fw.get("v3") or {}
-    ok = parse_dt(((v3.get("status") or {}).get("last_ok")))
+    ok = parse_dt((v3.get("status") or {}).get("last_ok"))
     age = f"{(now - ok).total_seconds() / 3600:.1f}h" if ok else "never"
     v3s = ("error" if v3.get("error") else
            f"records {v3.get('records', 0)}, q1 {v3.get('q1_members', 0)}, cov {v3.get('coverage_q1')}, "

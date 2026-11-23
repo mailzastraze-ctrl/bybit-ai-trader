@@ -17,7 +17,7 @@ part of the v3 record (the v2 `trades` record is unchanged).
 from __future__ import annotations
 
 import logging
-from datetime import UTC, date, datetime, timedelta
+from datetime import date, datetime, timedelta
 from functools import lru_cache
 
 import pandas as pd
