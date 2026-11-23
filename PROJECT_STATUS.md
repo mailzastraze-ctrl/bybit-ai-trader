@@ -1,6 +1,6 @@
 # PROJECT_STATUS
 
-_Last updated: 2026-11-23 evening (demo = coin desks, monthly core off, no-entry alarm; before: TradFi lane, gold on demo). History: `CHANGELOG.md`. Forward-test rules: `docs/DECISIONS.md`. Rules for Claude sessions: `CLAUDE.md`._
+_Last updated: 2026-11-23 night (strictly by strategy: no repeated signal after a restart, shock guard and execution tests off; before: demo = coin desks, monthly core off, no-entry alarm; before: TradFi lane, gold on demo). History: `CHANGELOG.md`. Forward-test rules: `docs/DECISIONS.md`. Rules for Claude sessions: `CLAUDE.md`._
 
 ## What runs
 - **Railway** (one container, volume `/data`, EU West, Hobby plan): Freqtrade on **Bybit Demo only** (`demo_trading` is hard-required, 1x), the manager (lifecycle, learning, manifest) and the web control room. No research on the server.
@@ -19,6 +19,7 @@ _Last updated: 2026-11-23 evening (demo = coin desks, monthly core off, no-entry
   - **XAUUSDT:** only `xau-macd-12h` (MACD 11/56/10 + zero line, 12h; the Strategy Lab autopilot's best by stability + return on ~3.3 years of PAXG, decoy-controlled; not clean evidence).
   - **SPYUSDT** (S&P 500; `SPXUSDT` is a memecoin): Trend Following (the TSMOM benchmark rule) and Momentum Rotation vs gold.
   - Whether the demo account lists them: `HEALTH … tradfi=[XAU ok open, SPY …]`; the TradFi execution test runs once they are confirmed. Off: `TRADFI_ENABLED=0`.
+- **Strictly by strategy** (owner, 23.11 night): every entry is a strategy's signal and every exit its own stop, target, trail, time or exit signal; no market-shock guard, no execution-test trades (`EXEC_TEST=1` to run them), a restart never repeats a signal. Skipped, by design: a signal on a coin another strategy holds or takes on the same candle (one trade per coin), entries refused by the limits below.
 - **Limits:**
   - no daily loss limit on demo (owner); up to 30 exploration positions / 3.5 % (all desks at once);
   - account limits stay: 8 % open risk, 4 % per side (a new entry counts at its sized risk), 1x, exchange stops, 25 % kill-switch.

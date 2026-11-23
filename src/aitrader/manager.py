@@ -201,7 +201,7 @@ def main() -> None:
                     if s.lifecycle.tradfi_enabled:
                         if s.lifecycle.tradfi_forward_book:  # hypothesis TF1 in the lab's forward book (opt-in)
                             life.register_tradfi_hypotheses(st)
-                        if up and os.environ.get("EXEC_TEST", "1") == "1" and selftest.tradfi_execution_test_due(reg) \
+                        if up and os.environ.get("EXEC_TEST", "0") == "1" and selftest.tradfi_execution_test_due(reg) \
                                 and not any(t.name == "tradfi-exec-test" and t.is_alive() for t in threading.enumerate()):
                             # orders and the exchange stop on gold / S&P 500 (minutes; never blocks the loop)
                             threading.Thread(target=selftest.run_tradfi_execution_test, args=(s,), daemon=True,

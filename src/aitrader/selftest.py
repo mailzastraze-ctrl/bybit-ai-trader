@@ -237,7 +237,7 @@ def main() -> int:
     reg.event("selftest", "self-test " + ("PASSED" if res["ok"] else "FAILED: " + ", ".join(
         k for k, v in res["checks"].items() if not v["ok"])), "info" if res["ok"] else "error")
     print(json.dumps(res, indent=2))
-    if res["ok"] and os.environ.get("EXEC_TEST", "1") == "1":
+    if res["ok"] and os.environ.get("EXEC_TEST", "0") == "1":
         run_execution_test_if_due(s)
     return 0 if res["ok"] else 1
 
