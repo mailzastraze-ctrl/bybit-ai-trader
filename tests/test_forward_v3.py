@@ -230,6 +230,55 @@ def test_a_missing_day_may_be_published_later_but_a_valid_day_never_changes(env)
     assert led["missing"] == [] and dict(forward3.valid_days_values(led))[day(2)] == 0.002 and led["revisions"] == 0
 
 
+def test_a_refilled_gap_is_neither_counted_twice_nor_a_repeating_revision(env):
+    """ChatGPT 23.11 (round 2): import with day 2 missing → import with day 2's candles restored → two
+    more imports. The published cumulative value stays exact, day 2 stays missing (its change is in
+    day 3's jump), and the different split of the same total is never a revision."""
+    _, reg = env
+    t = trade(0, 9, 107.0, reason="force_exit", o_hour=1)  # open after the freeze, open at every data end
+    cl = {0: 100.0, 1: 101.0, 2: 103.0, 3: 104.0, 4: 105.0, 5: 106.0, 6: 107.0}
+    r1 = rec([t], cl, now_day=4, gaps=(2,))
+    assert r1["missing"] == [day(2)] and r1["jumps"] == [day(3)]
+    for i, r in enumerate([r1, rec([t], cl, now_day=5), rec([t], cl, now_day=6), rec([t], cl, now_day=7)]):
+        forward3.apply(reg, [result("x", r)], at(4 + i, 4))
+    led = reg.kv_get(forward3.K_LEDGER)["x"]
+    assert sum(x for _, x in forward3.valid_days_values(led)) * BAL == pytest.approx(liquidation(t, 107.0))
+    assert dict(forward3.valid_days_values(led))[day(3)] * BAL == pytest.approx(
+        liquidation(t, 104.0) - liquidation(t, 101.0))  # the published jump, unchanged
+    assert led["missing"] == [day(2)] and led["jumps"] == [day(3)] and led["until"] == day(6)
+    assert led["revisions"] == 0 and led["revised_days"] == [] and led["refilled_days"] == [day(2)]
+
+
+def test_a_real_divergence_behind_a_refilled_gap_is_still_a_revision(env):
+    """The same refill with day 3's close changed in the data: a different total, a revision, and the
+    published value is kept."""
+    _, reg = env
+    t = trade(0, 9, 107.0, reason="force_exit", o_hour=1)
+    cl = {0: 100.0, 1: 101.0, 2: 103.0, 3: 104.0, 4: 105.0}
+    forward3.apply(reg, [result("x", rec([t], cl, now_day=4, gaps=(2,)))], at(4, 4))
+    published = dict(forward3.valid_days_values(reg.kv_get(forward3.K_LEDGER)["x"]))
+    forward3.apply(reg, [result("x", rec([t], cl | {3: 104.5}, now_day=5))], at(5, 4))
+    led = reg.kv_get(forward3.K_LEDGER)["x"]
+    assert led["revisions"] == 1 and led["revised_days"] == [day(3)]
+    assert {d: x for d, x in forward3.valid_days_values(led) if d in published} == published
+
+
+def test_a_run_that_lost_the_anchor_day_appends_nothing(env):
+    """The last published day is missing in a later run: its next value would mix days already
+    published with new ones, so nothing is appended until a run has the anchor again."""
+    _, reg = env
+    t = trade(0, 9, 107.0, reason="force_exit", o_hour=1)
+    cl = {0: 100.0, 1: 101.0, 2: 103.0, 3: 104.0, 4: 105.0, 5: 106.0}
+    forward3.apply(reg, [result("x", rec([t], cl, now_day=3))], at(3, 4))  # days 0–2 published
+    forward3.apply(reg, [result("x", rec([t], cl, now_day=5, gaps=(2,)))], at(5, 4))
+    led = reg.kv_get(forward3.K_LEDGER)["x"]
+    assert led["until"] == day(2) and led["anchor_missing"] == 1 and led["revisions"] == 0
+    forward3.apply(reg, [result("x", rec([t], cl, now_day=6))], at(6, 4))
+    led = reg.kv_get(forward3.K_LEDGER)["x"]
+    assert led["until"] == day(5) and led["missing"] == [] and led["revisions"] == 0
+    assert sum(x for _, x in forward3.valid_days_values(led)) * BAL == pytest.approx(liquidation(t, 106.0))
+
+
 def _ref(reg, n, freeze, scores=None, prefix="r"):
     for i in range(n):
         fin = iso(freeze - timedelta(hours=6 * (i + 1)))
@@ -303,6 +352,71 @@ def test_a_failed_retest_stays_in_the_coverage_denominator(env, monkeypatch):
     forward3.apply(reg, [result("a", v, freeze=fz, score=40.0)], at(3))  # later re-tests failed: days 3–5 absent
     d = forward3.diagnostics(reg, at(6, 2))
     assert d["q1_members"] == 1 and d["coverage_q1"] == pytest.approx(3 / 6)
+
+
+def test_a_return_to_the_book_never_changes_a_past_day_of_q1(env, monkeypatch):
+    """ChatGPT 23.11 (round 2): `b` leaves the book on day 3 and returns on day 10. The lab then
+    publishes b's days 2–9 too, but the composition, weights and line-A day values of those days stay
+    as they were: they were fixed by the daily book snapshots before the return."""
+    _, reg = env
+    monkeypatch.setattr(forward3, "V3_START", "2000-01-01")
+    fz = at(0, 0) - timedelta(hours=10)
+    _ref(reg, 45, fz)
+    a, b = {"id": "a", "freeze": iso(fz)}, {"id": "b", "freeze": iso(fz)}
+
+    def v(rid, x, until):  # one run's record: a constant daily change from day 0
+        return result(rid, {"from": day(0), "until": day(until), "values": [[day(i), x] for i in range(until + 1)],
+                            "missing": [], "jumps": [], "diag": {}}, freeze=fz, score=40.0)
+
+    def line_a(d):  # what the v3 verdict will compute for day d (DECISIONS §5): mean over M(d)
+        led, m = reg.kv_get(forward3.K_LEDGER), forward3.composition(reg, d)["members"]
+        return m, (sum(dict(forward3.valid_days_values(led[k]))[d] for k in m) / len(m) if m else None)
+
+    for i in range(10):  # one lab run per day at 01:00; it values the days up to the day before
+        forward3.note_scheduled(reg, [a, b] if i < 3 else [a], at(i, 1))
+        if i:
+            forward3.apply(reg, [v("a", 0.001, i - 1)] + ([v("b", 0.01, i - 1)] if i < 3 else []), at(i, 2))
+    before = {day(d): line_a(day(d)) for d in range(9)}
+    cov_before = forward3.diagnostics(reg, at(9, 3))["coverage_q1"]
+    for i in range(10, 13):  # b is back: the run of day 10 publishes b's days 2–9 as well
+        forward3.note_scheduled(reg, [a, b], at(i, 1))
+        forward3.apply(reg, [v("a", 0.001, i - 1), v("b", 0.01, i - 1)], at(i, 2))
+    assert forward3.valid_days(reg.kv_get(forward3.K_LEDGER)["b"])[:10] == [day(d) for d in range(10)]
+    assert {day(d): line_a(day(d)) for d in range(9)} == before  # nothing in the past moved
+    assert before[day(1)] == (["a", "b"], pytest.approx(0.0055)) and before[day(5)] == (["a"], 0.001)
+    assert before[day(2)] == (["a"], 0.001)  # b was dropped before day 3's run: not scheduled for day 2
+    assert forward3.scheduled_days(reg.kv_get(forward3.K_SCHED)["b"], reg.kv_get(forward3.K_BOOKDAYS)) == \
+        [day(0), day(1), day(10), day(11)]
+    d = forward3.diagnostics(reg, at(12, 3))
+    assert cov_before == 1.0 and d["coverage_q1"] == 1.0 and d["q1_off_schedule_days"] == 8  # b's days 2–9
+
+
+def test_a_day_without_any_lab_run_keeps_the_previous_book(env, monkeypatch):
+    """An outage is not a departure: the days stay scheduled and count against coverage until valued."""
+    _, reg = env
+    fz = at(0, 0) - timedelta(hours=10)
+    e = {"id": "a", "freeze": iso(fz)}
+    forward3.note_scheduled(reg, [e], at(0, 1))
+    forward3.note_scheduled(reg, [e], at(4, 1))  # no lab run on days 1–3
+    assert forward3.scheduled_days(reg.kv_get(forward3.K_SCHED)["a"], reg.kv_get(forward3.K_BOOKDAYS)) == \
+        [day(i) for i in range(4)]
+
+
+def test_moving_v3_start_moves_every_stored_eligibility_flag(env, monkeypatch):
+    """ChatGPT 23.11 (round 2): a later V3_START must not leave early strategies in the primary sample,
+    also those no longer re-tested."""
+    _, reg = env
+    monkeypatch.setattr(forward3, "V3_START", "2000-01-01")
+    fz = at(0, 0) - timedelta(hours=10)
+    _ref(reg, 45, fz)
+    v = {"from": day(0), "until": day(1), "values": [], "missing": [], "jumps": [], "diag": {}}
+    forward3.apply(reg, [result("early", v, freeze=fz, score=40.0)], at(2))
+    assert reg.kv_get(forward3.K_LEDGER)["early"]["eligible"] is True
+    monkeypatch.setattr(forward3, "V3_START", day(5))
+    assert forward3.diagnostics(reg, at(3))["research_eligible"] == 0  # computed, never the stored flag
+    forward3.apply(reg, [result("other", v, freeze=at(6), score=1.0)], at(7))  # "early" is not re-tested
+    led = reg.kv_get(forward3.K_LEDGER)
+    assert led["early"]["eligible"] is False and led["other"]["eligible"] is True
 
 
 def test_the_book_keeps_promising_strategies_by_the_set_from_two_days_ago(env):
@@ -392,3 +506,23 @@ def test_a_stalled_forward_is_a_red_flag_while_imports_look_fresh(tmp_path):
     reg.kv_set("forward", {"last_accepted": iso(utcnow() - timedelta(hours=2)), "ts": iso()})
     assert "forward > 24h" not in observe.red_flags(reg)
     assert "v3=[" in observe.status_line(reg)
+
+
+def test_a_partial_import_is_flagged_and_never_counts_as_fully_ok(env):
+    """ChatGPT 23.11 (round 2): failed v3 records and failed forward tests are counted; the last fully
+    successful import and the last partial one are kept apart."""
+    _, reg = env
+    v = {"from": day(0), "until": day(1), "values": [], "missing": [], "jumps": [], "diag": {}}
+    t0 = utcnow() - timedelta(hours=30)
+    forward3.record_status(reg, [result("a", v)], None, t0)
+    st = forward3.record_status(reg, [result("a", v), result("b", {"error": "boom"}),
+                                      {"id": "c", "ok": False, "error": "ft crashed", "exchange": "bybit"}], None)
+    assert st["state"] == "partial" and st["last_failures"] == "2/3" and st["last_ok"] == iso(t0)
+    assert st["last_lab_errors"] == 1 and st["last_failed"] == 1 and st["last_partial"]
+    assert forward3.status_flags(reg) == ["v3 partial 2/3", "v3 > 24h"]  # no fully ok import for 30 h
+    forward3.record_status(reg, [result("a", v)], None)
+    assert forward3.status_flags(reg) == []
+    forward.apply(reg, {"results": [result("a", v, tested_until=iso(utcnow())),
+                                    {"id": "c", "ok": False, "error": "ft crashed", "exchange": "bybit", "format": 3}]})
+    assert reg.kv_get(forward3.K_STATUS)["state"] == "partial" and "v3 partial 1/2" in observe.red_flags(reg)
+    assert "failed 1/2" in observe.status_line(reg)

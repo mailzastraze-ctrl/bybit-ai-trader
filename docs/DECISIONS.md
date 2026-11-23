@@ -8,6 +8,12 @@ authoritative record of the rules; the code implements them and cites the sectio
 No v3 return is computed or displayed anywhere until the v3 verdict code is merged ("record now,
 judge later", §12). A rule here changes only for a documented measurement or data error (§11).
 
+**Amended 23.11.2026, before the first stored v3 record** (round 2 of ChatGPT's review, owner's OK):
+§3 ledger checks and late publication, §3 recording status `partial`, §4 eligibility computed from
+the current V3_START, §5/§6 composition and coverage by daily book snapshots, §7 Holm across the
+lines, §8 the limit of the calibration. Each is a measurement error found in review or a stricter
+rule; none was seen against data.
+
 ## 1. v2 (kept for audit; computed and shown as before)
 - Book: every finished walk-forward experiment is frozen; each lab run backtests it from its freeze
   on Bybit candles (60-day book life); records kept 120 days after the freeze.
@@ -60,16 +66,27 @@ For a strategy `s` and a complete UTC day `d`, with the research wallet `W = 10 
   days missing.
 - The per-trade days sum exactly to `real_pnl`, and every day depends only on what was known at
   its end: re-testing later never changes a published day.
-- The server ledger is append-only. A run that computes a different value for a published day is a
-  **revision**: counted, the published value kept. A missing day may be published later. A
-  correction of a data error is a recorded decision in this file, never automatic.
+- The server ledger is append-only: a published day never changes. A later run is checked against it
+  at **common checkpoints** (days valid in both): the change since the previous common checkpoint
+  must agree. A different total is a **revision** (counted at every run that sees it, the published
+  value kept). The same total split differently is not: a gap refilled later gives D and D+1 where
+  the ledger has one jump on D+1.
+- A missing day may be published later only while no later day has been published. Once a later day
+  is published, its jump already carries the missing day's change: the day stays missing and is
+  recorded as `refilled` (publishing it would count its change twice). New days are appended after
+  the last published valid day, which must be valid in the run too; otherwise the run appends
+  nothing for that strategy (`anchor_missing`) and a later run continues. A correction of a data
+  error is a recorded decision in this file, never automatic.
 - Provenance per record: result `format` 3, `exchange` (Bybit only; other sources are ignored and
   stop the clock), `code_sha`, Freqtrade version. The source rule follows the format, not a date: a
   format-3 result without `exchange` is of unknown source and ignored; older results (the lab code
   before 23.11 carries neither) are accepted by an explicit migration rule (every lab import since
   20.11 was on Bybit; run 45048047056 checked by ChatGPT) and counted as `legacy_source`.
-- The recording has its own status: the time of the last stored v3 record, the last error (lab or
-  server), red flags `v3 error` and `v3 > 24h`. A fresh v2 import proves nothing about v3.
+- The recording has its own status: `ok` (every result that should carry a v3 record did and it was
+  stored), `partial` (some failed: a v3 record not built, or the whole forward test failed) or
+  `error`. The last fully successful import (`last_ok`) and the last partial one are kept apart.
+  Red flags: `v3 error`, `v3 partial F/N` (the last import), `v3 > 24h` (no fully successful import
+  for a day). A fresh v2 import proves nothing about v3.
 
 ## 4. Q1 membership (line A)
 - Decided once, when the strategy first appears in the ledger, from data that existed before its
@@ -81,6 +98,8 @@ For a strategy `s` and a complete UTC day `d`, with the research wallet `W = 10 
   "strategies above the historical upper-quartile threshold": its share may differ from 25 %; the
   threshold's drift and the admission share are diagnostics, never corrected retroactively.
 - The primary sample is research strategies frozen on or after **V3_START = 25.11.2026** (UTC).
+  Eligibility is always computed from the freeze and the current V3_START (stored flags follow it),
+  so moving the date can never leave an earlier strategy in the primary sample.
 
 ## 5. The shadow portfolio (lines A and B)
 This is a synthetic shadow portfolio, not a proven executable result on Bybit.
@@ -91,6 +110,16 @@ This is a synthetic shadow portfolio, not a proven executable result on Bybit.
   membership is fixed at the freeze; which strategies are observed (book retention) uses the
   promising set recorded two days earlier (`forward3.lagged_promising`); a strategy joining or
   leaving never rewrites past weights.
+- **Daily book snapshots.** The server records, per strategy, the UTC days on which it was in a book
+  served to the lab, and the days on which any book was served. A Q1 member is **scheduled** for day
+  `d` when it was in the book on `d` and still on `d + 1` (the day whose runs first value `d`). Both
+  books keep promising strategies by sets recorded on `d − 2` and `d − 1`, i.e. from results up to
+  `d − 2`. A day without any lab run keeps the previous day's book. `M(d)` uses only scheduled members
+  (`forward3.composition`). The schedule of `d` is final once the book of `d + 1` was served.
+- A strategy that leaves the book and returns later is not scheduled for the days in between. The lab
+  recomputes every entry from its freeze, so it will publish those days; such values are a
+  diagnostic (`q1_off_schedule_days`) and never enter `R_Q1`. A return never changes a past day's
+  composition, weights or value.
 - Cumulative return = Σ `R_Q1(d)` (simple sum). The cumulative value, the t-statistics and the
   comparison with the benchmark all use this one daily series.
 - Line B: `D(d) = R_Q1(d) − r_bench(d)` on the common valid days.
@@ -102,8 +131,9 @@ This is a synthetic shadow portfolio, not a proven executable result on Bybit.
   of statistical validity; the tests also assume a zero conditional mean under the null.
 
 ## 6. Coverage
-- Denominator: the complete days each Q1 member was scheduled (in the book served to the lab, from
-  its first full day to the day before its last scheduled run), failed runs included.
+- Denominator: the complete days each Q1 member was scheduled (§5, daily book snapshots, from its
+  first full day), failed runs and lab outages included. Days outside the schedule never count
+  either way.
 - Q1 coverage ≥ 95 % is required for any verdict. The benchmark must have a valid value on every
   day used in the paired test.
 - "Days" in every rule are valid common UTC days, not freeze → test time.
@@ -123,6 +153,10 @@ This is a synthetic shadow portfolio, not a proven executable result on Bybit.
     research spending; it is not a proof that no edge exists.
 - Line B is tested the same way on `D(d)` and reported with every verdict; the decision about the
   research's resources uses line B.
+- **Three claims, kept apart.** Only B says the research adds value. A without B means "the Q1
+  portfolio earned", not "the search adds return over TSMOM"; H1 is a claim about TSMOM only. At each
+  look the three confirmatory claims {A, B, H1} are adjusted together by **Holm** at that look's α
+  (α₁ = 0.01, α₂ = 0.04), with p-values from the calibration of §8.
 - Verdicts are for the owner. No verdict switches anything automatically; the risk limits and the
   kill-switch act independently of these dates.
 
@@ -133,7 +167,9 @@ This is a synthetic shadow portfolio, not a proven executable result on Bybit.
   split; report the false-positive rate with its upper 95 % confidence bound.
 - Lab OOS daily series and the benchmark's 3-year backtest may inform the dependence model (block
   lengths) only; they do not prove the null distribution of the future adaptive Q1.
-- The result is an empirical calibration under stated assumptions, not a guarantee.
+- The result is an empirical calibration under stated assumptions, not a guarantee. The fixed Q1 and
+  the two-day lag reduce bias; they do not make the adaptive research process statistically
+  independent.
 
 ## 9. Line H1
 - Legs `h1-tsmom-4h-12d`, `h1-tsmom-4h-84d` and the benchmark (its 30-day leg), equal weight over
@@ -167,4 +203,7 @@ the next look; never after seeing results and never in their direction.
 - From the deploy of 23.11.2026: lab daily values (`research/marks.py`), the append-only ledger, Q1
   decisions, the schedule, the two-day-lagged retention and the Bybit-only source guard
   (`forward3.py`); v3 data-quality diagnostics in `/api/forward` → `v3` and the `HEALTH` line.
+- 23.11.2026, before the first stored v3 record: checkpoint comparison and `refilled` /
+  `anchor_missing` (§3), status `partial` (§3), eligibility computed (§4), daily book snapshots and
+  `forward3.composition` (§5, §6).
 - Later, separate PRs before look 1: the v3 verdict computation from the ledger, the calibration.
