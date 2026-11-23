@@ -31,19 +31,24 @@ Q1_REF_DAYS, Q1_QUANTILE, Q1_MIN_REF = 30, 0.75, 40
 LEDGER_KEEP_DAYS = 240             # after the freeze: beyond the 180-day look
 PROMISING_LAG_DAYS = 2
 EVIDENCE_EXCHANGE = "bybit"        # forward evidence is Bybit prices only (live trading is Bybit)
-# Lab runs started before the deploy carry no `exchange`; every lab import since 20.11 (before the
-# book existed) was on Bybit data. A record without it is accepted only if tested before this time.
-EXCHANGE_STAMPED_SINCE = "2026-11-23T18:00:00Z"
-K_LEDGER, K_Q1, K_SCHED, K_PROM = "fw3_ledger", "fw3_q1", "fw3_scheduled", "fw3_promising"
+RESULT_FORMAT = 3                  # lab results of this format always carry `exchange`
+STALE_H = 24
+K_LEDGER, K_Q1, K_SCHED, K_PROM, K_STATUS = "fw3_ledger", "fw3_q1", "fw3_scheduled", "fw3_promising", "fw3_status"
 
 
 # ---------------------------------------------------------------------------- source of the data
 def accept_source(r: dict, now: datetime | None = None) -> bool:
+    """Bybit data only. Results of format ≥ 3 always state their exchange, so one without it is of
+    unknown source and ignored. Older results (lab code before 23.11) carry neither: they are accepted
+    by the explicit migration rule (every lab import since 20.11 was on Bybit) and counted as legacy."""
     ex = r.get("exchange")
-    if ex:
+    if int(r.get("format") or 0) >= RESULT_FORMAT:
         return ex == EVIDENCE_EXCHANGE
-    until = parse_dt(r.get("tested_until")) or now or utcnow()
-    return until < parse_dt(EXCHANGE_STAMPED_SINCE)  # migration rule for runs of the old lab code
+    return ex is None or ex == EVIDENCE_EXCHANGE
+
+
+def is_legacy(r: dict) -> bool:
+    return int(r.get("format") or 0) < RESULT_FORMAT
 
 
 # ---------------------------------------------------------------------------- Q1 at the freeze
@@ -171,6 +176,41 @@ def apply(reg: Registry, results: list[dict], now: datetime | None = None) -> di
     reg.kv_set(K_LEDGER, ledger)
     reg.kv_set(K_Q1, q1)
     return diagnostics(reg, now) | {"revisions_this_run": revisions}
+
+
+# ---------------------------------------------------------------------------- recording status
+def record_status(reg: Registry, results: list[dict], error: Exception | None, now: datetime | None = None) -> dict:
+    """When v3 last recorded something, and the last error. A fresh v2 forward import proves nothing
+    about v3: `last_ok` moves only when at least one result carried a v3 record and it was stored."""
+    now = now or utcnow()
+    st = reg.kv_get(K_STATUS) or {"since": iso(now)}
+    with_v3 = [r for r in results if isinstance(r.get("v3"), dict) and r["v3"].get("from")]
+    lab_err = [r["v3"]["error"] for r in results if isinstance(r.get("v3"), dict) and r["v3"].get("error")]
+    st["last_attempt"] = iso(now)
+    st["last_results"], st["last_with_v3"], st["last_lab_errors"] = len(results), len(with_v3), len(lab_err)
+    if error is not None:
+        st["last_error"], st["error_at"], st["state"] = str(error)[:200], iso(now), "error"
+    elif lab_err and not with_v3:
+        st["last_error"], st["error_at"], st["state"] = f"lab: {lab_err[0]}", iso(now), "error"
+    elif with_v3:
+        st["last_ok"], st["state"] = iso(now), "ok"
+    reg.kv_set(K_STATUS, st)
+    return st
+
+
+def status_flags(reg: Registry, now: datetime | None = None) -> list[str]:
+    now = now or utcnow()
+    st = reg.kv_get(K_STATUS)
+    if not st:
+        return []
+    out = []
+    ok = parse_dt(st.get("last_ok"))
+    if st.get("state") == "error":  # the last attempt that concerned v3 failed
+        out.append("v3 error")
+    ref = ok or parse_dt(st.get("since"))
+    if ref is not None and (now - ref).total_seconds() > STALE_H * 3600:
+        out.append("v3 > 24h")
+    return out
 
 
 # ---------------------------------------------------------------------------- schedule and coverage

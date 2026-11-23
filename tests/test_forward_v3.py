@@ -108,13 +108,49 @@ def test_a_published_day_never_changes_when_an_open_trade_closes_later(env):
 
 def test_only_complete_days_from_the_first_full_day_after_the_freeze():
     fz = at(0, 14)  # frozen at 14:00 on day 0: day 0 is not a full day
-    t_freeze_day = trade(0, 2, 103.0, o_hour=16)  # opened after the freeze but on its day: not in v3
     t_next = trade(1, 2, 103.0, o_hour=8)
-    r = marks.v3_record([t_freeze_day, t_next], fz, ["BTC/USDT:USDT"],
+    t_before = trade(0, 2, 103.0, o_hour=9)  # opened before the freeze: never part of the forward test
+    r = marks.v3_record([t_next, t_before], fz, ["BTC/USDT:USDT"],
                         {"BTC/USDT:USDT": candles({0: 101, 1: 102, 2: 103, 3: 103})}, "4h", at(3, 9))
     assert r["from"] == day(1) and r["until"] == day(2)  # day 3 (today) is not complete
     assert r["diag"]["trades"] == 1
     assert sum(x for _, x in r["values"]) == pytest.approx(real_pnl(t_next) / BAL)
+
+
+def test_a_trade_opened_on_the_freeze_day_enters_at_its_liquidation_value():
+    """ChatGPT 23.11 (2): a position opened after the freeze on its partial day and held across the
+    boundary is counted on every full day, starting from its value at the freeze day's close."""
+    fz = at(0, 14)
+    t = trade(0, 4, 106.0, o_hour=16)
+    cl = {0: 101.0, 1: 103.0, 2: 102.0, 3: 105.0, 4: 106.0}
+    r = marks.v3_record([t], fz, ["BTC/USDT:USDT"], {"BTC/USDT:USDT": candles(cl)}, "4h", at(5, 3))
+    vals = dict(r["values"])
+    assert vals[day(1)] == pytest.approx((liquidation(t, 103.0) - liquidation(t, 101.0)) / BAL)
+    assert sum(vals.values()) == pytest.approx((real_pnl(t) - liquidation(t, 101.0)) / BAL)  # nothing from before
+    assert r["diag"]["boundary"] == 1 and r["missing"] == []
+    no_base = marks.v3_record([t], fz, ["BTC/USDT:USDT"], {"BTC/USDT:USDT": candles(cl, gaps=(0,))}, "4h", at(5, 3))
+    assert no_base["diag"]["unmarked"] == 1 and no_base["values"] == []  # no start value: days missing, not zeros
+    assert no_base["missing"] == [day(i) for i in range(1, 5)]
+
+
+def test_a_close_on_a_missing_day_is_realised_on_the_next_valid_day():
+    """ChatGPT 23.11 (1): the result of a trade closed on a day without candles must not vanish."""
+    t = trade(0, 2, 105.0)
+    r = rec([t], {0: 101.0, 1: 102.0, 2: 104.0, 3: 104.5, 4: 104.0}, now_day=5, gaps=(2,))
+    vals = dict(r["values"])
+    assert r["missing"] == [day(2)] and r["jumps"] == [day(3)] and r["diag"]["close_carried"] == 1
+    assert vals[day(3)] == pytest.approx((real_pnl(t) - liquidation(t, 102.0)) / BAL)
+    assert sum(vals.values()) == pytest.approx(real_pnl(t) / BAL) and day(4) not in vals
+
+
+def test_a_trade_that_cannot_be_valued_makes_its_days_missing():
+    good = trade(0, 3, 104.0)
+    bad = trade(1, 2, 103.0) | {"amount": None}
+    r = rec([good, bad], {0: 101.0, 1: 102.0, 2: 103.0, 3: 104.0, 4: 104.0}, now_day=5)
+    vals = dict(r["values"])
+    assert r["diag"]["unmarked"] == 1 and r["missing"] == [day(1), day(2)]
+    assert day(1) not in vals and r["jumps"] == [day(3)]  # the good trade's days 1–3 land on day 3
+    assert sum(vals.values()) == pytest.approx(real_pnl(good) / BAL)
 
 
 def test_a_candle_gap_is_missing_not_zero_and_the_next_day_is_a_jump():
@@ -167,7 +203,8 @@ def test_the_shadow_record_carries_v3_and_its_provenance(env, tmp_path, monkeypa
     entry = {"id": "x1", "family": "trend_ema", "params": {}, "pairs": ["BTC/USDT:USDT"], "timeframe": "1h",
              "freeze": iso(now - timedelta(days=6)), "score": 1.0}
     r = shadow.run(s, [entry], tmp_path / "sh", workers=1, ft=Runner(True))[0]
-    assert r["exchange"] == "bybit" and r["code_sha"] == "deadbeef" and r["v3"]["diag"]["trades"] == 1
+    assert r["exchange"] == "bybit" and r["code_sha"] == "deadbeef" and r["format"] == 3
+    assert r["v3"]["diag"]["trades"] == 1
     assert sum(x for _, x in r["v3"]["values"]) == pytest.approx(real_pnl(t) / BAL)
     assert r["trades"] and r["trades"][0][1] == pytest.approx(real_pnl(t) / BAL)  # the v2 record is unchanged
 
@@ -314,15 +351,36 @@ def test_a_fallback_run_on_okx_data_never_replaces_bybit_evidence(env):
     assert any("okx data ignored" in e["message"] for e in reg.q("SELECT message FROM events"))
 
 
-def test_a_record_without_exchange_counts_only_from_the_old_lab_code(env, monkeypatch):
+def test_the_source_rule_follows_the_result_format_not_a_date(env):
+    """ChatGPT 23.11: results of format 3 always state their exchange, so one without it is of unknown
+    source; older results (the lab code before 23.11) are accepted by the explicit migration rule."""
     _, reg = env
     now = utcnow()
-    monkeypatch.setattr(forward3, "EXCHANGE_STAMPED_SINCE", iso(now - timedelta(hours=1)))
-    base = {"score": 1.0, "freeze": iso(now - timedelta(days=2)), "trades": []}
-    forward.apply(reg, {"results": [base | {"id": "old", "tested_until": iso(now - timedelta(hours=3))},
-                                    base | {"id": "new", "tested_until": iso(now)}]})
+    base = {"score": 1.0, "freeze": iso(now - timedelta(days=2)), "tested_until": iso(now), "trades": []}
+    forward.apply(reg, {"results": [base | {"id": "legacy"}, base | {"id": "unknown", "format": 3},
+                                    base | {"id": "new", "format": 3, "exchange": "bybit"}]})
     stored = reg.kv_get("forward_results")
-    assert "old" in stored and "new" not in stored  # after the stamp, a missing source is unknown
+    assert "legacy" in stored and "new" in stored and "unknown" not in stored
+    summ = reg.kv_get("forward")
+    assert summ["legacy_source"] == 1 and summ["ignored_other_source"] == 1
+
+
+def test_a_stalled_or_failing_v3_recording_is_a_red_flag_while_v2_arrives(env, monkeypatch):
+    """ChatGPT 23.11 (4): a fresh v2 forward import proves nothing about the v3 recording."""
+    _, reg = env
+    t0 = utcnow() - timedelta(hours=30)
+    v = {"from": day(0), "until": day(1), "values": [], "missing": [], "jumps": [], "diag": {}}
+    forward3.record_status(reg, [result("a", v)], None, t0)
+    forward3.record_status(reg, [result("a", None)], None, t0 + timedelta(hours=6))  # v2 only, no v3
+    assert "v3 > 24h" in forward3.status_flags(reg)  # last v3 record 30 h ago
+    forward3.record_status(reg, [result("a", v)], None)
+    assert forward3.status_flags(reg) == []
+    forward3.record_status(reg, [result("a", {"error": "boom"})], None)  # the lab could not build v3
+    assert forward3.status_flags(reg) == ["v3 error"]
+    monkeypatch.setattr(forward3, "apply", lambda *a, **k: (_ for _ in ()).throw(RuntimeError("disk")))
+    forward.apply(reg, {"results": [result("b", v, tested_until=iso(utcnow()))]})
+    assert reg.kv_get(forward3.K_STATUS)["last_error"] == "disk" and "v3 error" in observe.red_flags(reg)
+    assert reg.kv_get("forward_results")["b"]  # the v2 forward import still went through
 
 
 def test_a_stalled_forward_is_a_red_flag_while_imports_look_fresh(tmp_path):

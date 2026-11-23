@@ -73,15 +73,18 @@ def _f(t: dict, k: str) -> float | None:
         return None
 
 
-def trade_path(t: dict, closes: dict, valid: dict, days: list[str]) -> tuple[dict, set, dict]:
+def trade_path(t: dict, closes: dict, valid: dict, days: list[str], baseline_day: str | None = None
+               ) -> tuple[dict, set, dict]:
     """Daily value changes of one trade over `days` (share of the research wallet), the days that
-    carry a multi-day change after a gap, and diagnostics."""
+    carry a multi-day change after a gap, and diagnostics. The caller has checked that the trade can
+    be valued (`markable`). `baseline_day`: for a trade opened after the freeze but before the first
+    full day, the freeze day; the position enters the record at its liquidation value at that day's
+    close, so nothing from before the observation (entry costs included) is counted."""
     from aitrader.research.shadow import BALANCE
     amount, entry = _f(t, "amount") or 0.0, _f(t, "open_rate") or 0.0
     od, cd = parse_dt(str(t.get("open_date") or "")), parse_dt(str(t.get("close_date") or ""))
-    out, jumps, diag = {}, set(), {"unallocated": 0.0, "fees_unknown": 0, "funding_mismatch": 0}
-    if od is None or cd is None or amount <= 0 or entry <= 0:
-        return out, jumps, diag | {"unmarked": 1}
+    out, jumps = {}, set()
+    diag = {"unallocated": 0.0, "fees_unknown": 0, "funding_mismatch": 0, "close_carried": 0, "boundary": 0}
     od_s, cd_s = od.date().isoformat(), cd.date().isoformat()
     forced = t.get("exit_reason") == "force_exit"  # still open at the data end: never a realised result
     sign = -1.0 if t.get("is_short") else 1.0
@@ -96,61 +99,102 @@ def trade_path(t: dict, closes: dict, valid: dict, days: list[str]) -> tuple[dic
     def liquidation(mark: float) -> float:
         return sign * amount * (mark - entry) - entry_cost - amount * mark * fc - haircut
 
-    prev, gap = 0.0, False
+    realised = real_pnl(t)
+    rate = _f(t, "close_rate")
+    if not forced and rate is not None and fee_o is not None and fee_c is not None:
+        residual = realised - (sign * amount * (rate - entry) - amount * entry * fee_o - amount * rate * fee_c - 2 * haircut)
+        diag["unallocated"] = residual / BALANCE  # funding and rounding, first known at the close
+        ff = _f(t, "funding_fees")
+        if ff is not None and abs(residual - ff) > max(0.01, 1e-4 * amount * entry):
+            diag["funding_mismatch"] = 1
+    prev, gap, pending = 0.0, False, False
+    if baseline_day is not None:
+        prev, diag["boundary"] = liquidation(closes[baseline_day]), 1
+        od_s = days[0]
     for d in days:
         if d < od_s:
             continue
         if d > cd_s:
+            if not pending:
+                break
+            if not valid.get(d):
+                continue
+            # the close fell on a missing day: the realised result lands on the next valid day
+            out[d], diag["close_carried"] = (realised - prev) / BALANCE, 1
+            jumps.add(d)
             break
         if not valid.get(d):
             gap = True
+            pending = d == cd_s and not forced
             continue
-        if d == cd_s and not forced:
-            val = real_pnl(t)
-            rate = _f(t, "close_rate")
-            if rate is not None and fee_o is not None and fee_c is not None:
-                residual = val - (sign * amount * (rate - entry) - amount * entry * fee_o - amount * rate * fee_c - 2 * haircut)
-                diag["unallocated"] += residual / BALANCE  # funding and rounding, first known at the close
-                ff = _f(t, "funding_fees")
-                if ff is not None and abs(residual - ff) > max(0.01, 1e-4 * amount * entry):
-                    diag["funding_mismatch"] = 1
-        else:
-            val = liquidation(closes[d])
+        val = realised if d == cd_s and not forced else liquidation(closes[d])
         out[d] = (val - prev) / BALANCE
-        if gap and d != od_s:
+        if gap and (d != od_s or baseline_day is not None):
             jumps.add(d)  # the change since the last valid day, not one day's change
         prev, gap = val, False
     return out, jumps, diag
 
 
+def markable(t: dict, closes: dict, counts: dict, need: int, first_day: str) -> tuple[bool, str | None]:
+    """(can the trade be valued, baseline day). A trade without size, prices or dates cannot; one
+    opened before the first full day needs a complete freeze day to start from."""
+    od, cd = parse_dt(str(t.get("open_date") or "")), parse_dt(str(t.get("close_date") or ""))
+    if od is None or cd is None or (_f(t, "amount") or 0.0) <= 0 or (_f(t, "open_rate") or 0.0) <= 0:
+        return False, None
+    if od.date().isoformat() >= first_day:
+        return True, None
+    b = od.date().isoformat()
+    return (b in closes and counts.get(b, 0) >= need), b
+
+
 def v3_record(trades: list[dict], freeze: datetime, pairs: list[str], candles: dict, tf: str, now: datetime) -> dict:
     """The strategy's v3 record: complete days from the first full day after the freeze to the last
-    complete day before `now`; `values` holds the non-zero days (a valid day not listed is a 0)."""
+    complete day before `now`; `values` holds the non-zero days (a valid day not listed is a 0).
+
+    Every trade opened after the freeze counts; one opened on the freeze day enters at its
+    liquidation value at that day's close. A trade that cannot be valued (no size, prices or dates,
+    or no complete freeze day to start from) makes its days missing, never zeros: the other trades'
+    changes on those days move to the next valid day as a jump."""
     start, until = first_full_day(freeze), last_complete_day(now)
     rec = {"from": start.isoformat(), "until": until.isoformat(), "values": [], "missing": [], "jumps": [],
-           "diag": {"trades": 0, "unallocated": 0.0, "fees_unknown": 0, "funding_mismatch": 0, "unmarked": 0}}
+           "diag": {"trades": 0, "unallocated": 0.0, "fees_unknown": 0, "funding_mismatch": 0, "unmarked": 0,
+                    "close_carried": 0, "boundary": 0}}
     days = _days(start, until)
     if not days:
         return rec
     need = 86400 // tf_seconds(tf)
     valid = {d: all(((candles.get(p) or ({}, {}))[1]).get(d, 0) >= need for p in pairs) for d in days}
+    scope, plans = [], []
+    for t in trades:
+        od = parse_dt(str(t.get("open_date") or ""))
+        if od is not None and od < freeze:
+            continue  # opened before the freeze: never part of the forward test (as in v2)
+        scope.append(t)
+    for t in scope:  # pass 1: trades that cannot be valued make their days missing
+        closes, counts = candles.get(t.get("pair")) or ({}, {})
+        ok, base = markable(t, closes, counts, need, days[0])
+        if ok:
+            plans.append((t, closes, base))
+            continue
+        rec["diag"]["unmarked"] += 1
+        od, cd = parse_dt(str(t.get("open_date") or "")), parse_dt(str(t.get("close_date") or ""))
+        lo = od.date().isoformat() if od else days[0]
+        hi = cd.date().isoformat() if cd else days[-1]
+        for d in days:
+            if lo <= d <= hi:
+                valid[d] = False
     rec["missing"] = [d for d in days if not valid[d]]
     acc: dict[str, float] = {}
     jumps: set = set()
-    t0 = datetime.combine(start, datetime.min.time(), tzinfo=UTC)
-    for t in trades:
-        od = parse_dt(str(t.get("open_date") or ""))
-        if od is None or od < t0:
-            continue  # opened before the first full day: not in the v3 record
-        closes = (candles.get(t.get("pair")) or ({}, {}))[0]
-        path, j, dg = trade_path(t, closes, valid, days)
+    for t, closes, base in plans:  # pass 2
+        path, j, dg = trade_path(t, closes, valid, days, base)
         for d, x in path.items():
             acc[d] = acc.get(d, 0.0) + x
         jumps |= j
         rec["diag"]["trades"] += 1
-        for k in ("unallocated", "fees_unknown", "funding_mismatch", "unmarked"):
+        for k in ("unallocated", "fees_unknown", "funding_mismatch", "close_carried", "boundary"):
             rec["diag"][k] += dg.get(k, 0)
-    rec["values"] = [[d, round(x, 10)] for d, x in sorted(acc.items()) if round(x, 10) != 0.0]
+    rec["values"] = [[d, round(x, 10)] for d, x in sorted(acc.items()) if round(x, 10) != 0.0 and valid[d]]
     rec["jumps"] = sorted(jumps)
     rec["diag"]["unallocated"] = round(rec["diag"]["unallocated"], 10)
     return rec

@@ -447,11 +447,18 @@ def apply(reg: Registry, payload: dict) -> dict:
     accepted = [r for r in results if r.get("ok", True)]
     summ["ignored_other_source"] = len(other)
     summ["last_accepted"] = iso(now) if accepted else old_summ.get("last_accepted")
+    summ["legacy_source"] = sum(1 for r in accepted if F3.is_legacy(r))
+    err = None
     try:  # v3 recording must never break the v2 forward import
         summ["v3"] = F3.apply(reg, accepted, now)
     except Exception as ex:  # noqa: BLE001
+        err = ex
         log.warning("forward v3 recording failed: %s", ex)
         summ["v3"] = {"error": str(ex)[:200]} | {k: v for k, v in (old_summ.get("v3") or {}).items() if k != "error"}
+    try:
+        summ["v3"]["status"] = F3.record_status(reg, accepted, err, now)
+    except Exception as ex:  # noqa: BLE001
+        log.warning("forward v3: status not stored: %s", ex)
     old = old_summ.get("verdict")
     reg.kv_set("forward", summ)
     try:

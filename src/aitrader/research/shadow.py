@@ -31,12 +31,16 @@ def _trades_after(trades: list[dict], freeze) -> list[list]:
     return out
 
 
+RESULT_FORMAT = 3  # results carrying it always state their exchange (forward3.accept_source)
+
+
 def _provenance(s: Settings) -> dict:
     try:
         from freqtrade import __version__ as ftv
     except Exception:  # noqa: BLE001 – unit tests run without freqtrade
         ftv = None
-    return {"exchange": s.research.exchange, "code_sha": os.environ.get("GITHUB_SHA"), "ft_version": ftv}
+    return {"format": RESULT_FORMAT, "exchange": s.research.exchange, "code_sha": os.environ.get("GITHUB_SHA"),
+            "ft_version": ftv}
 
 
 def _v3(s: Settings, e: dict, trades: list[dict], freeze, now) -> dict | None:
@@ -50,7 +54,7 @@ def _v3(s: Settings, e: dict, trades: list[dict], freeze, now) -> dict | None:
         return marks.v3_record(trades, freeze, e.get("pairs") or pairs, candles, tf, now)
     except Exception as ex:  # noqa: BLE001 – the v3 record must never break the v2 forward test
         log.warning("forward v3 record %s failed: %s", e.get("id"), ex)
-        return None
+        return {"error": str(ex)[:200]}  # reported by the server (forward3 status), never silent
 
 
 def test_one(s: Settings, ft: FreqtradeRunner, root, e: dict) -> dict:
