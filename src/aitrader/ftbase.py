@@ -333,7 +333,13 @@ class AIBase(IStrategy):
         analysed without it, and the next analysis finds the signal one row back – it would never
         be acted on. Here the newest higher candle's signal still fires on the last row within
         `HTF_GRACE_ROWS` bot candles, once per (strategy, coin, candle): a signal the bot already
-        acted on is never repeated."""
+        acted on is never repeated.
+
+        Only for a candle THIS process analysed on time and found without the higher candle: the
+        "already fired" memory lives in this process, so after a restart a signal of the minutes
+        before it (acted on by the previous process) used to fire a second time (23.11: after the
+        deploys at 18:23/18:27/18:37 the 18:00 signals of 9 coins fired again; a trade that had
+        already closed could have been re-entered on its old signal)."""
         try:
             fired = self.__dict__.setdefault("_htf_fired", set())
             ds = m[f"date_{tf}"]
@@ -344,11 +350,16 @@ class AIBase(IStrategy):
             same = (ds == last).to_numpy()[::-1]
             run = int(same.argmin()) if not same.all() else n  # bot candles that already show the newest higher candle
             late = run - 1  # how many of them came after the one it should have fired on
+            # the first bot candle this process analysed for this coin: a higher candle due before
+            # it was the previous process's to act on – never repeated here
+            first = self.__dict__.setdefault("_first_row", {}).setdefault(pair, m["date"].iloc[-1])
+            due = m["date"].iloc[n - run] if run <= n else None
+            mine = due is not None and not pd.isna(due) and due >= first
             for c in ("long_sig", "short_sig"):
                 key = (sid, pair, str(last), c)
                 if bool(out[c].iloc[-1]):
                     fired.add(key)  # fired on time
-                elif 0 < late <= self.HTF_GRACE_ROWS and key not in fired \
+                elif mine and 0 < late <= self.HTF_GRACE_ROWS and key not in fired \
                         and bool(m[f"{c}_{tf}"].fillna(False).astype(bool).iloc[-1]):
                     out.iloc[-1, out.columns.get_loc(c)] = True  # late candle: act on it now
                     fired.add(key)
@@ -618,8 +629,8 @@ class AIBase(IStrategy):
         lab_trail = int(p.get("exit_mode") or 0) == 1 and float(p.get("lab_trail") or 0) > 0
         cur_atr = self._cur_atr(pair, trade, current_time) if (int(p.get("vol_shock") or 0) or lab_trail) else None
         stop = ctx.managed_stop(p, float(best or trade.open_rate), now=current_time, cur_atr=cur_atr)
-        shock = self._market_shock(current_time)
-        # live portfolio guard: BTC lurched against this side – a profitable position is moved to
+        shock = self._market_shock(current_time) if self.MARKET_SHOCK_GUARD else 0
+        # live portfolio guard (off since 23.11, owner: trades follow their strategy only): BTC lurched against this side – a profitable position is moved to
         # break-even (protective only; losing positions keep their stop, nothing is opened)
         if shock and (shock > 0) == bool(trade.is_short) and ctx.r_multiple(float(best or trade.open_rate), p) >= 0.5:
             be = ctx.break_even()
@@ -631,6 +642,9 @@ class AIBase(IStrategy):
         return stop
 
     SHOCK_MOVE = 0.025  # BTC move in one hour that counts as a market shock
+    # Off (owner, 23.11: "strictly the strategy's entry and exit, no exceptions"): the guard is live
+    # only and part of no tested strategy, so it changed exits the strategies were never tested with.
+    MARKET_SHOCK_GUARD = False
 
     def _market_shock(self, current_time: datetime) -> int:
         """+1 / −1 when BTC moved ≥ SHOCK_MOVE up / down over the last hour (live only)."""

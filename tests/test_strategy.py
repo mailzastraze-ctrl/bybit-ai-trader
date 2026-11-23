@@ -313,10 +313,15 @@ def test_take_profit_waits_at_target_side_risk_cap_and_market_shock_guard(portfo
     assert ok("short") is False and ok("long") is False   # 0.1% cap: any new risk exceeds it
     portfolio.config["aitrader"]["max_side_risk"] = 0.5
     assert ok("short") is True
-    # market shock: BTC +3% in the last hour → a profitable short goes to break-even; a long is untouched
+    # market shock: BTC +3% in the last hour. Off by default (owner 23.11: exits follow the strategy
+    # only) – the stop stays the strategy's own …
     btc = pd.DataFrame({"close": [100.0] * 10 + [103.0]})
     portfolio.dp = SimpleNamespace(get_pair_dataframe=lambda pair, tf: btc, get_analyzed_dataframe=lambda pair, tf: (None, None))
     tr = SimpleNamespace(id=7, is_short=True, min_rate=98.8, max_rate=100.0, open_rate=100.0, enter_tag="s1")
+    assert portfolio.MARKET_SHOCK_GUARD is False
+    assert portfolio._stop("ETH/USDT:USDT", tr, EntryContext(entry=100.0, atr=1.0, is_short=True), dict(p), t0) == pytest.approx(102.0)
+    # … and when switched on, a profitable short goes to break-even; a long is untouched
+    monkeypatch.setattr(portfolio, "MARKET_SHOCK_GUARD", True)
     stop = portfolio._stop("ETH/USDT:USDT", tr, EntryContext(entry=100.0, atr=1.0, is_short=True), dict(p), t0)
     assert stop == pytest.approx(99.88)
     lt = SimpleNamespace(id=8, is_short=False, min_rate=100.0, max_rate=103.0, open_rate=100.0, enter_tag="s1")
@@ -440,6 +445,12 @@ def test_late_higher_timeframe_candle_is_still_acted_on_once_live(tmp_path):
     # too late (beyond the grace of 2 bot candles): not chased
     st = bot("too_late.json")
     assert analyse(st, due + pd.Timedelta(minutes=45), k + 1)["enter_long"].iloc[-1] != 1
+    # a restart after the signal was acted on: the new process never repeats it (23.11 18:23–18:37)
+    st = bot("before_restart.json")
+    assert analyse(st, due, k + 1)["enter_long"].iloc[-1] == 1
+    st = bot("after_restart.json")
+    assert analyse(st, due + pd.Timedelta(minutes=15), k + 1)["enter_long"].iloc[-1] != 1
+    assert analyse(st, due + pd.Timedelta(minutes=30), k + 1)["enter_long"].iloc[-1] != 1
 
 
 def _hourly_on_15m(h1):
