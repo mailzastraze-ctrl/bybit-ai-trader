@@ -305,6 +305,71 @@ def test_a_failed_retest_stays_in_the_coverage_denominator(env, monkeypatch):
     assert d["q1_members"] == 1 and d["coverage_q1"] == pytest.approx(3 / 6)
 
 
+def test_a_return_to_the_book_never_changes_a_past_day_of_q1(env, monkeypatch):
+    """ChatGPT 23.11 (round 2): `b` leaves the book on day 3 and returns on day 10. The lab then
+    publishes b's days 2–9 too, but the composition, weights and line-A day values of those days stay
+    as they were: they were fixed by the daily book snapshots before the return."""
+    _, reg = env
+    monkeypatch.setattr(forward3, "V3_START", "2000-01-01")
+    fz = at(0, 0) - timedelta(hours=10)
+    _ref(reg, 45, fz)
+    a, b = {"id": "a", "freeze": iso(fz)}, {"id": "b", "freeze": iso(fz)}
+
+    def v(rid, x, until):  # one run's record: a constant daily change from day 0
+        return result(rid, {"from": day(0), "until": day(until), "values": [[day(i), x] for i in range(until + 1)],
+                            "missing": [], "jumps": [], "diag": {}}, freeze=fz, score=40.0)
+
+    def line_a(d):  # what the v3 verdict will compute for day d (DECISIONS §5): mean over M(d)
+        led, m = reg.kv_get(forward3.K_LEDGER), forward3.composition(reg, d)["members"]
+        return m, (sum(dict(forward3.valid_days_values(led[k]))[d] for k in m) / len(m) if m else None)
+
+    for i in range(10):  # one lab run per day at 01:00; it values the days up to the day before
+        forward3.note_scheduled(reg, [a, b] if i < 3 else [a], at(i, 1))
+        if i:
+            forward3.apply(reg, [v("a", 0.001, i - 1)] + ([v("b", 0.01, i - 1)] if i < 3 else []), at(i, 2))
+    before = {day(d): line_a(day(d)) for d in range(9)}
+    cov_before = forward3.diagnostics(reg, at(9, 3))["coverage_q1"]
+    for i in range(10, 13):  # b is back: the run of day 10 publishes b's days 2–9 as well
+        forward3.note_scheduled(reg, [a, b], at(i, 1))
+        forward3.apply(reg, [v("a", 0.001, i - 1), v("b", 0.01, i - 1)], at(i, 2))
+    assert forward3.valid_days(reg.kv_get(forward3.K_LEDGER)["b"])[:10] == [day(d) for d in range(10)]
+    assert {day(d): line_a(day(d)) for d in range(9)} == before  # nothing in the past moved
+    assert before[day(1)] == (["a", "b"], pytest.approx(0.0055)) and before[day(5)] == (["a"], 0.001)
+    assert before[day(2)] == (["a"], 0.001)  # b was dropped before day 3's run: not scheduled for day 2
+    assert forward3.scheduled_days(reg.kv_get(forward3.K_SCHED)["b"], reg.kv_get(forward3.K_BOOKDAYS)) == \
+        [day(0), day(1), day(10), day(11)]
+    d = forward3.diagnostics(reg, at(12, 3))
+    assert cov_before == 1.0 and d["coverage_q1"] == 1.0 and d["q1_off_schedule_days"] == 8  # b's days 2–9
+
+
+def test_a_day_without_any_lab_run_keeps_the_previous_book(env, monkeypatch):
+    """An outage is not a departure: the days stay scheduled and count against coverage until valued."""
+    _, reg = env
+    fz = at(0, 0) - timedelta(hours=10)
+    e = {"id": "a", "freeze": iso(fz)}
+    forward3.note_scheduled(reg, [e], at(0, 1))
+    forward3.note_scheduled(reg, [e], at(4, 1))  # no lab run on days 1–3
+    assert forward3.scheduled_days(reg.kv_get(forward3.K_SCHED)["a"], reg.kv_get(forward3.K_BOOKDAYS)) == \
+        [day(i) for i in range(4)]
+
+
+def test_moving_v3_start_moves_every_stored_eligibility_flag(env, monkeypatch):
+    """ChatGPT 23.11 (round 2): a later V3_START must not leave early strategies in the primary sample,
+    also those no longer re-tested."""
+    _, reg = env
+    monkeypatch.setattr(forward3, "V3_START", "2000-01-01")
+    fz = at(0, 0) - timedelta(hours=10)
+    _ref(reg, 45, fz)
+    v = {"from": day(0), "until": day(1), "values": [], "missing": [], "jumps": [], "diag": {}}
+    forward3.apply(reg, [result("early", v, freeze=fz, score=40.0)], at(2))
+    assert reg.kv_get(forward3.K_LEDGER)["early"]["eligible"] is True
+    monkeypatch.setattr(forward3, "V3_START", day(5))
+    assert forward3.diagnostics(reg, at(3))["research_eligible"] == 0  # computed, never the stored flag
+    forward3.apply(reg, [result("other", v, freeze=at(6), score=1.0)], at(7))  # "early" is not re-tested
+    led = reg.kv_get(forward3.K_LEDGER)
+    assert led["early"]["eligible"] is False and led["other"]["eligible"] is True
+
+
 def test_the_book_keeps_promising_strategies_by_the_set_from_two_days_ago(env):
     _, reg = env
     now = utcnow()
