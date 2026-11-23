@@ -27,6 +27,23 @@ All on 4h candles, exploration risk (0.1 % of equity per trade × correlation sc
 The two new families are **not** in `FAMILIES`: the lab's bandit, generator, screener and explorers
 are unchanged; `get_family` resolves them for the bot and for backtests.
 
+## 2a. Gold on demo: the autopilot's best (owner, 23.11.2026)
+The owner asked for XAUUSDT on demo with **the best strategy found by stability + return**. Bybit's
+XAUUSDT is too short for the Strategy Lab autopilot (≥ 900 days), so it ran on PAXG (tokenized gold,
+24/7) 2023-07 → 2026-11: branch workflow `tradfi-gold-screen` (`.github/tradfi/gold_candles.py`,
+`screener/screen.js --mode swing`, 10 rules × parameters × exits on 2h/4h/6h/12h, 10 decoy copies).
+663 329 backtests; 62 configurations passed all seven checks; decoys passed 8.4 per copy; 23 also
+significant on unseen data (BH q = 0.2). Results: `research/tradfi/screen/`.
+
+Chosen rule: the highest score (Sharpe × equity R² × robustness) among those also significant on
+unseen data → **`xau-macd-12h`**: MACD 11/56/10 with the zero-line filter on 12h, stop 1.5×ATR, target
+4R, chandelier trail 3×ATR (engine exits, `exit_mode` 1). Search years (2.7 y): 44 trades, PF 3.31,
+DD 6.3 %, R² 0.92; walk-forward year: 20 trades, PF 1.97; last 90 days: 5 trades, PF 8.8; all
+neighbouring parameter sets profitable; Monte Carlo DD95 10.5 %. (Engine figures at 100 % of capital;
+the bot risks 0.1 % per trade.) Caveats: PAXG proxy, a gold bull market, best of many – the forward
+record decides. On demo gold trades **only** with this strategy (`demo_pairs`); the three
+pre-registered strategies keep gold in their hypotheses, and Trend Following and Rotation trade SPY.
+
 ## 3. Execution and risk
 - One bot, one manifest: the lane's sleeves are added next to crypto and the core, outside the crypto
   slots and whitelist cap. A crypto strategy can never trade gold or SPY (filtered in the manifest and

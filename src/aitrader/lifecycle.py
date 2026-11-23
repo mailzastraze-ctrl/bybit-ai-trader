@@ -180,8 +180,12 @@ class Lifecycle:
             pairs = [p for p in d.get("pairs") or [] if tradfi.is_tradfi(p)]  # never a crypto pair (or SPX6900)
             if not d.get("id") or not pairs:
                 continue
+            # `pairs`: the configuration (and its forward-book hypothesis); `demo_pairs`: what it trades on
+            # demo (owner, 23.11: gold on demo only with the best strategy found by the autopilot)
+            demo = d.get("demo_pairs")
+            demo = [p for p in (pairs if demo is None else demo) if tradfi.is_tradfi(p)]
             cfg[d["id"]] = {"id": d["id"], "family": fam.name, "params": fam.normalize(d.get("params")),
-                            "pairs": pairs, "sides": d.get("sides") or ["long", "short"],
+                            "pairs": pairs, "demo_pairs": demo, "sides": d.get("sides") or ["long", "short"],
                             "timeframe": d.get("timeframe") or "4h", "rank": int(d.get("rank", 0)),
                             "hypothesis": d.get("hypothesis"), "title": d.get("title") or fam.title,
                             "registered": d.get("registered")}
@@ -192,7 +196,9 @@ class Lifecycle:
         return len(cfg)
 
     def tradfi_pairs(self) -> list[str]:
-        return sorted({p for c in (self.reg.kv_get("tradfi_cfg") or {}).values() for p in c.get("pairs") or []})
+        """Instruments the lane trades on demo (availability is checked for these)."""
+        return sorted({p for c in (self.reg.kv_get("tradfi_cfg") or {}).values()
+                       for p in c.get("demo_pairs", c.get("pairs")) or []})
 
     def tradfi_sleeves(self, excluded: set[str], scale: float = 1.0) -> list[Sleeve]:
         """The lane's sleeves for the manifest (empty when the lane is off). Pairs Bybit does not
@@ -204,7 +210,8 @@ class Lifecycle:
         corr = state.get("scale") or {}
         out = []
         for c in (self.reg.kv_get("tradfi_cfg") or {}).values():
-            pairs = [p for p in tradfi.usable_pairs(state, c.get("pairs") or []) if p not in excluded]
+            demo = c.get("demo_pairs", c.get("pairs")) or []
+            pairs = [p for p in tradfi.usable_pairs(state, demo) if p not in excluded]
             if not pairs:
                 continue
             k = min(float(corr.get(p, 1.0) or 1.0) for p in pairs)

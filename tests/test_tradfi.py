@@ -208,7 +208,7 @@ def test_rotation_holds_the_leader_long_only_and_needs_the_other_asset():
 
 def test_preregistered_configs_load_and_trend_following_is_the_benchmark_rule():
     cfg = {json.loads(f.read_text())["id"]: json.loads(f.read_text()) for f in (ROOT / "research" / "tradfi").glob("*.json")}
-    assert set(cfg) == {"tf-trend-4h-30d", "tf-gold-regime-4h", "tf-rotation-4h-60d"}
+    assert {"tf-trend-4h-30d", "tf-gold-regime-4h", "tf-rotation-4h-60d"} <= set(cfg)
     bench = json.loads((ROOT / "research" / "external" / "benchmark-tsmom-4h-30d.json").read_text())
     tf = cfg["tf-trend-4h-30d"]
     assert tf["family"] == bench["family"] == "tsmom" and tf["timeframe"] == bench["timeframe"]
@@ -216,9 +216,11 @@ def test_preregistered_configs_load_and_trend_following_is_the_benchmark_rule():
     assert fam.normalize(tf["params"]) == fam.normalize(bench["params"])
     assert cfg["tf-gold-regime-4h"]["pairs"] == [XAU]
     assert cfg["tf-rotation-4h-60d"]["sides"] == ["long"]
-    for d in cfg.values():
+    for k in ("tf-trend-4h-30d", "tf-gold-regime-4h", "tf-rotation-4h-60d"):
+        d = cfg[k]
         assert all(tradfi.is_tradfi(p) for p in d["pairs"]) and d["preregistration"]["decision_rule"]
         assert get_family(d["family"]).normalize(d["params"])["sl_atr"] >= 3.0  # wide stops for multi-week holds
+        assert XAU not in d["demo_pairs"]  # gold on demo: only the autopilot's best
 
 
 # ============================================================== 4. portfolio: lifecycle + manifest
@@ -243,24 +245,29 @@ def test_lane_sleeves_are_separate_from_crypto_and_crypto_is_unchanged(env):
     _crypto_row(reg, "c1", [BTC, XAU, "ETH/USDT:USDT"])  # a crypto strategy that somehow lists gold
     life.import_core(ROOT / "research" / "external", ROOT / "research" / "hypotheses")
     before = life.build_manifest([], set(), False).to_dict()["sleeves"]
-    assert life.import_tradfi(ROOT / "research" / "tradfi") == 3
+    assert life.import_tradfi(ROOT / "research" / "tradfi") == len(list((ROOT / "research" / "tradfi").glob("*.json")))
     reg.kv_set(tradfi.K_STATE, {"available": {XAU: True, SPY: True}, "scale": {XAU: 1.0, SPY: 0.8}})
     man = life.build_manifest([], set(), False)
     after = man.to_dict()["sleeves"]
     lane = [x for x in man.sleeves if x.note == "tradfi"]
     assert [x for x in after if x["note"] != "tradfi"] == before  # crypto + core exactly as before
-    assert {x.id for x in lane} == {"tf-trend-4h-30d", "tf-gold-regime-4h", "tf-rotation-4h-60d"}
     c1 = man.by_id("c1")
     assert XAU not in c1.pairs and BTC in c1.pairs  # gold belongs to the lane only
     for x in lane:
-        assert x.stage == "exploration" and x.leverage == 1.0 and x.timeframe == "4h"
+        assert x.stage == "exploration" and x.leverage == 1.0 and x.timeframe in ("4h", "12h")
         assert all(tradfi.is_tradfi(p) for p in x.pairs)
-    trend = man.by_id("tf-trend-4h-30d")
-    assert trend.risk == pytest.approx(s.lifecycle.risk_exploration * 0.8)  # SPY moves with BTC: smaller
-    assert man.by_id("tf-gold-regime-4h").risk == pytest.approx(s.lifecycle.risk_exploration)
-    # on gold the order is fixed by the pre-registration: trend, gold regime, rotation
-    assert [x.id for x in man.sleeves_for(XAU)] == ["tf-trend-4h-30d", "tf-gold-regime-4h", "tf-rotation-4h-60d"]
+    # on demo gold trades only with the autopilot's best strategy (owner, 23.11); the pre-registered
+    # gold configurations stay hypotheses (`demo_pairs`)
+    best = [x for x in lane if XAU in x.pairs]
+    assert len(best) == 1 and best[0].id.startswith("xau-") and man.sleeves_for(XAU) == best
+    assert man.by_id("tf-gold-regime-4h") is None
+    assert [x.pairs for x in lane if x.id in ("tf-trend-4h-30d", "tf-rotation-4h-60d")] == [[SPY], [SPY]]
+    assert man.by_id("tf-trend-4h-30d").risk == pytest.approx(s.lifecycle.risk_exploration * 0.8)  # SPY moves with BTC
+    assert best[0].risk == pytest.approx(s.lifecycle.risk_exploration)
     assert XAU in man.all_pairs() and SPY in man.all_pairs()
+    assert sorted(life.tradfi_pairs()) == [SPY, XAU]
+    # the hypotheses keep their own instruments for the forward book
+    assert reg.kv_get("tradfi_cfg")["tf-rotation-4h-60d"]["pairs"] == [XAU, SPY]
 
 
 def test_lane_off_or_instrument_unavailable(env):
@@ -299,8 +306,8 @@ def test_hypotheses_enter_the_forward_book_only_when_tradable(env):
     s, reg = env
     life = Lifecycle(s, reg)
     life.import_tradfi(ROOT / "research" / "tradfi")
-    assert life.register_tradfi_hypotheses({"available": {XAU: True, SPY: False}}) == 1  # gold regime only
-    assert set(reg.kv_get("hypotheses")) == {"tf-gold-regime-4h"}
+    assert life.register_tradfi_hypotheses({"available": {XAU: True, SPY: False}}) == 2  # the gold-only ones
+    assert set(reg.kv_get("hypotheses")) == {"tf-gold-regime-4h", "xau-macd-12h"}
     freeze = reg.kv_get("hypotheses")["tf-gold-regime-4h"]["freeze"]
     assert life.register_tradfi_hypotheses({"available": {XAU: True, SPY: True}}) == 2
     assert reg.kv_get("hypotheses")["tf-gold-regime-4h"]["freeze"] == freeze  # frozen at the first registration
@@ -601,3 +608,23 @@ def test_forward_book_downloads_tradfi_candles_apart_from_the_benchmark(tmp_path
     assert ft.downloads[0] == [BTC] and ft.downloads[1] == [SPY, XAU]
     assert res["benchmark-tsmom-4h-30d"]["ok"] and res["benchmark-tsmom-4h-30d"]["trades"]
     assert res["tf-trend-4h-30d"]["ok"] is False
+
+
+def test_gold_winner_is_exactly_the_autopilot_configuration():
+    """XAUUSDT on demo: the Strategy Lab autopilot's best configuration by stability + return that
+    also passed the decoy control and significance on unseen data, traded with the engine's own
+    exits (exit_mode 1) through the twin family (bar-for-bar parity: tests/test_screen.py)."""
+    from aitrader.research.screen import to_params
+    cfg = json.loads((ROOT / "research" / "tradfi" / "xau-macd-12h.json").read_text())
+    screen = json.loads((ROOT / "research" / "tradfi" / "screen" / "xau-screen.json").read_text())
+    sig = [x for x in screen["survivors"] if x.get("significant")]
+    best = max(sig, key=lambda x: x["score"])
+    assert cfg["engine"] == {"strategy": best["strategy"], "params": best["params"], "exits": best["exits"]}
+    assert cfg["family"] == best["family"] and cfg["timeframe"] == best["timeframe"] == "12h"
+    fam = get_family(cfg["family"])
+    assert fam.normalize(cfg["params"]) == to_params(best)  # no parameter clipped by the family's bounds
+    p = fam.normalize(cfg["params"])
+    assert (p["exit_mode"], p["sl_atr"], p["lab_tp"], p["lab_trail"]) == (1, best["exits"]["sl"], best["exits"]["tp"],
+                                                                         best["exits"]["tr"])
+    assert cfg["pairs"] == cfg["demo_pairs"] == [XAU] and cfg["rank"] == 0
+    assert best["A"]["pf"] >= 1.4 and best["r2"] >= 0.75 and best["robust"] >= 0.7 and best["B"]["net"] >= 0

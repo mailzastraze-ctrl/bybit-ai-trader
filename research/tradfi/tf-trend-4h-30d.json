@@ -12,6 +12,9 @@
     "XAU/USDT:USDT",
     "SPY/USDT:USDT"
   ],
+  "demo_pairs": [
+    "SPY/USDT:USDT"
+  ],
   "sides": [
     "long",
     "short"
@@ -47,5 +50,6 @@
     "seen_data": [],
     "frozen": "2026-11-23 (file); forward record from the first registration on the server",
     "clean_evidence": "Only the forward test from the freeze. Bybit's TradFi perpetuals have too little history (gold since spring 2026, SPY since May 2026) for the system's walk-forward (≥ 120-day warm-up + training + ≥ 4 test quarters); a replication on them can reject, never validate."
-  }
+  },
+  "demo_note": "Gold trades on demo only with the strategy the Strategy Lab autopilot found for it (owner, 23.11.2026); this configuration stays a pre-registered hypothesis for the forward book."
 }

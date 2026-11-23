@@ -1,0 +1,145 @@
+{
+  "id": "xau-macd-12h",
+  "rank": 0,
+  "hypothesis": "TF2",
+  "title": "Gold: MACD 12h (Strategy Lab autopilot, best by stability + return)",
+  "registered": "2026-11-23",
+  "lane": "tradfi",
+  "source": "Owner's request 23.11.2026: trade XAUUSDT on demo with the best strategy found by stability + return. Found by the owner's Strategy Lab engine (screener/screen.js, swing mode) on PAXG (tokenized gold) 2023-07..2026-11, branch workflow tradfi-gold-screen run 45177446124.",
+  "family": "macd_cross",
+  "timeframe": "12h",
+  "pairs": [
+    "XAU/USDT:USDT"
+  ],
+  "demo_pairs": [
+    "XAU/USDT:USDT"
+  ],
+  "sides": [
+    "long",
+    "short"
+  ],
+  "params": {
+    "macd_fast": 11,
+    "macd_gap": 45,
+    "macd_signal": 10,
+    "macd_zero": 1,
+    "htf_trend": 0,
+    "htf_len": 200,
+    "vol_regime": 0,
+    "session": 0,
+    "no_weekend": 0,
+    "event_guard": 0,
+    "sl_atr": 1.5,
+    "tp_rr": 2.0,
+    "trail_rr": 1.5,
+    "trail_atr": 2.5,
+    "max_hold": 500,
+    "be_rr": 1.0,
+    "lock_rr": 1.5,
+    "lock_frac": 0.4,
+    "tp_near": 0.0,
+    "tp_lock": 0.75,
+    "event_lock": 0,
+    "vol_shock": 0,
+    "exit_mode": 1,
+    "lab_tp": 4.0,
+    "lab_trail": 3.0,
+    "conv_w": 0.0
+  },
+  "engine": {
+    "strategy": "macd",
+    "params": {
+      "fast": 11,
+      "slow": 56,
+      "signal": 10,
+      "zero": 1
+    },
+    "exits": {
+      "sl": 1.5,
+      "tp": 4,
+      "tr": 3
+    }
+  },
+  "selection": {
+    "rule": "Highest autopilot score (Sharpe × equity R² × robustness) among the configurations that passed all seven checks, the target–decoy control and Benjamini–Hochberg significance on unseen data (walk-forward year + last 3 months). The top score overall (MACD 12h 12/58/10, score 1.98) was not significant on unseen data.",
+    "search": {
+      "evaluated": 663329,
+      "swing_tested": 94,
+      "swing_passed_checks": 62,
+      "swing_decoy_survivors": 8.4,
+      "swing_decoys": 10,
+      "swing_survivors": 62,
+      "seconds": 114
+    },
+    "rank_in_list": 2,
+    "score": 1.907,
+    "luck_share": 0.1,
+    "significant": true,
+    "p": 0.03279308564679651,
+    "A_search_years": {
+      "trades": 44,
+      "pf": 3.312,
+      "net": 74.92,
+      "dd": 6.3,
+      "sharpe": 2.075,
+      "win": 56.8,
+      "tpm": 1.35,
+      "years": 2.7
+    },
+    "B_last_90_days": {
+      "trades": 5,
+      "pf": 8.807,
+      "net": 10.41,
+      "dd": 2.32,
+      "sharpe": 3.296,
+      "win": 60
+    },
+    "walk_forward_year": {
+      "trades": 20,
+      "pf": 1.973,
+      "net": 13.8,
+      "dd": 4.83,
+      "sharpe": 1.32
+    },
+    "r2": 0.919,
+    "robust_neighbours": 1,
+    "monte_carlo": {
+      "dd95": 10.5,
+      "ploss": 0
+    },
+    "data": {
+      "2h": {
+        "bars": 14753,
+        "source": "binance PAXGUSDT spot",
+        "from": "2023-07-12T14:00:00+00:00",
+        "to": "2026-11-22T22:00:00+00:00"
+      },
+      "4h": {
+        "bars": 7376,
+        "source": "binance PAXGUSDT spot",
+        "from": "2023-07-12T16:00:00+00:00",
+        "to": "2026-11-22T20:00:00+00:00"
+      },
+      "6h": {
+        "bars": 4917,
+        "source": "binance PAXGUSDT spot",
+        "from": "2023-07-12T18:00:00+00:00",
+        "to": "2026-11-22T18:00:00+00:00"
+      },
+      "12h": {
+        "bars": 2458,
+        "source": "binance PAXGUSDT spot",
+        "from": "2023-07-13T00:00:00+00:00",
+        "to": "2026-11-22T12:00:00+00:00"
+      }
+    },
+    "units": "engine results at 100 % of capital, 1x (Strategy Lab settings); the bot sizes by risk (0.1 % of equity per trade), so money results are far smaller; PF and win rate are comparable"
+  },
+  "caveats": [
+    "Found on PAXG (tokenized gold, 24/7), not on Bybit's XAUUSDT (≈ 8 months of history). The perpetual tracks spot gold; PAXG trades a small premium and moves a little on weekends.",
+    "2023–2026 was a strong gold bull market. The decoys keep the drift (shuffled daily blocks), so passing them means the timing beat luck on this history – not that it will continue.",
+    "The best of 660 000 backtests on one instrument is selected with hindsight: in this run decoys passed all seven checks 8.4 times per copy against 62 real configurations. Only the forward record from the freeze is clean evidence.",
+    "Live entries only while gold trades (Globex hours); the engine also entered on weekends (carried to the Sunday open here)."
+  ],
+  "decision_rule": "Demo at exploration risk (0.1 % per trade). Judged on its own forward record against buy & hold of gold; with ~1.4 trades a month a statistical answer takes 1–2 years."
+}

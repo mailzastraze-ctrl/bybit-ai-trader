@@ -1,0 +1,40 @@
+name: tradfi-real-image
+# Branch-only mirror of CI's "Tests inside the real Freqtrade image" whose result is committed back
+# to the branch (readable with git alone). Removed before the merge.
+on:
+  push:
+    branches: [tradfi-gold-spy]
+    paths: ["src/**", "ft/**", "tests/**", "config/**", "Dockerfile", "pyproject.toml", "research/tradfi/*.json"]
+permissions:
+  contents: write
+concurrency:
+  group: tradfi-real-image
+  cancel-in-progress: true
+jobs:
+  real-image:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v5
+      - name: Build production image
+        run: docker build -t aitrader:ci . > build.log 2>&1 || (tail -50 build.log; exit 1)
+      - name: Full test suite + strategy loading inside the real Freqtrade image
+        run: |
+          set +e
+          docker run --rm -v "$PWD/tests:/app/tests" -w /app --entrypoint "" aitrader:ci \
+            sh -c "pip install --user -q pytest && python -m pytest -q tests" > pytest.log 2>&1
+          echo "pytest_exit=$?" > result.txt
+          docker run --rm -w /app --entrypoint "" aitrader:ci sh -c \
+            "freqtrade create-userdir --userdir /tmp/ud >/dev/null && freqtrade list-strategies --userdir /tmp/ud --strategy-path ft/strategies -1" > strategies.log 2>&1
+          echo "list_strategies_exit=$?" >> result.txt
+          docker run --rm -w /app --entrypoint "" aitrader:ci python -c "import freqtrade, ccxt; print('freqtrade', freqtrade.__version__, 'ccxt', ccxt.__version__)" >> result.txt 2>&1
+          exit 0
+      - name: Commit the result to the branch
+        run: |
+          mkdir -p research/tradfi/ci
+          { echo "run ${{ github.run_id }} sha ${{ github.sha }}"; cat result.txt; echo "--- pytest (tail)"; tail -n 40 pytest.log; echo "--- strategies"; grep -E "AIPortfolio|FamTsmom|Error|error" strategies.log | head -20; } > research/tradfi/ci/real-image.txt
+          git config user.name "tradfi-ci"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add research/tradfi/ci
+          git commit -m "tradfi: real Freqtrade image test result [skip ci]" || exit 0
+          for i in 1 2 3; do git pull --rebase -q origin ${{ github.ref_name }} && git push origin HEAD:${{ github.ref_name }} && break; sleep 5; done
