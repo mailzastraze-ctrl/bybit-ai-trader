@@ -41,5 +41,17 @@
  "mapping_note": "Owner config: z-score vs 200-bar mean, long below -3.5 sigma / short above +3.5, exit at -/+1.5 sigma, stop 3xATR(14), trailing 3xATR, no take profit, no time exit – with the engine's own exits (exit_mode 1). Sizing is the system's risk-based sizing (not 5x of capital).",
  "owner": true,
  "supersedes": "owner-sol15m-zscore",
- "supersede_reason": "the first import approximated the engine's exits with the system's own (ratchet, break-even); this one uses the engine's exits exactly"
+ "supersede_reason": "the first import approximated the engine's exits with the system's own (ratchet, break-even); this one uses the engine's exits exactly",
+  "provenance": {
+    "selected_on": "Found by the owner's Strategy Lab auto-selection on SOL 15m.",
+    "seen_data": [
+      {
+        "what": "the owner's Strategy Lab backtest on SOLUSDT 15m",
+        "from": "2025-11-20",
+        "to": "2026-11-20"
+      }
+    ],
+    "frozen": "2026-11-21 (import of the x2 version)",
+    "clean_evidence": "Clean evidence is the forward test from the freeze only. A one-off read on any period before the freeze is a replication: it can reject, never confirm (the same rule as clean_oos). PLAN B4's 'sealed last 12 months' is not sealed for this configuration."
+  }
 }
