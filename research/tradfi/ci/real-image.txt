@@ -1,0 +1,25 @@
+run 45178502789 sha 5e79617859f7c975c3a42c8dc99c740108372d78
+pytest_exit=0
+list_strategies_exit=0
+freqtrade 2026.10 ccxt 4.5.90
+--- pytest (tail)
+WARNING: Running pip as the 'root' user can result in broken permissions and conflicting behaviour with the system package manager, possibly rendering your system unusable. It is recommended to use a virtual environment instead: https://pip.pypa.io/warnings/venv. Use the --root-user-action option if you know what you are doing and want to suppress this warning.
+
+[notice] A new release of pip is available: 26.2.2 -> 26.3
+[notice] To update, run: pip install --upgrade pip
+........................................................................ [ 19%]
+........................................................................ [ 39%]
+........................................................................ [ 59%]
+............................................................sssss.ssssss [ 78%]
+sssssss................................................................. [ 98%]
+......                                                                   [100%]
+=============================== warnings summary ===============================
+tests/test_web.py::test_auth_and_endpoints
+  /home/ftuser/.local/lib/python3.14/site-packages/fastapi/testclient.py:1: StarletteDeprecationWarning: Using `httpx` with `starlette.testclient` is deprecated; install `httpx2` instead.
+    from starlette.testclient import TestClient as TestClient  # noqa
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+348 passed, 18 skipped, 1 warning in 46.73s
+--- strategies
+AIPortfolio
+FamTsmom
