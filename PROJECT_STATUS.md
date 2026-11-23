@@ -13,7 +13,8 @@ _Last updated: 2026-11-23 evening (demo = coin desks, monthly core off, no-entry
   - Frozen for the whole experiment: no queue, no rotation, no retirement; open coins are filled on a later lab import. A new choice only with the owner (`DESK_EPOCH`).
   - The assignment: control room → «Монеты» (owner can pick any strategies from each coin's list of best), `DESKS` log line; per coin the live record is the strategy's record. One strategy base with codes: `/explorer`.
   - By history ≈ 30 trades a month in total (0.4–2.5 per coin): tested strategies trade rarely per coin.
-- **Monthly TSMOM core:** off on demo (owner, 23.11); stays the forward benchmark and H1. Its open trades end on their own rules.
+- **Monthly TSMOM core:** off on demo (owner, 23.11); stays the forward benchmark and H1.
+- **Fresh start (owner, 23.11: "the previous stage failed, everything starts anew"):** the experiment started flat – the previous stage's 5 positions were closed at market at 15:56 UTC; the first desk entry followed at 16:00 UTC (BNB). The control room counts the experiment's result from its start.
 - **TradFi lane** (owner, 23.11; `docs/TRADFI.md`): Bybit's gold and S&P 500 perpetuals in the same bot, entries only while the underlying market is open, ≤ 2 positions, ≤ 0.5 % at stops, 0.1 % risk × BTC-correlation scale.
   - **XAUUSDT:** only `xau-macd-12h` (MACD 11/56/10 + zero line, 12h; the Strategy Lab autopilot's best by stability + return on ~3.3 years of PAXG, decoy-controlled; not clean evidence).
   - **SPYUSDT** (S&P 500; `SPXUSDT` is a memecoin): Trend Following (the TSMOM benchmark rule) and Momentum Rotation vs gold.
