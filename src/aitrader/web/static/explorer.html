@@ -83,7 +83,6 @@
   <select id="sort" title="Порядок (на телефоне; в таблице — клик по заголовку)">
     <option value="stage">Сначала торгующие</option><option value="code">По коду</option><option value="demo_pnl">По прибыли на демо</option>
     <option value="per_month">По частоте сделок</option><option value="res_pf">По PF на истории</option><option value="dd">По просадке</option>
-    <option value="fw_pnl">По доходности форвард-теста</option>
   </select>
   <a href="/#strategies" style="margin-left:auto">Монеты</a><a href="/">← Пульт</a>
 </header>
@@ -92,12 +91,11 @@
   <div id="cards"></div>
   <div class="wrap" id="tableWrap"><table>
     <thead>
-      <tr><th class="nosort"></th><th class="nosort"></th><th class="nosort"></th><th class="hide-m nosort"></th><th class="grp nosort" colspan="4">Исследование (на истории)</th>
-          <th class="grp nosort" colspan="3">Форвард-тест (новые данные)</th><th class="grp nosort" colspan="3">Демо-счёт (реальные сделки)</th></tr>
+      <tr><th class="nosort"></th><th class="nosort"></th><th class="nosort"></th><th class="hide-m nosort"></th><th class="grp nosort" colspan="3">История (проверка вне выборки)</th>
+          <th class="grp nosort" colspan="2">Демо-счёт</th></tr>
       <tr><th>Код</th><th>Метод</th><th>Статус</th><th class="hide-m">Монеты</th>
-          <th class="r">сделок</th><th class="r">в месяц</th><th class="r">PF</th><th class="r">просадка</th>
-          <th class="r">сделок</th><th class="r">PF</th><th class="r">итог</th>
-          <th class="r">сделок</th><th class="r">PF</th><th class="r">прибыль</th></tr>
+          <th class="r" title="на одной монете, не сумма по всем">сделок в мес.<br>на монету</th><th class="r">PF</th><th class="r">просадка</th>
+          <th class="r">сделок</th><th class="r">прибыль</th></tr>
     </thead>
     <tbody id="rows"></tbody>
   </table></div>
@@ -106,6 +104,7 @@
 <aside id="drawer"><div class="dh"><h2 id="dTitle">—</h2><button class="close" id="dClose">Закрыть ✕</button></div><div class="db" id="dBody"></div></aside>
 
 <script src="/static/ui.js"></script>
+<script src="/static/chart.js"></script>
 <script>
 const $ = (s) => document.querySelector(s);
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({"&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"}[c]));
@@ -145,7 +144,7 @@ function renderList() {
   let rows = ALL.strategies.filter((r) => view === "live" ? isLive(r) : view === "base" ? !isLive(r) && !OFF.includes(r.stage) : view === "off" ? OFF.includes(r.stage) : true);
   if (q) rows = rows.filter((r) => `${r.code ?? ""} #${r.code ?? ""} ${r.method} ${r.title} ${r.family} ${r.variant} ${r.id} ${r.pairs.join(" ")} ${(r.desk || []).join(" ")}`.toLowerCase().includes(q));
   const key = {code: (r) => r.code ?? 1e9, demo_pnl: (r) => -(r.demo.pnl ?? -1e9), fw_pnl: (r) => -(r.forward.pnl_pct ?? -1e9),
-               per_month: (r) => -(r.research.per_month ?? -1), res_pf: (r) => -(r.research.pf ?? -1e9), dd: (r) => r.research.dd ?? 1e9}[$("#sort").value];
+               per_month: (r) => -(r.research.per_month_coin ?? -1), res_pf: (r) => -(r.research.pf ?? -1e9), dd: (r) => r.research.dd ?? 1e9}[$("#sort").value];
   if (key) rows = rows.slice().sort((a, b) => key(a) - key(b));
   const all = ALL.strategies, nLive = all.filter(isLive).length, nOff = all.filter((r) => OFF.includes(r.stage)).length;
   $("#hint").innerHTML = `В базе <b>${all.length}</b> стратегий: торгуют сейчас <b>${nLive}</b>, прошли проверки и ждут <b>${all.length - nLive - nOff}</b>, отсеяны или сняты <b>${nOff}</b>. ` +
@@ -158,18 +157,17 @@ function renderList() {
     return `<tr data-id="${esc(r.id)}"><td class="num"><b>#${esc(r.code ?? "—")}</b></td><td class="name"><b>${esc(r.method)}${tags}</b><small>${esc(r.id)}</small></td>
       <td><span class="pill ${cls}">${esc(r.status)}</span></td>
       <td class="hide-m">${esc(coins.slice(0, 5).map(coin).join(", "))}${coins.length > 5 ? ` +${coins.length - 5}` : ""}</td>
-      <td class="r num">${r.research.trades ?? "—"}</td><td class="r num">${r.research.per_month == null ? "—" : nf(r.research.per_month, 1)}</td>
+      <td class="r num">${r.research.per_month_coin == null ? "—" : nf(r.research.per_month_coin, 1)}</td>
       <td class="r num">${pf(r.research.pf)}</td><td class="r num">${r.research.dd == null ? "—" : nf(r.research.dd * 100, 1) + "%"}</td>
-      <td class="r num">${r.forward.trades || "—"}</td><td class="r num">${pf(r.forward.pf)}</td><td class="r num">${r.forward.pnl_pct == null ? "—" : sg(r.forward.pnl_pct, 2, "%")}</td>
-      <td class="r num">${r.demo.trades || "—"}</td><td class="r num">${r.demo.trades ? pf(r.demo.pf) : "—"}</td><td class="r num">${r.demo.trades ? sg(r.demo.pnl, 2, " $") : "—"}</td></tr>`;
-  }).join("") : `<tr><td colspan="14" class="empty">Здесь пока пусто.</td></tr>`;
+      <td class="r num">${r.demo.trades || "—"}</td><td class="r num">${r.demo.trades ? sg(r.demo.pnl, 2, " $") : "—"}</td></tr>`;
+  }).join("") : `<tr><td colspan="9" class="empty">Здесь пока пусто.</td></tr>`;
   $("#cards").innerHTML = rows.length ? rows.map((r) => {
     const cls = pillCls(r), coins = (r.desk || []).length ? r.desk : r.pairs;
     return `<div class="sc" data-id="${esc(r.id)}"><div class="top"><div class="name"><b>#${esc(r.code ?? "—")} · ${esc(r.method)}${r.benchmark ? `<span class="tag">эталон</span>` : ""}</b>
         <small>${esc(coins.slice(0, 4).map(coin).join(", "))}${coins.length > 4 ? ` +${coins.length - 4}` : ""}</small></div>
         <span class="pill ${cls}">${esc(r.status)}</span></div>
-      <div class="three"><div><b>История</b>${r.research.trades ?? "—"} сд. · PF ${pf(r.research.pf)}</div>
-        <div><b>Форвард</b>${r.forward.trades ? `${r.forward.trades} сд. · ${sg(r.forward.pnl_pct, 1, "%")}` : "—"}</div>
+      <div class="three"><div><b>История, на монету</b>${r.research.per_month_coin == null ? "—" : nf(r.research.per_month_coin, 1) + " сд./мес"} · PF ${pf(r.research.pf)}</div>
+        <div><b>Просадка</b>${r.research.dd == null ? "—" : nf(r.research.dd * 100, 1) + "%"}</div>
         <div><b>Демо</b>${r.demo.trades ? `${r.demo.trades} сд. · ${sg(r.demo.pnl, 1, "$")}` : "—"}</div></div></div>`;
   }).join("") : `<div class="empty">Здесь пока пусто.</div>`;
 }
@@ -186,48 +184,11 @@ function lineChart(points, h = 160, zero = null) {
     ${zero != null ? `<line x1="0" x2="${w}" y1="${Y(zero)}" y2="${Y(zero)}" stroke="#2a313b" stroke-dasharray="4 4"/>` : ""}
     <path d="${d}" fill="none" stroke="${up ? "#2fbf71" : "#ef5350"}" stroke-width="2" vector-effect="non-scaling-stroke"/></svg>`;
 }
-function candleChart(candles, trades, width) {
-  if (!candles.length) return `<div class="empty">Бот сейчас не следит за свечами этой монеты (она не в его списке) — сделки показаны в таблице ниже.</div>`;
-  const w = Math.max(320, Math.round(width || 1000)), h = w < 600 ? 280 : 360, pad = 8, n = candles.length, cw = (w - 2 * pad) / n;
-  const t = candles.map((c) => new Date(c[0]).getTime());
-  let lo = Math.min(...candles.map((c) => +c[3])), hi = Math.max(...candles.map((c) => +c[2]));
-  const vis = trades.filter((x) => new Date(x.close_date || x.open_date).getTime() >= t[0]);
-  for (const x of vis) { const e = +x.close_rate || +x.current_rate || +x.open_rate; lo = Math.min(lo, +x.open_rate, e); hi = Math.max(hi, +x.open_rate, e); }
-  const Y = (v) => pad + (1 - (v - lo) / (hi - lo || 1)) * (h - 2 * pad);
-  const X = (ms) => { let i = t.findIndex((v) => v >= ms); if (i < 0) i = n - 1; return pad + (i + 0.5) * cw; };
-  let s = "";
-  candles.forEach((c, i) => {
-    const [o, hh, l, cl] = [+c[1], +c[2], +c[3], +c[4]], x = pad + (i + 0.5) * cw, col = cl >= o ? "#2fbf71" : "#ef5350";
-    s += `<line x1="${x}" x2="${x}" y1="${Y(hh)}" y2="${Y(l)}" stroke="${col}" stroke-width="1" vector-effect="non-scaling-stroke"/>`;
-    s += `<rect x="${x - cw * 0.35}" width="${Math.max(cw * 0.7, 0.6)}" y="${Math.min(Y(o), Y(cl))}" height="${Math.max(Math.abs(Y(o) - Y(cl)), 0.8)}" fill="${col}"/>`;
-  });
-  for (const x of vis) {
-    const xa = X(new Date(x.open_date).getTime()), ya = Y(+x.open_rate), win = +x.profit_abs >= 0;
-    const tip = `${x.is_short ? "Шорт" : "Лонг"} ${coin(x.pair)}: вход ${dt(x.open_date)} по ${x.open_rate}` +
-                (x.close_date ? `, выход ${dt(x.close_date)} по ${x.close_rate} (${RS[x.exit_reason] || x.exit_reason || ""}), результат ${nf(x.profit_abs, 2)} $`
-                              : `, позиция открыта, сейчас ${nf(x.profit_abs, 2)} $`);
-    if (!x.close_date && x.current_rate) {
-      const xb = pad + (n - 0.5) * cw, yb = Y(+x.current_rate);
-      s += `<line x1="${xa}" y1="${ya}" x2="${xb}" y2="${yb}" stroke="#f0b429" stroke-width="2" stroke-dasharray="2 3" vector-effect="non-scaling-stroke" data-tip="${esc(tip)}" style="cursor:pointer"><title>${esc(tip)}</title></line>`;
-    }
-    if (x.close_date) {
-      const xb = X(new Date(x.close_date).getTime()), yb = Y(+x.close_rate);
-      s += `<line x1="${xa}" y1="${ya}" x2="${xb}" y2="${yb}" stroke="${win ? "#2fbf71" : "#ef5350"}" stroke-width="2" stroke-dasharray="5 3" vector-effect="non-scaling-stroke" data-tip="${esc(tip)}" style="cursor:pointer"><title>${esc(tip)}</title></line>`;
-      s += `<circle cx="${xb}" cy="${yb}" r="5" fill="${win ? "#2fbf71" : "#ef5350"}" stroke="#0f1216" stroke-width="1.5" data-tip="${esc(tip)}" style="cursor:pointer"><title>${esc(tip)}</title></circle>`;
-    }
-    const tri = x.is_short ? `${xa - 7},${ya - 9} ${xa + 7},${ya - 9} ${xa},${ya}` : `${xa - 7},${ya + 9} ${xa + 7},${ya + 9} ${xa},${ya}`;
-    s += `<polygon points="${tri}" fill="${x.is_short ? "#ef5350" : "#2fbf71"}" stroke="#fff" stroke-width="1" data-tip="${esc(tip)}" style="cursor:pointer"><title>${esc(tip)}</title></polygon>`;
-  }
-  return `<svg viewBox="0 0 ${w} ${h}" style="height:${h}px;background:#13171c;border-radius:8px">${s}</svg>
-    <div class="dim" style="font-size:12px;margin-top:6px">▲ вход в лонг · ▼ вход в шорт · ● выход (зелёный — прибыль, красный — убыток) · жёлтый пунктир — позиция ещё открыта. Нажмите на отметку — подробности. Свечи: ${esc(candles.length)} шт., с ${dt(candles[0][0])}.</div>
-    <div id="tip" style="margin-top:6px;font-size:13px;min-height:1.2em"></div>`;
-}
-
 // ------------------------------------------------------------------ detail
 async function openStrategy(id) {
   SEL = id; document.body.classList.add("open"); $("#dTitle").textContent = "Загрузка…"; $("#dBody").innerHTML = "";
   try { DET = await api(`/api/explorer/${encodeURIComponent(id)}`); } catch (e) { $("#dBody").innerHTML = `<div class="empty">Не удалось загрузить (${esc(e.message)}).</div>`; return; }
-  const pairs = [...new Set([...(DET.trades || []).map((t) => t.pair), ...(DET.row.pairs || [])])];
+  const pairs = [...new Set([...(DET.row.desk || []), ...(DET.trades || []).map((t) => t.pair), ...(DET.coins || []).map((c) => c.pair), ...(DET.row.pairs || [])])];
   PAIR = pairs[0] || null;
   renderDetail(pairs);
   if (PAIR) loadCandles();
@@ -273,9 +234,14 @@ function renderDetail(pairs) {
         ["доля прибыльных", r.demo.win_rate == null ? "—" : nf(r.demo.win_rate * 100, 0) + "%"],
         ["альфа к BTC", r.demo.alpha_ann == null ? "—" : `${sg(r.demo.alpha_ann * 100, 1, "%/год")} (β ${nf(r.demo.beta, 2)})`]])}
     </div>
-    <div class="card"><h3>Сделки на графике</h3>
+    ${(d.coins || []).length ? `<div class="card"><h3>По монетам (проверка вне выборки · демо)</h3><div class="wrap"><table>
+      <thead><tr><th>Монета</th><th class="r">сделок в месяц</th><th class="r">прибыль в месяц</th><th class="r">сделок в проверке</th><th class="r">демо: сделок</th><th class="r">демо: прибыль</th></tr></thead>
+      <tbody>${d.coins.map((x) => `<tr data-p="${esc(x.pair)}" style="cursor:pointer"><td><b>${esc(coin(x.pair))}</b>${x.trading ? ` <span class="pill live">торгует</span>` : ""}</td>
+        <td class="r num">${x.per_month == null ? "—" : nf(x.per_month, 1)}</td><td class="r num">${x.pnl_month == null ? "—" : sg(x.pnl_month, 0, " $")}</td>
+        <td class="r num">${x.trades ?? "—"}</td><td class="r num">${x.demo_trades || "—"}</td><td class="r num">${x.demo_pnl == null ? "—" : sg(x.demo_pnl, 2, " $")}</td></tr>`).join("")}</tbody></table></div></div>` : ""}
+    <div class="card"><h3>График монеты: сделки на демо и бэктест на истории</h3>
       <div class="chips" id="pairChips">${pairs.map((p) => `<button data-p="${esc(p)}" class="${p === PAIR ? "on" : ""}">${esc(coin(p))}${tr.some((t) => t.pair === p) ? ` · ${tr.filter((t) => t.pair === p).length}` : ""}</button>`).join("") || `<span class="dim">Монет нет.</span>`}</div>
-      <div id="chart" style="margin-top:10px"><div class="empty">Загрузка свечей…</div></div>
+      <div id="chart" style="margin-top:10px"></div>
     </div>
     <div class="card"><h3>Все сделки на демо-счёте (${tr.length}${tr.length - closed.length ? `, из них открыто ${tr.length - closed.length}` : ""})</h3>${tr.length ? `<div class="wrap"><table>
       <thead><tr><th>Монета</th><th>Сторона</th><th>Вход</th><th class="r">цена</th><th>Выход</th><th class="r">цена</th><th class="r">результат</th><th>Причина</th><th>Что было после</th></tr></thead>
@@ -297,21 +263,13 @@ function renderDetail(pairs) {
   for (const b of document.querySelectorAll("#pairChips button")) b.onclick = () => { PAIR = b.dataset.p; renderDetail(pairs); loadCandles(); };
   for (const row of document.querySelectorAll("#dBody tbody tr[data-p]")) row.onclick = () => { PAIR = row.dataset.p; renderDetail(pairs); loadCandles(); };
 }
-async function loadCandles() {
-  const pair = PAIR, tf = DET.row.timeframe || "1h";
-  let data = {candles: []};
-  const width = ($("#chart") || {}).clientWidth || 1000, limit = Math.max(100, Math.min(400, Math.floor(width / 3)));  // ≥3 px per candle
-  try { data = await api(`/api/explorer/candles?pair=${encodeURIComponent(pair)}&tf=${encodeURIComponent(tf)}&limit=${limit}`); } catch (e) { /* shown as empty */ }
-  if (pair !== PAIR) return;
-  const el = $("#chart");
-  if (el) el.innerHTML = (data.timeframe && data.timeframe !== tf ? `<div class="dim" style="font-size:12px;margin-bottom:6px">Свечи ${esc(data.timeframe)} (таймфрейм ${esc(tf)} недоступен).</div>` : "") +
-                         candleChart(data.candles || [], (DET.trades || []).filter((t) => t.pair === pair), width);
+let CHART = null;
+function loadCandles() {  // the shared chart (static/chart.js): demo trades + this strategy's backtest on history
+  if (CHART) { CHART.destroy(); CHART = null; }
+  const el = $("#chart"); if (!el || !PAIR) return;
+  CHART = TChart.mount(el, {pair: PAIR, tf: DET.row.timeframe || "1h", sid: DET.row.id, height: innerWidth < 800 ? 300 : 400});
 }
-document.addEventListener("click", (e) => {  // tap on a trade marker (phones have no hover)
-  const m = e.target.closest && e.target.closest("#chart [data-tip]"); const tip = $("#tip");
-  if (m && tip) tip.textContent = m.dataset.tip;
-});
-function closeDrawer() { document.body.classList.remove("open"); SEL = null; try { history.replaceState(null, "", location.pathname); } catch (e) { /* ignore */ } }
+function closeDrawer() { document.body.classList.remove("open"); SEL = null; if (CHART) { CHART.destroy(); CHART = null; } try { history.replaceState(null, "", location.pathname); } catch (e) { /* ignore */ } }
 
 // ------------------------------------------------------------------ wiring
 $("#q").oninput = renderList; $("#sort").onchange = renderList; $("#view").onchange = renderList;

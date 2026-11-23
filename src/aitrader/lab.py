@@ -17,7 +17,7 @@ import logging
 import threading
 from datetime import timedelta
 
-from aitrader import forward
+from aitrader import forward, tradfi
 from aitrader.learner import Learner
 from aitrader.lifecycle import DEPLOYED, Lifecycle
 from aitrader.registry import Registry
@@ -145,6 +145,7 @@ def build_state(s: Settings, reg: Registry) -> dict:
         "server_trials_90d": len(srs),
         "universe": reg.kv_get("universe"),
         "shadow": _book_scheduled(reg),
+        "history": history_book(reg),
         "external_tests": external_tests(reg),
         "screen_tested": screen_tested(reg),
     }
@@ -159,6 +160,43 @@ def _book_scheduled(reg: Registry) -> list[dict]:
     except Exception as ex:  # noqa: BLE001 – bookkeeping must never stop a lab run
         log.warning("forward v3: schedule not stored: %s", ex)
     return book
+
+
+HISTORY_REFRESH_DAYS = 7  # the year on the charts moves on: each strategy's history is redone weekly
+
+
+def history_book(reg: Registry, now=None) -> list[dict]:
+    """The strategies trading on demo (coin desks, frozen parameters) whose year of backtest trades for
+    the owner's charts is missing, older than a week or made with other parameters/coins (`shadow.history`)."""
+    import hashlib
+    import json as _json
+
+    from aitrader import desks as D
+    from aitrader.web.chart import HISTORY_KEY
+    now = now or utcnow()
+    have = reg.kv_get(HISTORY_KEY) or {}
+    seen: dict[str, dict] = {}
+    for pair, d in ((reg.kv_get("desks") or {}).get("coins") or {}).items():
+        for x in D.picks(d):
+            sid = x.get("strategy")
+            if not sid or not x.get("family"):
+                continue
+            e = seen.setdefault(sid, {"id": sid, "family": x["family"], "params": x.get("params") or {},
+                                      "timeframe": x.get("timeframe") or "1h", "sides": x.get("sides") or ["long", "short"],
+                                      "pairs": []})
+            for p in [pair, *sorted((x.get("coin_scores") or {}).keys())]:
+                if p not in e["pairs"] and not tradfi.is_tradfi(p):
+                    e["pairs"].append(p)
+    out = []
+    for e in seen.values():
+        e["params_key"] = hashlib.sha1(_json.dumps([e["params"], sorted(e["pairs"]), e["timeframe"]],
+                                                   sort_keys=True).encode()).hexdigest()[:12]
+        h = have.get(e["id"]) or {}
+        ts = parse_dt(h.get("ts"))
+        if h.get("params_key") == e["params_key"] and ts is not None and (now - ts).days < HISTORY_REFRESH_DAYS:
+            continue
+        out.append(e)
+    return out
 
 
 def screen_tested(reg: Registry, days: int = 21) -> list[str]:
@@ -270,6 +308,11 @@ def apply_import(s: Settings, reg: Registry, data: dict) -> dict:
     """Store finished experiments, candidates, market scores; learn; act on revalidations."""
     now = iso()
     fw = forward.apply(reg, data["shadow"]) if data.get("shadow") else None
+    if data.get("history"):
+        from aitrader.web.chart import store_history
+        n_hist = store_history(reg, data["history"])
+        if n_hist:
+            reg.event("research", f"charts: a year of backtest trades for {n_hist} strategies trading on demo", data={"lab": True})
     if data.get("screen"):
         sc = data["screen"]
         reg.kv_set("screen", sc | {"ts": now})

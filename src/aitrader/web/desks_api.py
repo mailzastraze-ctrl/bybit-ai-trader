@@ -48,32 +48,48 @@ def _label(nm: dict, sid: str) -> dict:
     return {"code": n.get("code"), "method": n.get("method") or sid}
 
 
-def overview(reg: Registry, open_trades: list[dict], sleeve_pairs: dict[str, list[str]] | None = None) -> dict:
+def _on_coin(ev: dict, pair: str) -> dict[str, D.Option]:
+    return {o.strategy: o for o in (ev or {}).get(pair, [])}
+
+
+def overview(reg: Registry, open_trades: list[dict], sleeve_pairs: dict[str, list[str]] | None = None,
+             ev: dict | None = None) -> dict:
+    """Each coin: its strategy (or the owner's strategies) and the guests trading it, every number
+    on THIS coin only (owner, 23.11: figures across all of a strategy's coins blur the picture)."""
     st = reg.kv_get("desks") or {}
     nm = N.names(reg)
     live = _live(reg, st.get("created"))
     pos = {t.get("pair"): t for t in open_trades or [] if isinstance(t, dict)}
     sleeve_pairs = sleeve_pairs or {}
     mine = {x["strategy"] for d in (st.get("coins") or {}).values() for x in D.picks(d)}
+
+    def demo(sid: str, pair: str) -> dict:
+        xs = live.get((sid, pair), [])
+        return {"trades": len(xs), "pnl": round(sum(xs), 2), "pf": _pf(xs), "wins": sum(1 for v in xs if v > 0)}
+
     rows = []
     for pair, d in (st.get("coins") or {}).items():
+        here = _on_coin(ev, pair)
         ps = []
         for x in D.picks(d):
-            xs = live.get((x["strategy"], pair), [])
-            every = [v for (sid, _p), vs in live.items() if sid == x["strategy"] for v in vs]
-            coins = sleeve_pairs.get(x["strategy"]) or [pair]
             ps.append({"id": x["strategy"], **_label(nm, x["strategy"]), "timeframe": x.get("timeframe"),
-                       "coins": [D.coin_name(c) for c in coins],
-                       "demo_all": {"trades": len(every), "pnl": round(sum(every), 2), "pf": _pf(every)},
                        "bucket": x.get("bucket"), "per_month": x.get("per_month"), "pnl_month": x.get("pnl_month"),
                        "max_dd": x.get("max_dd"), "oos_trades": x.get("oos_trades"), "manual": bool(x.get("manual")),
-                       "demo": {"trades": len(xs), "pnl": round(sum(xs), 2), "pf": _pf(xs),
-                                "wins": sum(1 for v in xs if v > 0)}})
+                       "demo": demo(x["strategy"], pair)})
+        own = {p["id"] for p in ps}
+        guests = []
+        for sid in sorted(s for s, cs in sleeve_pairs.items() if pair in (cs or []) and s not in own and s in mine):
+            o = here.get(sid)
+            guests.append({"id": sid, **_label(nm, sid), "timeframe": o.timeframe if o else None,
+                           "per_month": round(o.per_month, 2) if o else None,
+                           "pnl_month": round(o.pnl_month, 2) if o else None, "oos_trades": o.trades if o else None,
+                           "demo": demo(sid, pair)})
+        guests.sort(key=lambda g: -(g["pnl_month"] or 0))
         t = pos.get(pair)
-        rows.append({"pair": pair, "coin": D.coin_name(pair), "picks": ps, "manual": bool(d.get("manual")),
+        rows.append({"pair": pair, "coin": D.coin_name(pair), "picks": ps, "guests": guests, "manual": bool(d.get("manual")),
                      "position": None if not t else {
                          "side": "short" if t.get("is_short") else "long", "tag": t.get("enter_tag"),
-                         "guest": (t.get("enter_tag") in mine) and t.get("enter_tag") not in {p["id"] for p in ps},
+                         "guest": (t.get("enter_tag") in mine) and t.get("enter_tag") not in own,
                          **_label(nm, t.get("enter_tag") or ""), "profit_abs": t.get("profit_abs"),
                          "profit_ratio": t.get("profit_ratio"), "open_date": t.get("open_date")}})
     return {"epoch": st.get("epoch"), "created": st.get("created"), "summary": D.summary(st.get("coins") or {}),
@@ -94,12 +110,11 @@ def options(life: Lifecycle, pair: str) -> dict:
     nm = N.names(reg)
     rows = []
     for i, o in enumerate(opts, 1):
-        r = reg.one("SELECT stage, oos FROM strategies WHERE id=?", (o.strategy,)) or {}
-        oos = r.get("oos") or {}
+        r = reg.one("SELECT stage FROM strategies WHERE id=?", (o.strategy,)) or {}
         rows.append({"rank": i, "id": o.strategy, **_label(nm, o.strategy), "family": o.family, "timeframe": o.timeframe,
                      "bucket": D.bucket(o.per_month, cuts), "per_month": round(o.per_month, 2),
                      "pnl_month": round(o.pnl_month, 2), "max_dd": round(o.dd, 4), "score": round(o.score, 2),
-                     "oos_trades": o.trades, "pf_all": oos.get("profit_factor"), "stage": r.get("stage"),
+                     "oos_trades": o.trades, "stage": r.get("stage"),
                      "chosen": o.strategy in chosen, "elsewhere": D.coin_name(elsewhere[o.strategy]) if o.strategy in elsewhere else None})
     return {"pair": pair, "coin": D.coin_name(pair), "options": rows}
 

@@ -131,3 +131,72 @@ def run(s: Settings, entries: list[dict], out, workers: int = 4, ft: FreqtradeRu
              sum(not r["ok"] for r in results), sum((r.get("diag") or {}).get("still_open", 0) for r in results),
              sum((r.get("diag") or {}).get("backtest_trades", 0) for r in results))
     return results
+
+
+# ---------------------------------------------------------------------------- history for the charts
+HISTORY_DAYS = 365  # the charts show each trading strategy's trades over the last year
+
+
+def _compact(trades: list[dict]) -> dict[str, list[list]]:
+    """Backtest trades → per coin [open ms, close ms, short, open rate, close rate, return, reason]."""
+    out: dict[str, list[list]] = {}
+    for t in trades:
+        od, cd = parse_dt(str(t.get("open_date") or "")), parse_dt(str(t.get("close_date") or ""))
+        if od is None or not t.get("pair"):
+            continue
+        out.setdefault(t["pair"], []).append([
+            int(od.timestamp() * 1000), int(cd.timestamp() * 1000) if cd else None, int(bool(t.get("is_short"))),
+            t.get("open_rate"), t.get("close_rate"), round(float(t.get("profit_ratio") or 0.0), 5),
+            t.get("exit_reason")])
+    return out
+
+
+def history_one(s: Settings, ft: FreqtradeRunner, root, e: dict, start) -> dict:
+    """One trading strategy, frozen parameters, its coins, the last year: the trades it would have made.
+    For the owner's charts only – part of that year was seen when the strategy was searched, so this is
+    an illustration, never evidence (the evidence is the walk-forward and the forward test)."""
+    base = {"id": e["id"], "params_key": e.get("params_key"), "from": iso(start), "to": iso(utcnow())}
+    job = Job(root / f"h-{e['id']}")
+    try:
+        cfg = ft.write_config(job, "config.json", research_config(s, e["pairs"], timeframe=e.get("timeframe"),
+                                                                  sides=e.get("sides")))
+        man = Manifest(sleeves=[Sleeve(id=e["id"], family=e["family"], params=e["params"], pairs=e["pairs"],
+                                       stage="production", risk=0.01, leverage=s.lifecycle.leverage,
+                                       sides=e.get("sides") or ["long", "short"])])  # the bot runs on the strategy's own timeframe here
+        mpath = job.path("manifest.json")
+        write_json_atomic(mpath, man.to_dict())
+        overlay = ft.write_config(job, "overlay.json", {"aitrader": {"manifest_path": str(mpath)}})
+        out = ft.backtest(job, [cfg, overlay], "AIPortfolio", f"{start:%Y%m%d}-", s.research.base_fee, "hist")
+        trades = strategy_stats(load_backtest(out), "AIPortfolio").get("trades", [])
+        return base | {"ok": True, "pairs": _compact(trades), "n": len(trades)}
+    except Exception as ex:  # noqa: BLE001 – one strategy without a chart must not stop the others
+        log.warning("history %s failed: %s", e["id"], ex)
+        return base | {"ok": False, "error": str(ex)[:300]}
+
+
+def history(s: Settings, entries: list[dict], out, workers: int = 4, ft: FreqtradeRunner | None = None) -> list[dict]:
+    """Backtest every strategy trading on demo (server state `history`) over the last year; written to
+    `history-results.json` next to the forward test and imported with it (web/chart.store_history)."""
+    entries = [e for e in entries or [] if e.get("id") and e.get("pairs") and e.get("family")]
+    if not entries:
+        return []
+    ft = ft or FreqtradeRunner(s)
+    root = out / "hist-jobs"
+    root.mkdir(parents=True, exist_ok=True)
+    start = utcnow() - timedelta(days=HISTORY_DAYS)
+    from aitrader.research.screen import warmup_days
+    for tf in sorted({e.get("timeframe") or "1h" for e in entries}):
+        group = [e for e in entries if (e.get("timeframe") or "1h") == tf]
+        pairs = sorted({p for e in group for p in e["pairs"] if not tradfi.is_tradfi(p)} | {MARKET_PAIR})
+        dl = Job(root / f"_download-{tf}")
+        try:
+            cfg = ft.write_config(dl, "config.json", research_config(s, pairs, timeframe=tf))
+            ft.download(dl, cfg, pairs, f"{start - timedelta(days=warmup_days(tf)):%Y%m%d}-", timeframe=tf, prepend=True)
+        except Exception as ex:  # noqa: BLE001 – those strategies then fail alone, visibly
+            log.warning("history candles %s not downloaded: %s", tf, str(ex)[:200])
+    with ThreadPoolExecutor(max_workers=workers) as pool:
+        results = list(pool.map(lambda e: history_one(s, ft, root, e, start), entries))
+    write_json_atomic(out / "history-results.json", {"results": results})
+    log.info("history for the charts: %d strategies, %d trades, %d errors", len(results),
+             sum(r.get("n", 0) for r in results), sum(not r["ok"] for r in results))
+    return results

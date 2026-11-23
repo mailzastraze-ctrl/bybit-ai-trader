@@ -220,7 +220,30 @@ def desks_overview() -> dict:
     c = ft()
     man = Manifest.load(S.manifest_path)
     return desks_api.overview(reg(), _safe(c.status, []) if c.ping() else [],
-                              {sl.id: sl.pairs for sl in man.sleeves if sl.stage != "closing"})
+                              {sl.id: sl.pairs for sl in man.sleeves if sl.stage != "closing"},
+                              _safe(lambda: desks_api.evidence(_life()), {}))
+
+
+@app.get("/api/chart/candles", dependencies=[Depends(auth)])
+def chart_candles(pair: str, tf: str = "1h", end: int | None = None, limit: int = 500) -> dict:
+    """Bybit candles of any coin and timeframe, as far back as the chart is scrolled (`end` = ms)."""
+    from aitrader.web import chart
+    if tf not in chart.INTERVAL:
+        raise HTTPException(400, f"timeframe must be one of {', '.join(chart.INTERVAL)}")
+    try:
+        return chart.candles(pair, tf, end, limit)
+    except Exception as e:  # noqa: BLE001 – the page shows the reason instead of an empty chart
+        raise HTTPException(502, f"candles unavailable: {e}") from e
+
+
+@app.get("/api/chart/trades", dependencies=[Depends(auth)])
+def chart_trades(pair: str, sid: str | None = None) -> dict:
+    """Every trade on one coin for the chart: demo trades and the lab's backtest on history."""
+    from aitrader.web import chart
+    c = ft()
+    man = Manifest.load(S.manifest_path)
+    return chart.coin_trades(reg(), pair, _safe(c.status, []) if c.ping() else [],
+                             {sl.id: sl.pairs for sl in man.sleeves if sl.stage != "closing"}, extra=[sid] if sid else None)
 
 
 @app.get("/api/desks/options", dependencies=[Depends(auth)])

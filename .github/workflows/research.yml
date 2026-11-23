@@ -225,7 +225,9 @@ jobs:
         if: always()
         with:
           name: lab-results-shadow
-          path: work/batch/shadow/shadow-results.json
+          path: |
+            work/batch/shadow/shadow-results.json
+            work/batch/shadow/history-results.json
           retention-days: 7
           if-no-files-found: ignore
 
