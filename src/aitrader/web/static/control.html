@@ -187,7 +187,7 @@ details.more{margin-top:12px;border-top:1px solid var(--line);padding-top:10px}
 details.more summary{cursor:pointer;color:var(--text2);font-size:12.5px;list-style:none}
 details.more summary::before{content:"▸ ";color:var(--muted)}details.more[open] summary::before{content:"▾ "}
 details.more[open] summary{margin-bottom:10px}
-.kpis{grid-template-columns:repeat(5,1fr)}
+.kpis{grid-template-columns:repeat(3,1fr)}
 @media (max-width:1200px){.kpis{grid-template-columns:repeat(3,1fr)}}
 @media (max-width:640px){.kpis{grid-template-columns:repeat(2,1fr)}.kpi .v{font-size:19px}}
 @media (max-width:900px){header{flex-wrap:wrap}.tabs{order:3;width:100%;overflow-x:auto}}
@@ -195,6 +195,8 @@ details.more[open] summary{margin-bottom:10px}
 .btn:hover{border-color:var(--text2)}
 .btn.on{background:#2b3a2b;border-color:#3fc23f}
 .opt td{vertical-align:middle}
+tr.click{cursor:pointer}tr.click:hover td{background:var(--card2)}
+.guests{font-size:12px;color:var(--text2);line-height:1.6;margin-top:3px}
 </style>
 </head>
 <body class="t-overview">
@@ -215,13 +217,9 @@ details.more[open] summary{margin-bottom:10px}
   <!-- ======================= ОБЗОР ======================= -->
   <section class="card c12" data-tab="overview"><div class="brief"><div id="brief">Загрузка…</div><div class="att" id="attention"></div></div></section>
   <section class="c12 kpis" id="kpis" data-tab="overview"></section>
-  <section class="card c8" data-tab="overview">
+  <section class="card c12" data-tab="overview">
     <h2>Торговый капитал (USDT) <span class="sub"><span class="seg" id="eqRange"><button data-h="24">24ч</button><button data-h="168" class="on">7д</button><button data-h="0">Всё</button></span></span></h2>
     <div id="eqChart" style="height:250px"></div>
-  </section>
-  <section class="card c4 world" data-tab="overview">
-    <h2>Мир сейчас <span class="sub" id="worldNow"></span></h2>
-    <div id="world"></div>
   </section>
   <section class="card c12" data-tab="overview trades">
     <h2>Открытые позиции <span class="sub" id="posSub"></span></h2>
@@ -229,30 +227,13 @@ details.more[open] summary{margin-bottom:10px}
     <div class="sub" id="sigLine" style="margin-top:8px;line-height:1.5"></div>
     <div class="sub" id="pmLine" style="margin-top:4px;line-height:1.5"></div>
   </section>
-  <section class="card c12" data-tab="overview">
-    <h2>Как работает компания <span class="sub">путь каждой стратегии к реальному счёту</span></h2>
-    <div class="funnel" id="pipeline"></div>
-    <details class="more"><summary>Форвард-тест: держат ли найденные стратегии прибыль на новых данных</summary><div id="forward"></div></details>
-  </section>
-  <section class="card c6" data-tab="overview">
-    <h2>Цели компании <span class="sub">считаются по реальным данным</span></h2>
-    <div id="goals"></div>
-    <p class="dim" id="mission" style="margin:10px 0 0;font-size:12px"></p>
-  </section>
-  <section class="card c6" data-tab="overview">
-    <h2>Журнал компании</h2>
-    <div class="log" id="log"></div>
-  </section>
 
   <!-- ======================= СТРАТЕГИИ ======================= -->
   <section class="card c12" data-tab="strategies">
     <h2>Монеты и их стратегии <span class="sub" id="deskSub"></span></h2>
-    <p class="dim" style="margin:0 0 10px;font-size:12.5px;line-height:1.5">На каждой монете торгует лучшая на ней стратегия из прошедших проверки на истории (прибыль на этой монете с поправкой на просадку),
-      у каждой монеты своя. Каждая стратегия кроме своей монеты торгует и другие монеты, где была в плюсе на истории (там она гость: на своей монете она первая).
-      Набор заморожен на весь эксперимент: статистика копится отдельно по каждой паре «стратегия + монета». «Выбрать» — поставить на монету любые стратегии из списка лучших для неё.
-      Сортировка — по клику на заголовок любой колонки, во всех таблицах.</p>
+    <p class="dim" style="margin:0 0 10px;font-size:12.5px">Все цифры — на этой монете. Нажмите на строку — график монеты со сделками демо и бэктеста на истории.</p>
     <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px"><button class="btn" id="addCoin">+ Добавить монету</button><a class="btn" href="/explorer">Вся база стратегий ↗</a></div>
-    <div class="scroll" id="desks"></div>
+    <div id="desks"></div>
   </section>
 
   <!-- ======================= ЛАБОРАТОРИЯ ======================= -->
@@ -284,6 +265,16 @@ details.more[open] summary{margin-bottom:10px}
     <div class="log" id="learn"></div>
   </section>
 
+  <section class="card c12" data-tab="lab">
+    <h2>Как работает компания <span class="sub">путь каждой стратегии к реальному счёту</span></h2>
+    <div class="funnel" id="pipeline"></div>
+    <details class="more"><summary>Форвард-тест: держат ли найденные стратегии прибыль на новых данных</summary><div id="forward"></div></details>
+  </section>
+  <section class="card c12" data-tab="lab">
+    <h2>Журнал компании</h2>
+    <div class="log" id="log"></div>
+  </section>
+
   <!-- ======================= СДЕЛКИ ======================= -->
   <section class="card c12" data-tab="trades">
     <h2>Кто торгует сейчас <span class="sub" id="slvSub"></span></h2>
@@ -298,6 +289,7 @@ details.more[open] summary{margin-bottom:10px}
 <aside class="drawer" id="drawer"><button class="x" id="dx">Закрыть ✕</button><div id="dbody"></div></aside>
 <div class="tip" id="tip"></div>
 <script src="/static/ui.js"></script>
+<script src="/static/chart.js"></script>
 <script src="/static/control.js"></script>
 </body>
 </html>

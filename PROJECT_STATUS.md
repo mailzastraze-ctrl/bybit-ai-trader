@@ -5,7 +5,7 @@ _Last updated: 2026-11-23 evening (demo = coin desks, monthly core off, no-entry
 ## What runs
 - **Railway** (one container, volume `/data`, EU West, Hobby plan): Freqtrade on **Bybit Demo only** (`demo_trading` is hard-required, 1x), the manager (lifecycle, learning, manifest) and the web control room. No research on the server.
 - **GitHub Actions research lab** (`research-lab`, public repo, 4 runners, a run every ~3 h): walk-forward, screener/autopilot, forward test of frozen strategies. It sends compact results to the server.
-- Web: https://aitrader-production-cf456409.up.railway.app (basic auth: `WEB_USER` / `WEB_PASSWORD` in Railway). `/` control room («Монеты»: coin desks and the owner's choice), `/explorer` the one strategy base (codes, sortable), `/hq` 3D office (owner-maintained).
+- Web: https://aitrader-production-cf456409.up.railway.app (basic auth: `WEB_USER` / `WEB_PASSWORD` in Railway). `/` control room («Монеты»: coin desks and the owner's choice, every figure on that coin; a click opens the coin's candle chart with demo trades and each strategy's backtest year from the lab), `/explorer` the one strategy base (codes, trades per month on one coin), `/hq` 3D office (owner-maintained).
 - No profitability is claimed. Numbers come from demo fills or walk-forward / forward tests after costs.
 
 ## What trades on demo (23.11 evening, owner)

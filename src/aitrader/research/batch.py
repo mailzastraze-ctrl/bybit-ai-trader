@@ -500,6 +500,12 @@ def cmd_lab_shadow(out: Path, run_id: str, server: str | None, workers: int = 4)
     sdir.mkdir(parents=True, exist_ok=True)
     res = shadow.run(s, book, sdir, workers=workers)
     lab.run_event("shadow", strategies=len(res), trades=sum(len(r["trades"]) for r in res))
+    try:  # the owner's charts: what each strategy trading on demo did on its coins over the last year
+        hist = shadow.history(s, (plan_doc.get("state") or {}).get("history") or [], sdir, workers=workers)
+        if hist:
+            lab.run_event("history", strategies=len(hist), errors=sum(not r["ok"] for r in hist))
+    except Exception as e:  # noqa: BLE001 – charts must never cost the forward test
+        log.warning("history for the charts failed: %s", e)
     return res
 
 
@@ -516,12 +522,15 @@ def cmd_lab_merge(out: Path, results_root: Path, run_id: str, server: str | None
     n = sum(len(json.loads(f.read_text()).get("experiments", [])) for f in files)
     sh = sorted(results_root.rglob("shadow-results.json"))
     shadow_res = json.loads(sh[-1].read_text()) if sh else None
+    hi = sorted(results_root.rglob("history-results.json"))
+    history_res = (json.loads(hi[-1].read_text()).get("results") or None) if hi else None
     sc = sorted(list(results_root.rglob("screen-results.json")) + list(out.glob("screen-results.json")))
     from aitrader.research import screen as screen_mod
     screen_sum = screen_mod.summary(json.loads(sc[-1].read_text())) if sc else None
     if not n:
-        if shadow_res or screen_sum:
-            log.info("forward test import: %s", lab.import_batch({"shadow": shadow_res, "screen": screen_sum}))
+        if shadow_res or screen_sum or history_res:
+            log.info("forward test import: %s", lab.import_batch({"shadow": shadow_res, "screen": screen_sum,
+                                                                  "history": history_res}))
         lab.run_event("end", experiments=0)
         return None
     ledger = json.loads(ledger_path.read_text()) if ledger_path and ledger_path.exists() else {"trials": []}
@@ -532,11 +541,13 @@ def cmd_lab_merge(out: Path, results_root: Path, run_id: str, server: str | None
     imp = {k: v for k, v in m.items() if k != "experiments"} | {"summary": m["experiments"]}
     if shadow_res:
         imp["shadow"] = shadow_res
+    if history_res:
+        imp["history"] = history_res
     if screen_sum:
         imp["screen"] = screen_sum
     (export / "imports").mkdir(parents=True, exist_ok=True)
     (export / "reports").mkdir(parents=True, exist_ok=True)
-    write_json_atomic(export / "imports" / f"{batch_id}.json", {k: v for k, v in imp.items() if k not in ("shadow", "screen")})
+    write_json_atomic(export / "imports" / f"{batch_id}.json", {k: v for k, v in imp.items() if k not in ("shadow", "screen", "history")})
     if screen_sum:
         write_json_atomic(export / "screen.json", screen_sum)
     (export / "reports" / f"{batch_id}.md").write_text(report_md(m))

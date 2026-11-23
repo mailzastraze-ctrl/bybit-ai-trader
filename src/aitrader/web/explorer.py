@@ -41,7 +41,28 @@ def desk_coins(reg: Registry) -> dict[str, list[str]]:
     return out
 
 
-def _row(st: dict, fwd: dict, board: dict, code: int | None = None, desk: list[str] | None = None) -> dict:
+def _coins_tested(reg: Registry) -> dict[str, int]:
+    """Experiment id → how many coins its walk-forward traded (the research figures are their sum)."""
+    out = {}
+    for r in reg.q("SELECT id, spec FROM experiments WHERE status='done'"):
+        sp = r.get("spec") if isinstance(r.get("spec"), dict) else {}
+        out[r["id"]] = max(1, len(sp.get("pairs") or []) or 1)
+    return out
+
+
+def _desk_months(reg: Registry) -> dict[str, float]:
+    """Strategy id → trades per month on its own desk coin (the desk's frozen figure)."""
+    from aitrader import desks as D
+    out = {}
+    for _pair, d in ((reg.kv_get("desks") or {}).get("coins") or {}).items():
+        for x in D.picks(d):
+            if x.get("per_month") is not None:
+                out.setdefault(x["strategy"], float(x["per_month"]))
+    return out
+
+
+def _row(st: dict, fwd: dict, board: dict, code: int | None = None, desk: list[str] | None = None,
+         ncoins: int = 1, desk_month: float | None = None) -> dict:
     o, live = st.get("oos") or {}, st.get("live") or {}
     hist = st.get("history") or []
     b = board.get(st.get("experiment_id") or "") or board.get(st["id"]) or {}
@@ -64,7 +85,10 @@ def _row(st: dict, fwd: dict, board: dict, code: int | None = None, desk: list[s
         "since": st.get("stage_since"),
         "research": {"trades": o.get("trades"), "pf": o.get("profit_factor"), "sharpe": o.get("sharpe"),
                      "dd": o.get("max_drawdown"), "ret": o.get("total_return"),
-                     "per_month": round(o["trades"] / (days / 30.44), 2) if days and o.get("trades") else None},
+                     # owner, 23.11: trades per month on ONE coin, not summed over every coin it was tested on
+                     "per_month_coin": (round(desk_month, 2) if desk_month is not None else
+                                        round(o["trades"] / (days / 30.44) / max(ncoins, 1), 2) if days and o.get("trades") else None),
+                     "coins_tested": ncoins},
         "forward": {**_forward(fwd, st), "p_pos": b.get("p_pos")},
         "demo": {"trades": live.get("trades", 0), "pf": live.get("profit_factor"), "pnl": live.get("pnl"),
                  "win_rate": live.get("win_rate"), "alpha_ann": alpha.get("alpha_ann"), "beta": alpha.get("beta")},
@@ -77,13 +101,15 @@ def listing(reg: Registry, show: str = "all") -> dict:
     board = _board(reg)
     sig = (reg.kv_get("signals") or {}).get("per_sleeve") or {}
     cs, desks = names.codes(reg), desk_coins(reg)
+    ncoins, dm = _coins_tested(reg), _desk_months(reg)
     rows = []
     for st in reg.strategies():
         if show == "active" and st["stage"] in ("rejected", "retired"):
             continue
         if show == "retired" and st["stage"] != "retired":
             continue
-        rows.append({**_row(st, fwd, board, cs.get(st["id"]), desks.get(st["id"])), "signals": sig.get(st["id"])})
+        rows.append({**_row(st, fwd, board, cs.get(st["id"]), desks.get(st["id"]), ncoins.get(st.get("experiment_id") or "", 1),
+                            dm.get(st["id"])), "signals": sig.get(st["id"])})
     rows.sort(key=lambda r: (0 if r["desk"] else 1, STAGE_ORDER.get(r["stage"], 9), r["code"] or 0))
     counts: dict[str, int] = {}
     for st in reg.strategies():
@@ -125,8 +151,23 @@ def detail(reg: Registry, sid: str) -> dict | None:
     pm = (reg.kv_get("postmortem") or {}).get("trades") or {}
     for t in trades:
         t["after"] = pm.get(str(t.get("trade_id")))
-    row = _row(st, fwd_all, _board(reg), names.codes(reg).get(sid), desk_coins(reg).get(sid))
-    return {"row": {**row, "signals": sig}, "card": card, "gates": gate_rows,
+    ps = (res or {}).get("pair_stats") or {}
+    row = _row(st, fwd_all, _board(reg), names.codes(reg).get(sid), desk_coins(reg).get(sid), max(len(ps), 1),
+               _desk_months(reg).get(sid))
+    days = float(((res or {}).get("oos") or {}).get("n_days") or ((res or {}).get("oos") or {}).get("days") or 0) or None
+    demo_by: dict[str, list[float]] = {}
+    for t in trades:
+        demo_by.setdefault(t.get("pair"), []).append(float(t.get("profit_abs") or 0))
+    coins = []
+    for pair in sorted(set(ps) | set(demo_by), key=lambda p: -float((ps.get(p) or {}).get("pnl") or -1e9)):
+        v, xs = ps.get(pair) or {}, demo_by.get(pair, [])
+        m = (days / 30.44) if days else None
+        coins.append({"pair": pair, "trades": v.get("trades"), "pnl": v.get("pnl"),
+                      "per_month": round(v["trades"] / m, 2) if m and v.get("trades") is not None else None,
+                      "pnl_month": round(v["pnl"] / m, 2) if m and v.get("pnl") is not None else None,
+                      "demo_trades": len(xs), "demo_pnl": round(sum(xs), 2) if xs else None,
+                      "trading": pair in (row.get("desk") or [])})
+    return {"row": {**row, "signals": sig}, "card": card, "gates": gate_rows, "coins": coins,
             "history": (st.get("history") or [])[-12:],
             "research": {k: (res or {}).get(k) for k in ("oos", "stress", "mc", "market", "wfe", "robust_frac", "fold_pos",
                                                          "dsr", "clean_oos", "verdict", "replication", "parity")} if res else {"oos": st.get("oos")},

@@ -72,11 +72,9 @@ function renderKpis() {
             `${ov.experiment.closed_count} закрытых сделок с ${new Date(ov.experiment.since).toLocaleString("ru-RU", {day: "numeric", month: "short", hour: "2-digit", minute: "2-digit"})} · за всё время ${sgnUsd(ov.closed_pnl)}`)
       : kpi("Результат на демо", `<span class="${cls(ov.closed_pnl)}">${sgnUsd(ov.closed_pnl)}</span>`, `${ov.closed_count ?? 0} закрытых сделок${tr.length ? ` · ${Math.round(wins / tr.length * 100)}% в плюс` : ""}`),
     kpi("Сейчас в рынке", `${open.length} ${plural(open.length, "позиция", "позиции", "позиций")}`, `<span class="${cls(upnl)}">${sgnUsd(upnl)}</span> · ${nTrading} стратегий на ${coins} монетах`),
-    kpi("Может ли зарабатывать?", fwLabel, `форвард-тест: ${fw.top?.trades || 0} из ${fw.rules?.final_trades ?? 200} сделок`, {works: "pos", not_working: "neg"}[fw.verdict] || ""),
-    kpi("Готовность к реалу", `${rd.passed ?? 0}/${rd.total ?? 10}`, rd.ready ? "все проверки пройдены — решать вам" : "проверок пройдено · только совет"),
   ].join("");
   const gs = G.goals || [];
-  $("#mission").textContent = `Миссия: найти, доказать и масштабировать реальные торговые преимущества на Bybit Demo — без подгонки и без выдуманных результатов.${gs.length ? ` Целей достигнуто: ${gs.filter((g) => g.progress >= 1).length} из ${gs.length}.` : ""}`;
+  if ($("#mission")) $("#mission").textContent = `Миссия: найти, доказать и масштабировать реальные торговые преимущества на Bybit Demo — без подгонки и без выдуманных результатов.${gs.length ? ` Целей достигнуто: ${gs.filter((g) => g.progress >= 1).length} из ${gs.length}.` : ""}`;
 }
 const plural = (n, a, b, c) => { const m = Math.abs(n) % 100, k = m % 10; return m > 10 && m < 20 ? c : k === 1 ? a : k >= 2 && k <= 4 ? b : c; };
 const span = (ms) => { const m = Math.max(0, Math.round(ms / 60000)); if (m < 60) return `${m} мин`; const h = Math.floor(m / 60); if (h < 24) return `${h} ч ${m % 60 ? (m % 60) + " мин" : ""}`.trim(); return `${Math.floor(h / 24)} дн ${h % 24 ? (h % 24) + " ч" : ""}`.trim(); };
@@ -235,11 +233,12 @@ function renderPositions() {
     const atStop = stop ? (short ? entry - stop : stop - entry) * amt : null;
     const prot = !stop ? pill("нет данных о стопе", "warn") : locked ? pill(`прибыль зафиксирована ${sgnUsd(atStop)}`, "good") : pill(`риск до стопа ${usd(Math.abs(atStop))}`, "");
     const pr = +(t.profit_ratio ?? 0);
-    return `<tr><td><b>${esc(pair(t.pair))}</b> ${pill(short ? "шорт" : "лонг", short ? "crit" : "good")}<div class="dim mono">вход ${entry}</div></td>
+    return `<tr class="click" data-chart="${esc(t.pair)}" data-sid="${esc(t.enter_tag || "")}" data-tf="${esc(sl?.timeframe || "1h")}" data-t0="${new Date(t.open_date || 0).getTime() || ""}"><td><b>${esc(pair(t.pair))}</b> ${pill(short ? "шорт" : "лонг", short ? "crit" : "good")}<div class="dim mono">вход ${entry}</div></td>
       <td data-v="${esc(UI.code(t.enter_tag) || UI.method(t.enter_tag))}">${esc(UI.method(t.enter_tag, famName(sl?.family)))}<div class="dim mono">${UI.code(t.enter_tag) ? "#" + esc(UI.code(t.enter_tag)) : esc(t.enter_tag || "")}</div></td>
       <td class="r num"><span class="${cls(t.profit_abs)}">${sgnUsd(+t.profit_abs)}</span><div class="dim">${pct(pr)}</div></td>
       <td>${prot}<div class="dim mono">стоп ${stop || "—"}</div></td><td class="r num" data-v="${new Date(t.open_date || 0).getTime() ? (Date.now() - new Date(t.open_date).getTime()) / 6e4 : ""}">${dur(t.open_date)}</td></tr>`;
   }).join("")}</tbody></table>`;
+  bindCharts("#positions");
 }
 
 // ---------------------------------------------------------------------------- стратегии (карточки)
@@ -333,8 +332,23 @@ function openCard(c) {
   $("#drawer").classList.add("open");
   lineChart($("#dChart"), curvePts(c.curve), (v) => pct(v - 1, 1), fmtDate, "График появится после строгой проверки этой стратегии.");
 }
-$("#dx").onclick = () => $("#drawer").classList.remove("open", "wide");
-addEventListener("keydown", (e) => { if (e.key === "Escape") $("#drawer").classList.remove("open", "wide"); });
+function closeDrawer() { $("#drawer").classList.remove("open", "wide"); if (S.chart) { S.chart.destroy(); S.chart = null; } }
+$("#dx").onclick = closeDrawer;
+addEventListener("keydown", (e) => { if (e.key === "Escape") closeDrawer(); });
+// one candle chart for a coin: demo trades + each strategy's backtest on history (static/chart.js)
+function bindCharts(root) {  // rows with data-chart open the coin's chart focused on that trade
+  document.querySelectorAll(`${root} tr[data-chart]`).forEach((tr) => tr.onclick = (e) => {
+    if (e.target.closest("a,button")) return;
+    const d = tr.dataset, focus = d.t0 ? {t0: +d.t0, t1: d.t1 ? +d.t1 : null} : null;
+    openChart(d.chart, {tf: d.tf || "1h", sid: d.sid || null, focus, title: d.sid ? `${UI.code(d.sid) ? "#" + UI.code(d.sid) + " " : ""}${UI.method(d.sid, "")}` : ""});
+  });
+}
+function openChart(pairName, o = {}) {
+  if (S.chart) { S.chart.destroy(); S.chart = null; }
+  $("#dbody").innerHTML = `<h3>${esc(pair(pairName))}${o.title ? ` · ${esc(o.title)}` : ""}</h3><div class="dim" style="margin:2px 0 10px">${o.sub || ""}</div><div id="coinChart"></div>${o.below || ""}`;
+  $("#drawer").classList.add("open", "wide");
+  S.chart = TChart.mount($("#coinChart"), {pair: pairName, tf: o.tf || "1h", sid: o.sid, focus: o.focus, height: Math.max(340, Math.min(560, innerHeight - 260))});
+}
 
 // ---------------------------------------------------------------------------- лаборатория
 const STEPS = ["download", "hyperopt fold 1", "oos fold 1", "hyperopt fold 2", "oos fold 2", "hyperopt fold 3", "oos fold 3", "hyperopt fold 4", "oos fold 4", "robustness", "evaluated"];
@@ -417,7 +431,7 @@ function renderReadiness() {
     + `<p class="dim" style="margin:8px 0 0;font-size:11.5px">Система никогда не переключится на реальный счёт сама — только по вашему решению.</p>`;
 }
 function renderForward() {
-  if (S.tab !== "overview") return;
+  if (S.tab !== "lab") return;
   const f = S.fw || {}, t = f.top || {}, rest = f.rest || {}, p = f.persistence || {};
   const v = {works: ["Работает", "good"], not_working: ["Не работает", "crit"], inconclusive: ["Неясно", "warn"], early_positive: ["Ранний сигнал: скорее плюс", "blue"], early_negative: ["Ранний сигнал: скорее минус", "warn"], too_early: ["Копим данные", ""]}[f.verdict] || ["Копим данные", ""];
   const n = t.trades || 0, need = f.rules?.final_trades ?? 200;
@@ -490,31 +504,38 @@ function renderDesks() {
   const d = S.desks;
   if (!d) { $("#desks").innerHTML = `<div class="empty">Загрузка…</div>`; return; }
   const sm = d.summary || {};
-  $("#deskSub").textContent = `${sm.coins || 0} монет торгуют · активных ${sm.active || 0}, средних ${sm.medium || 0}, редких ${sm.rare || 0}` +
+  $("#deskSub").textContent = `${sm.coins || 0} монет` +
     (d.created ? ` · эксперимент №${d.epoch} с ${new Date(d.created).toLocaleString("ru-RU", {day: "numeric", month: "short", hour: "2-digit", minute: "2-digit"})}` : "");
   const rows = [];
-  for (const k of d.desks || []) {
-    const ps = k.picks.length ? k.picks : [null];
-    for (const p of ps) rows.push({k, p});
-  }
+  for (const k of d.desks || []) (k.picks.length ? k.picks : [null]).forEach((p, i) => rows.push({k, p, first: i === 0}));
   if (!rows.length) { $("#desks").innerHTML = `<div class="empty">Столы ещё не назначены.</div>`; return; }
-  $("#desks").innerHTML = `<table><thead><tr><th>Монета</th><th>Код</th><th>Метод</th><th>Тип</th>
-    <th class="r">Сделок/мес<br><span class="dim">история</span></th><th class="r">Прибыль/мес<br><span class="dim">история</span></th><th class="r">Просадка<br><span class="dim">история</span></th>
-    <th class="r">Сделок<br><span class="dim">демо</span></th><th class="r">P&L<br><span class="dim">демо</span></th><th class="r">PF<br><span class="dim">демо</span></th>
-    <th class="r">Монет<br><span class="dim">торгует</span></th><th class="r">Сделок<br><span class="dim">все монеты</span></th><th class="r">P&L<br><span class="dim">все монеты</span></th><th>Сейчас</th><th class="nosort"></th></tr></thead><tbody>${rows.map(({k, p}) => {
+  const code = (x) => x.code != null ? `#${esc(x.code)}` : "";
+  const demoTxt = (dm) => dm && dm.trades ? `${dm.trades} · <span class="${cls(dm.pnl)}">${sgnUsd(dm.pnl)}</span>` : `<span class="dim">0</span>`;
+  $("#desks").innerHTML = `<table><thead><tr><th>Монета</th><th>Стратегия</th>
+    <th class="r">Сделок в месяц<br><span class="dim">на монете, история</span></th><th class="r">Прибыль в месяц<br><span class="dim">на монете, история</span></th>
+    <th class="r">Просадка<br><span class="dim">история</span></th><th class="r">Демо<br><span class="dim">сделок · P&L</span></th><th>Сейчас</th><th class="nosort"></th></tr></thead><tbody>${rows.map(({k, p, first}) => {
       const pos = k.position;
       const now = pos ? `${pill(pos.side === "short" ? "шорт" : "лонг", pos.side === "short" ? "crit" : "good")} <span class="${cls(pos.profit_abs)}">${sgnUsd(+pos.profit_abs || 0)}</span>` +
-        (pos.tag && p && pos.tag !== p.id ? `<div class="dim">${k.picks.some((x) => x.id === pos.tag) ? "позиция" : pos.guest ? "позиция гостя" : "старая позиция"} (${esc(pos.code ? "#" + pos.code : pos.method || pos.tag)})</div>` : "") : `<span class="dim">ждёт вход</span>`;
-      if (!p) return `<tr><td><b>${esc(k.coin)}</b></td><td>—</td><td class="dim">не торгует (выбрано: ничего)</td><td>—</td><td class="r">—</td><td class="r">—</td><td class="r">—</td><td class="r">—</td><td class="r">—</td><td class="r">—</td><td class="r">—</td><td class="r">—</td><td class="r">—</td><td>${now}</td>
+        (pos.tag && p && pos.tag !== p.id ? `<div class="dim">${pos.guest ? "гость" : "позиция"} ${esc(pos.code ? "#" + pos.code : pos.method || pos.tag)}</div>` : "") : `<span class="dim">ждёт вход</span>`;
+      const guests = first && (k.guests || []).length ? `<div class="guests">Также торгуют эту монету: ${k.guests.map((g) => { const bits = [g.per_month != null ? `${nf(g.per_month, 1)} сд./мес` : "", g.pnl_month != null ? `${usd(g.pnl_month, 0)}/мес` : "",
+          g.demo?.trades ? `демо ${g.demo.trades} · <span class="${cls(g.demo.pnl)}">${sgnUsd(g.demo.pnl)}</span>` : ""].filter(Boolean);
+        return `<b>${code(g)}</b> ${esc(g.method)}${bits.length ? " — " + bits.join(", ") : ""}`; }).join("; ")}</div>` : "";
+      const tf = p?.timeframe || "1h";
+      if (!p) return `<tr class="click" data-chart="${esc(k.pair)}" data-tf="1h"><td><b>${esc(k.coin)}</b></td><td class="dim">не торгует (выбрано: ничего)${guests}</td><td class="r">—</td><td class="r">—</td><td class="r">—</td><td class="r">—</td><td>${now}</td>
         <td><button class="btn" data-pick="${esc(k.pair)}">Выбрать</button></td></tr>`;
-      const dm = p.demo || {};
-      return `<tr><td><b>${esc(k.coin)}</b>${p.manual ? ` ${pill("ваш выбор", "good")}` : ""}</td><td class="mono"><a href="/explorer#${esc(p.id)}">#${esc(p.code ?? "—")}</a></td><td>${esc(p.method)}</td><td data-v="${esc(p.bucket)}">${bucketPill(p.bucket)}</td>
-        <td class="r num">${p.per_month ?? "—"}</td><td class="r num">${p.pnl_month != null ? usd(p.pnl_month, 0) : "—"}</td><td class="r num">${p.max_dd != null ? nf(p.max_dd * 100, 1) + "%" : "—"}</td>
-        <td class="r num">${dm.trades || 0}</td><td class="r num ${cls(dm.pnl)}">${dm.trades ? sgnUsd(dm.pnl) : "—"}</td><td class="r num">${dm.trades ? pfTxt(dm.pf) : "—"}</td>
-        <td class="r num" title="${esc((p.coins || []).join(", "))}">${(p.coins || []).length || 1}</td><td class="r num">${p.demo_all?.trades || 0}</td><td class="r num ${cls(p.demo_all?.pnl)}">${p.demo_all?.trades ? sgnUsd(p.demo_all.pnl) : "—"}</td><td>${now}</td>
+      return `<tr class="click" data-chart="${esc(k.pair)}" data-tf="${esc(tf)}" data-sid="${esc(p.id)}"><td data-v="${esc(k.coin)}"><b>${esc(k.coin)}</b>${p.manual ? ` ${pill("ваш выбор", "good")}` : ""}</td>
+        <td data-v="${esc(p.code ?? "")}"><a class="mono" href="/explorer#${esc(p.id)}">${code(p) || "—"}</a> ${esc(p.method)}${guests}</td>
+        <td class="r num">${p.per_month != null ? nf(p.per_month, 1) : "—"}</td><td class="r num">${p.pnl_month != null ? usd(p.pnl_month, 0) : "—"}</td>
+        <td class="r num">${p.max_dd != null ? nf(p.max_dd * 100, 1) + "%" : "—"}</td><td class="r num" data-v="${p.demo?.pnl ?? 0}">${demoTxt(p.demo)}</td><td>${now}</td>
         <td><button class="btn" data-pick="${esc(k.pair)}">Выбрать</button></td></tr>`;
     }).join("")}</tbody></table>`;
-  document.querySelectorAll("#desks [data-pick]").forEach((b) => b.onclick = () => openDeskChooser(b.dataset.pick));
+  document.querySelectorAll("#desks [data-pick]").forEach((b) => b.onclick = (e) => { e.stopPropagation(); openDeskChooser(b.dataset.pick); });
+  document.querySelectorAll("#desks a").forEach((a) => a.onclick = (e) => e.stopPropagation());
+  document.querySelectorAll("#desks tr[data-chart]").forEach((tr) => tr.onclick = () => {
+    const k = (d.desks || []).find((x) => x.pair === tr.dataset.chart), p = (k?.picks || []).find((x) => x.id === tr.dataset.sid);
+    openChart(tr.dataset.chart, {tf: tr.dataset.tf, title: p ? `${p.code != null ? "#" + p.code + " " : ""}${p.method}` : "",
+      sub: p ? `На этой монете по истории: ${p.per_month != null ? nf(p.per_month, 1) : "—"} сделок в месяц, ${p.pnl_month != null ? usd(p.pnl_month, 0) : "—"} в месяц, просадка ${p.max_dd != null ? nf(p.max_dd * 100, 1) + "%" : "—"}.` : ""});
+  });
 }
 async function openDeskChooser(pairName) {
   $("#dbody").innerHTML = `<h3>${esc(pair(pairName))}: выбор стратегий</h3><div class="dim">Загрузка списка лучших стратегий для этой монеты…</div>`;
@@ -523,14 +544,14 @@ async function openDeskChooser(pairName) {
   try { o = await api(`/api/desks/options?pair=${encodeURIComponent(pairName)}`); } catch (e) { $("#dbody").innerHTML += `<div class="neg">Ошибка: ${esc(e.message)}</div>`; return; }
   const opts = o.options || [];
   $("#dbody").innerHTML = `<h3>${esc(o.coin)}: лучшие стратегии на этой монете</h3>
-    <div class="dim" style="margin:4px 0 10px;line-height:1.5">Все прошли проверки на истории. Порядок — прибыль на ${esc(o.coin)} в месяц с поправкой на просадку.
+    <div class="dim" style="margin:4px 0 10px;line-height:1.5">Все прошли проверки на истории. Все цифры — на ${esc(o.coin)}. Порядок — прибыль в месяц с поправкой на просадку.
       Отметьте любые (можно несколько: первая, давшая сигнал, займёт монету; можно ни одной — монета перестанет входить). Бот подхватит выбор в течение ~2 минут.
       Сортировка — по клику на заголовок.</div>
-    ${opts.length ? `<div class="scroll" id="optTable"><table><thead><tr><th class="nosort">✓</th><th class="r">Место</th><th>Код</th><th>Метод</th><th>Тип</th><th class="r">Сделок/мес</th>
-      <th class="r">Прибыль/мес</th><th class="r">Просадка</th><th class="r">Сделок на монете</th><th class="r">PF (все монеты)</th><th>Где сейчас</th></tr></thead><tbody>${opts.map((x) => `<tr class="opt">
+    ${opts.length ? `<div class="scroll" id="optTable"><table><thead><tr><th class="nosort">✓</th><th class="r">Место</th><th>Код</th><th>Метод</th><th class="r">Сделок в месяц</th>
+      <th class="r">Прибыль в месяц</th><th class="r">Просадка</th><th class="r">Сделок в проверке</th><th>Где сейчас</th></tr></thead><tbody>${opts.map((x) => `<tr class="opt">
         <td><input type="checkbox" data-id="${esc(x.id)}" ${x.chosen ? "checked" : ""}></td><td class="r num">${x.rank}</td><td class="mono">#${esc(x.code ?? "—")}</td><td>${esc(x.method)}</td>
-        <td data-v="${esc(x.bucket)}">${bucketPill(x.bucket)}</td><td class="r num">${x.per_month}</td><td class="r num">${usd(x.pnl_month, 0)}</td><td class="r num">${nf(x.max_dd * 100, 1)}%</td>
-        <td class="r num">${x.oos_trades}</td><td class="r num">${pfTxt(x.pf_all)}</td><td>${x.chosen ? pill("на этой монете", "good") : x.elsewhere ? esc("на " + x.elsewhere) : "—"}</td></tr>`).join("")}</tbody></table></div>
+        <td class="r num">${nf(x.per_month, 1)}</td><td class="r num">${usd(x.pnl_month, 0)}</td><td class="r num">${nf(x.max_dd * 100, 1)}%</td>
+        <td class="r num">${x.oos_trades}</td><td>${x.chosen ? pill("на этой монете", "good") : x.elsewhere ? esc("на " + x.elsewhere) : "—"}</td></tr>`).join("")}</tbody></table></div>
       <div style="display:flex;gap:8px;margin-top:12px;align-items:center"><button class="btn on" id="optSave">Сохранить выбор</button><span class="dim" id="optMsg"></span></div>`
     : `<div class="empty">Для этой монеты нет стратегий, прошедших проверки (нужно ≥ 3 сделок на ней и прибыль на истории).</div>`}`;
   if (!opts.length) return;
@@ -564,11 +585,10 @@ function renderTrades() {
   const sl = (S.ov?.manifest?.sleeves || []).filter((s) => s.stage !== "closing");
   const byId = Object.fromEntries((S.strats?.strategies || []).map((x) => [x.id, x]));
   $("#slvSub").textContent = `${sl.length} стратегий · ${new Set(sl.flatMap((s) => s.pairs)).size} монет под наблюдением`;
-  $("#sleeves").innerHTML = sl.length ? `<table><thead><tr><th>Стратегия</th><th>Стадия</th><th>ТФ</th><th>Монеты</th><th class="r">Риск/сделка</th><th class="r">Сделок</th><th class="r">P&L</th></tr></thead><tbody>${sl.map((s) => {
+  $("#sleeves").innerHTML = sl.length ? `<table><thead><tr><th>Стратегия</th><th>Монеты</th><th class="r">Сделок на демо</th><th class="r">P&L</th></tr></thead><tbody>${sl.map((s) => {
     const lv = byId[s.id]?.live || {};
-    return `<tr><td data-v="${esc(UI.code(s.id) || s.id)}">${esc(UI.method(s.id, famName(s.family)))}<div class="dim mono">${UI.code(s.id) ? "#" + esc(UI.code(s.id)) : esc(s.id)}</div></td><td>${stagePill(s.stage)}</td><td>${esc(s.timeframe || "1h")}</td>
-      <td class="dim">${s.pairs.slice(0, 6).map(pair).join(", ")}${s.pairs.length > 6 ? ` +${s.pairs.length - 6}` : ""}</td>
-      <td class="r num">${nf(s.risk * 100, 2)}%</td><td class="r num">${lv.trades ?? 0}</td><td class="r num ${cls(lv.pnl)}">${lv.pnl != null ? sgnUsd(lv.pnl) : "—"}</td></tr>`;
+    return `<tr><td data-v="${esc(UI.code(s.id) || s.id)}"><span class="mono">${UI.code(s.id) ? "#" + esc(UI.code(s.id)) : esc(s.id)}</span> ${esc(UI.method(s.id, famName(s.family)))}</td>
+      <td class="dim">${s.pairs.map(pair).join(", ")}</td><td class="r num">${lv.trades ?? 0}</td><td class="r num ${cls(lv.pnl)}">${lv.pnl != null ? sgnUsd(lv.pnl) : "—"}</td></tr>`;
   }).join("")}</tbody></table>` : `<div class="empty">Стратегии не развёрнуты.</div>`;
   const tr = S.trades?.closed || [];
   const tot = tr.reduce((a, t) => a + (+t.profit_abs || 0), 0), wins = tr.filter((t) => +t.profit_abs > 0).length;
@@ -576,15 +596,16 @@ function renderTrades() {
   $("#closedSub").textContent = tr.length ? `${tr.length} сделок · ${Math.round(wins / tr.length * 100)}% прибыльных · ${sgnUsd(tot)} на демо` : "";
   $("#closed").innerHTML = tr.length ? `<table><thead><tr><th>Закрыта</th><th>Монета</th><th>Стратегия</th><th class="r nosort">Вход → выход</th><th>Причина</th><th class="r">P&L</th><th class="r">%</th></tr></thead><tbody>${tr.slice(0, 60).map((t) => {
     const s = sleeveOf(t.sleeve_id);
-    return `<tr><td class="num" data-v="${esc(t.close_date || "")}">${esc((t.close_date || "").slice(5, 16).replace("T", " "))}</td><td><b>${esc(pair(t.pair))}</b> ${pill(t.is_short ? "шорт" : "лонг", t.is_short ? "crit" : "good")}</td>
+    return `<tr class="click" data-chart="${esc(t.pair)}" data-sid="${esc(t.sleeve_id || "")}" data-tf="${esc(s?.timeframe || "1h")}" data-t0="${new Date(t.open_date || 0).getTime() || ""}" data-t1="${new Date(t.close_date || 0).getTime() || ""}"><td class="num" data-v="${esc(t.close_date || "")}">${esc((t.close_date || "").slice(5, 16).replace("T", " "))}</td><td><b>${esc(pair(t.pair))}</b> ${pill(t.is_short ? "шорт" : "лонг", t.is_short ? "crit" : "good")}</td>
       <td data-v="${esc(UI.code(t.sleeve_id) || t.sleeve_id)}">${esc(UI.method(t.sleeve_id, famName(s?.family)))}<div class="dim mono">${UI.code(t.sleeve_id) ? "#" + esc(UI.code(t.sleeve_id)) : esc(t.sleeve_id)}</div></td><td class="r num">${t.open_rate} → ${t.close_rate}</td><td>${esc(RS[t.exit_reason] || t.exit_reason)}</td>
       <td class="r num ${cls(t.profit_abs)}">${sgnUsd(+t.profit_abs)}</td><td class="r num ${cls(t.profit_ratio)}">${pct(+t.profit_ratio)}</td></tr>`;
   }).join("")}</tbody></table>` : `<div class="empty">Закрытых сделок пока нет.</div>`;
+  bindCharts("#closed");
 }
 
 // ---------------------------------------------------------------------------- опрос данных
 function safe(fn) { try { fn(); } catch (e) { console.warn(fn.name, e); } }
-function renderAll() { [renderHeader, renderKpis, renderBrief, renderWorld, renderPipeline, renderEquity, renderPositions, renderForward, renderGoals, renderLog, renderCards, renderDesks, renderLab, renderTrades].forEach(safe); }
+function renderAll() { [renderHeader, renderKpis, renderBrief, renderPipeline, renderEquity, renderPositions, renderForward, renderLog, renderCards, renderDesks, renderLab, renderTrades].forEach(safe); }
 async function fast() {
   try {
     const [ov, rs, desks] = await Promise.all([api("/api/overview"), api("/api/research"),
