@@ -190,6 +190,7 @@ def main() -> None:
                     last_disk_line = now
                     log.info("%s", observe.disk_line(reg))  # what fills the volume, what the janitor freed
                     log.info("%s", observe.signals_line(reg))  # signals of the last 7 days and why some were not taken
+                    log.info("%s", observe.sigcheck_line(reg))  # bot-own signals since the experiment start vs entries
             except Exception as e:  # noqa: BLE001
                 log.warning("status line failed: %s", e)
         for p in procs:

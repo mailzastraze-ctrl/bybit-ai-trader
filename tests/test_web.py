@@ -112,6 +112,7 @@ def test_coin_desks_api_lists_best_and_takes_the_owners_choice(client):
     btc = d["desks"][0]
     assert btc["coin"] == "BTC" and btc["picks"][0]["id"] == "good" and btc["picks"][0]["code"] == names["good"]["code"]
     assert btc["picks"][0]["demo"] == {"trades": 1, "pnl": 7.5, "pf": 99.0, "wins": 1}
+    assert btc["picks"][0]["demo_all"]["trades"] == 1 and btc["picks"][0]["coins"] == ["BTC"]
     o = client.get("/api/desks/options", params={"pair": "BTC/USDT:USDT"}, auth=a).json()
     assert [x["id"] for x in o["options"]] == ["good", "ok"]  # "thin" has too few trades on BTC
     assert o["options"][0]["chosen"] and not o["options"][1]["chosen"]

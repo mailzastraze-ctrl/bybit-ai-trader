@@ -770,6 +770,7 @@ class Lifecycle:
             st = {"epoch": lc.desk_epoch, "created": iso(), "coins": {}, "cuts": None, "tried": None}
         coins = st.get("coins") or {}
         if len(coins) >= lc.desk_coins or st.get("tried") == lab_ts:
+            self._fill_proven_coins(st)
             return st
         evidence = self.desk_evidence()
         universe = list((self.reg.kv_get("universe") or {}).get("pairs") or [])
@@ -781,6 +782,7 @@ class Lifecycle:
             new[p].update(params=r.get("params") or {}, sides=r.get("sides") or ["long", "short"],
                           assigned=iso(), stage_at_assignment=r.get("stage"))
         st.update(coins=new, cuts=list(cuts), tried=lab_ts, updated=iso())
+        self._fill_proven_coins(st, evidence, save=False)
         self.reg.kv_set("desks", st)
         if added:
             line = ", ".join(f"{D.coin_name(p)}:{new[p]['strategy']}({new[p]['family']} {new[p]['timeframe']}, "
@@ -792,6 +794,24 @@ class Lifecycle:
                            f"{sm['coins']} of {lc.desk_coins} in total – {line}", data={"desks": sm})
             self.sync_desk_stages(new)
         return st
+
+    def _fill_proven_coins(self, st: dict, evidence: dict | None = None, save: bool = True) -> None:
+        """Every desk strategy also trades the other coins where it proved itself on history
+        (owner, 23.11: "a strategy makes far more than one trade a month" – that is across its
+        coins): each qualifying coin with its score there, frozen with the desk."""
+        todo = [x for d in (st.get("coins") or {}).values() for x in D.picks(d) if "coin_scores" not in x]
+        if not todo:
+            return
+        evidence = evidence if evidence is not None else self.desk_evidence()
+        proven: dict[str, dict[str, float]] = {}
+        for pair, xs in evidence.items():
+            for o in xs:
+                if o.qualifies():
+                    proven.setdefault(o.strategy, {})[pair] = round(o.score, 2)
+        for x in todo:
+            x["coin_scores"] = proven.get(x["strategy"], {})
+        if save:
+            self.reg.kv_set("desks", st)
 
     def flatten_for_experiment(self, ft, open_trades: list[dict]) -> list[str]:
         """A desk experiment starts flat (owner, 23.11: "the previous stage was a failure, everything
@@ -837,24 +857,47 @@ class Lifecycle:
                 self.reg.set_stage(sid, "exploration", f"coin desk {D.coin_name(pair)}: the best tested strategy on this coin")
 
     def desk_sleeves(self, excluded: set[str], scale: float = 1.0) -> list[Sleeve]:
-        """One sleeve per strategy with the coins it runs (normally one; the owner may put one
-        strategy on several coins or several strategies on one coin – the first signal takes it)."""
+        """One sleeve per strategy. It goes first on its own coin desk(s) (`lead`) and, with
+        `desk_all_coins`, also trades every other coin where it proved itself on history, as a
+        guest: at most `desk_max_per_coin` strategies per coin (the desk owner and the guests
+        with the best score there), the whitelist capped at `max_whitelist` coins. The first
+        signal takes a free coin; per (strategy, coin) the statistics stay separate."""
+        lc = self.lc
         st = self.ensure_desks(excluded)
         by: dict[str, Sleeve] = {}
+        picks: dict[str, dict] = {}
         for pair, d in (st.get("coins") or {}).items():
             if pair in excluded:
                 continue  # e.g. a delisting: no new entries, the open trade keeps its exits
             for x in D.picks(d):
+                picks.setdefault(x["strategy"], x)
                 sl = by.get(x["strategy"])
                 if sl is None:
                     by[x["strategy"]] = Sleeve(
-                        id=x["strategy"], family=x["family"], params=x.get("params") or {}, pairs=[pair],
+                        id=x["strategy"], family=x["family"], params=x.get("params") or {}, pairs=[pair], lead=[pair],
                         stage="exploration", risk=round(self.risk_for("exploration") * scale, 6),
-                        leverage=self.lc.leverage, sides=x.get("sides") or ["long", "short"], score=1.0,
+                        leverage=lc.leverage, sides=x.get("sides") or ["long", "short"], score=1.0,
                         timeframe=x.get("timeframe") or "",
                         note=f"desk {D.coin_name(pair)}: {x.get('bucket')}, ~{x.get('per_month')} trades/month")
                 elif pair not in sl.pairs:
                     sl.pairs.append(pair)
+                    sl.lead.append(pair)
+        if lc.desk_all_coins:
+            per_coin: dict[str, int] = {}
+            for sl in by.values():
+                for p in sl.pairs:
+                    per_coin[p] = per_coin.get(p, 0) + 1
+            union = set(per_coin)
+            guests = sorted(((score, sid, p) for sid, x in picks.items() for p, score in (x.get("coin_scores") or {}).items()
+                             if p not in by[sid].pairs and p not in excluded and not tradfi.is_tradfi(p)), reverse=True)
+            for _score, sid, p in guests:
+                if per_coin.get(p, 0) >= lc.desk_max_per_coin:
+                    continue
+                if p not in union and len(union) >= lc.max_whitelist:
+                    continue
+                by[sid].pairs.append(p)
+                per_coin[p] = per_coin.get(p, 0) + 1
+                union.add(p)
         return list(by.values())
 
     def desk_options(self, pair: str) -> list[dict]:

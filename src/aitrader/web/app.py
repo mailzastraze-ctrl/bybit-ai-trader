@@ -218,7 +218,9 @@ def desks_overview() -> dict:
     """Coin desks: the strategy (or the owner's strategies) on each coin and its live record there."""
     from aitrader.web import desks_api
     c = ft()
-    return desks_api.overview(reg(), _safe(c.status, []) if c.ping() else [])
+    man = Manifest.load(S.manifest_path)
+    return desks_api.overview(reg(), _safe(c.status, []) if c.ping() else [],
+                              {sl.id: sl.pairs for sl in man.sleeves if sl.stage != "closing"})
 
 
 @app.get("/api/desks/options", dependencies=[Depends(auth)])

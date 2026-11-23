@@ -231,6 +231,12 @@ def main() -> None:
                         storage.janitor_hourly(reg, s)
                     except Exception as e:  # noqa: BLE001
                         log.warning("janitor failed: %s", e)
+                last_sc = parse_dt((reg.kv_get("sigcheck") or {}).get("ts"))
+                if up and man is not None and (last_sc is None or (utcnow() - last_sc).total_seconds() >= 3600):
+                    try:  # hourly: every signal on the bot's own candles since the experiment start vs entries made
+                        observe.run_signal_check(reg, ft, man.all_pairs(), open_trades)
+                    except Exception as e:  # noqa: BLE001 – observation must never break the loop
+                        log.info("signal check failed: %s", e)
                 try:  # observation only: missed signals and how many independent bets are open
                     reg.kv_set("signals", observe.summarize_signals(observe.journal_path(s.state_dir)))
                     if up:

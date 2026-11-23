@@ -105,6 +105,8 @@ class Lifecycle:
     demo_mode: str = "desks"
     desk_coins: int = 30   # env DESK_COINS (owner: top 25–30 coins)
     desk_epoch: int = 1    # env DESK_EPOCH: a new number starts a new experiment with a fresh choice
+    desk_all_coins: bool = True  # a desk strategy also trades its other proven coins as a guest (env DESK_ALL_COINS)
+    desk_max_per_coin: int = 6   # strategies per coin with guests (desk owner first); env DESK_MAX_PER_COIN
     # the monthly TSMOM set as an always-on demo core (22.11). Off since 23.11 (owner: "месячные тренды –
     # бред" for an active demo); it stays the forward book's benchmark. Env DEMO_CORE=1 turns it back on.
     demo_core: bool = False
@@ -183,6 +185,8 @@ class Settings:
         lc.demo_mode = _env("DEMO_MODE", lc.demo_mode).strip().lower()
         lc.desk_coins = _i("DESK_COINS", lc.desk_coins)
         lc.desk_epoch = _i("DESK_EPOCH", lc.desk_epoch)
+        lc.desk_all_coins = _on("DESK_ALL_COINS", lc.desk_all_coins)
+        lc.desk_max_per_coin = _i("DESK_MAX_PER_COIN", lc.desk_max_per_coin)
         lc.demo_core = _on("DEMO_CORE", lc.demo_core)
 
     # ---- derived paths -------------------------------------------------

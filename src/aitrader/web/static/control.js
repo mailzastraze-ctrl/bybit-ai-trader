@@ -500,16 +500,18 @@ function renderDesks() {
   if (!rows.length) { $("#desks").innerHTML = `<div class="empty">Столы ещё не назначены.</div>`; return; }
   $("#desks").innerHTML = `<table><thead><tr><th>Монета</th><th>Код</th><th>Метод</th><th>Тип</th>
     <th class="r">Сделок/мес<br><span class="dim">история</span></th><th class="r">Прибыль/мес<br><span class="dim">история</span></th><th class="r">Просадка<br><span class="dim">история</span></th>
-    <th class="r">Сделок<br><span class="dim">демо</span></th><th class="r">P&L<br><span class="dim">демо</span></th><th class="r">PF<br><span class="dim">демо</span></th><th>Сейчас</th><th class="nosort"></th></tr></thead><tbody>${rows.map(({k, p}) => {
+    <th class="r">Сделок<br><span class="dim">демо</span></th><th class="r">P&L<br><span class="dim">демо</span></th><th class="r">PF<br><span class="dim">демо</span></th>
+    <th class="r">Монет<br><span class="dim">торгует</span></th><th class="r">Сделок<br><span class="dim">все монеты</span></th><th class="r">P&L<br><span class="dim">все монеты</span></th><th>Сейчас</th><th class="nosort"></th></tr></thead><tbody>${rows.map(({k, p}) => {
       const pos = k.position;
       const now = pos ? `${pill(pos.side === "short" ? "шорт" : "лонг", pos.side === "short" ? "crit" : "good")} <span class="${cls(pos.profit_abs)}">${sgnUsd(+pos.profit_abs || 0)}</span>` +
-        (pos.tag && p && pos.tag !== p.id ? `<div class="dim">${k.picks.some((x) => x.id === pos.tag) ? "позиция" : "старая позиция"} (${esc(pos.code ? "#" + pos.code : pos.method || pos.tag)})</div>` : "") : `<span class="dim">ждёт вход</span>`;
-      if (!p) return `<tr><td><b>${esc(k.coin)}</b></td><td>—</td><td class="dim">не торгует (выбрано: ничего)</td><td>—</td><td class="r">—</td><td class="r">—</td><td class="r">—</td><td class="r">—</td><td class="r">—</td><td class="r">—</td><td>${now}</td>
+        (pos.tag && p && pos.tag !== p.id ? `<div class="dim">${k.picks.some((x) => x.id === pos.tag) ? "позиция" : pos.guest ? "позиция гостя" : "старая позиция"} (${esc(pos.code ? "#" + pos.code : pos.method || pos.tag)})</div>` : "") : `<span class="dim">ждёт вход</span>`;
+      if (!p) return `<tr><td><b>${esc(k.coin)}</b></td><td>—</td><td class="dim">не торгует (выбрано: ничего)</td><td>—</td><td class="r">—</td><td class="r">—</td><td class="r">—</td><td class="r">—</td><td class="r">—</td><td class="r">—</td><td class="r">—</td><td class="r">—</td><td class="r">—</td><td>${now}</td>
         <td><button class="btn" data-pick="${esc(k.pair)}">Выбрать</button></td></tr>`;
       const dm = p.demo || {};
       return `<tr><td><b>${esc(k.coin)}</b>${p.manual ? ` ${pill("ваш выбор", "good")}` : ""}</td><td class="mono"><a href="/explorer#${esc(p.id)}">#${esc(p.code ?? "—")}</a></td><td>${esc(p.method)}</td><td data-v="${esc(p.bucket)}">${bucketPill(p.bucket)}</td>
         <td class="r num">${p.per_month ?? "—"}</td><td class="r num">${p.pnl_month != null ? usd(p.pnl_month, 0) : "—"}</td><td class="r num">${p.max_dd != null ? nf(p.max_dd * 100, 1) + "%" : "—"}</td>
-        <td class="r num">${dm.trades || 0}</td><td class="r num ${cls(dm.pnl)}">${dm.trades ? sgnUsd(dm.pnl) : "—"}</td><td class="r num">${dm.trades ? pfTxt(dm.pf) : "—"}</td><td>${now}</td>
+        <td class="r num">${dm.trades || 0}</td><td class="r num ${cls(dm.pnl)}">${dm.trades ? sgnUsd(dm.pnl) : "—"}</td><td class="r num">${dm.trades ? pfTxt(dm.pf) : "—"}</td>
+        <td class="r num" title="${esc((p.coins || []).join(", "))}">${(p.coins || []).length || 1}</td><td class="r num">${p.demo_all?.trades || 0}</td><td class="r num ${cls(p.demo_all?.pnl)}">${p.demo_all?.trades ? sgnUsd(p.demo_all.pnl) : "—"}</td><td>${now}</td>
         <td><button class="btn" data-pick="${esc(k.pair)}">Выбрать</button></td></tr>`;
     }).join("")}</tbody></table>`;
   document.querySelectorAll("#desks [data-pick]").forEach((b) => b.onclick = () => openDeskChooser(b.dataset.pick));

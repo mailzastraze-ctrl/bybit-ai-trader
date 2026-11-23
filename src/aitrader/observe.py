@@ -460,6 +460,86 @@ def activity(reg, open_trades: list[dict], now=None) -> dict:
     return out
 
 
+SIGNAL_GAP_ALARM = 3  # entry signals the bot's own strategy shows on its own candles but never acted on
+
+
+def signal_check(candles: dict[str, dict], trades: list[dict], since, now=None, grace_min: int = 40) -> dict:
+    """Owner, 23.11: "entries must happen actively, without stalls". The bot's analysed 15m candles
+    (Freqtrade /pair_candles: what its strategies signal on its own data) against the entries it
+    actually made since `since`. A signal counts as taken if a trade with that strategy opened on
+    that coin within `grace_min` minutes after it, as busy if the coin already held a position,
+    otherwise as missed. Observation only."""
+    now = now or utcnow()
+    since = parse_dt(since) or now - timedelta(days=1)
+    spans: dict[str, list[tuple]] = {}
+    for t in trades or []:
+        od = parse_dt(t.get("open_date"))
+        if od is None or str(t.get("enter_tag") or t.get("sleeve_id") or "").startswith("exec-test"):
+            continue
+        spans.setdefault(t.get("pair"), []).append((od, parse_dt(t.get("close_date")) or now,
+                                                    t.get("enter_tag") or t.get("sleeve_id")))
+    out = {"ts": iso(now), "since": iso(since), "signals": 0, "taken": 0, "busy": 0, "missed": 0, "missed_by": {},
+           "coins": len(candles)}
+    for pair, data in (candles or {}).items():
+        cols = (data or {}).get("columns") or []
+        if not {"date", "enter_tag"} <= set(cols):
+            continue
+        ix = {c: cols.index(c) for c in cols}
+        for row in (data or {}).get("data") or []:
+            try:
+                d = parse_dt(row[ix["date"]])
+                el = ix.get("enter_long") is not None and row[ix["enter_long"]] == 1
+                es = ix.get("enter_short") is not None and row[ix["enter_short"]] == 1
+            except (TypeError, ValueError, IndexError):
+                continue
+            if d is None or not (el or es):
+                continue
+            close = d + timedelta(minutes=15)  # the analysed candle closes 15 min after its start
+            if close < since or close > now - timedelta(minutes=5):
+                continue  # before the experiment, or too fresh to judge
+            tag = row[ix["enter_tag"]]
+            out["signals"] += 1
+            sp = spans.get(pair, [])
+            if any(t == tag and close - timedelta(minutes=1) <= od <= close + timedelta(minutes=grace_min) for od, _c, t in sp):
+                out["taken"] += 1
+            elif any(od < close <= c for od, c, _t in sp):
+                out["busy"] += 1
+            else:
+                out["missed"] += 1
+                k = f"{str(pair).split('/')[0]}:{tag}"
+                out["missed_by"][k] = out["missed_by"].get(k, 0) + 1
+    return out
+
+
+def run_signal_check(reg, ft, pairs: list[str], open_trades: list[dict], now=None) -> dict:
+    """Fetch the bot's analysed candles for `pairs` since the experiment start (at most ~7 days)
+    and compare its signals with the entries made (`signal_check`); stored in kv `sigcheck`."""
+    now = now or utcnow()
+    start = parse_dt((reg.kv_get("desks") or {}).get("created")) or now - timedelta(days=1)
+    since = max(start, now - timedelta(days=7))
+    rows = min(700, int((now - since).total_seconds() // 900) + 8)
+    candles = {}
+    for p in pairs:
+        try:
+            candles[p] = ft.pair_candles(p, "15m", rows)
+        except Exception as e:  # noqa: BLE001 – one coin failing never stops the check
+            log.info("signal check: candles for %s unavailable: %s", p, e)
+    trades = [dict(r) for r in reg.q("SELECT sleeve_id, pair, open_date, close_date FROM live_trades WHERE open_date >= ?",
+                                     (iso(since - timedelta(days=1)),))]
+    trades += [{"enter_tag": t.get("enter_tag"), "pair": t.get("pair"), "open_date": t.get("open_date"), "close_date": None}
+               for t in open_trades or []]
+    out = signal_check(candles, trades, since, now)
+    reg.kv_set("sigcheck", out)
+    return out
+
+
+def sigcheck_line(reg) -> str:
+    s = reg.kv_get("sigcheck") or {}
+    top = ", ".join(f"{k} {v}" for k, v in sorted((s.get("missed_by") or {}).items(), key=lambda kv: -kv[1])[:8])
+    return (f"SIGCHECK since={s.get('since')} coins={s.get('coins', 0)} signals={s.get('signals', 0)} taken={s.get('taken', 0)} "
+            f"busy={s.get('busy', 0)} missed={s.get('missed', 0)} missed_by=[{top or 'none'}]")
+
+
 def red_flags(reg, now=None) -> list[str]:
     """The owner's red flags (PLAN §5) from what the registry already knows."""
     now = now or utcnow()
@@ -507,6 +587,9 @@ def red_flags(reg, now=None) -> list[str]:
         le = parse_dt(a.get("last_entry"))
         if le is None or (now - le).total_seconds() > NO_ENTRY_ALARM_H * 3600:
             out.append(f"no entry > {NO_ENTRY_ALARM_H}h")
+    sc = reg.kv_get("sigcheck") or {}
+    if (sc.get("missed") or 0) >= SIGNAL_GAP_ALARM:
+        out.append(f"signals not acted on {sc['missed']}")
     return out
 
 
