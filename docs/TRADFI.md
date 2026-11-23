@@ -1,7 +1,10 @@
 # TradFi lane — gold and the S&P 500 on Bybit Demo
 
-_23.11.2026, owner's request (a ChatGPT recommendation, reviewed by Claude). Branch `tradfi-gold-spy`,
-not deployed. Code: `src/aitrader/tradfi.py`, `src/aitrader/families/tradfi.py`, configurations
+_23.11.2026, owner's request (a ChatGPT recommendation, reviewed by Claude). **Live on demo since
+23.11.2026 13:03 UTC** (deploy 2003c6d, owner's OK). Verified on the account: Freqtrade keeps
+`XAU/USDT:USDT` and `SPY/USDT:USDT` on its whitelist; the TradFi execution test passed on gold (market
+buy 0.016 XAU at 3627.81, 1x → exchange stop at 3613.02 → market exit); `HEALTH … tradfi=[SPY ok, XAU ok
+open] flags=none`, self-test 6/6. Code: `src/aitrader/tradfi.py`, `src/aitrader/families/tradfi.py`, configurations
 `research/tradfi/*.json`, tests `tests/test_tradfi.py`._
 
 ## 1. What the recommendation got wrong, and what was changed
@@ -12,8 +15,8 @@ not deployed. Code: `src/aitrader/tradfi.py`, `src/aitrader/families/tradfi.py`,
 | Walk-forward, OOS, robustness on these instruments | The system's walk-forward needs ≥ 120 days of indicator warm-up + training + test quarters (min. 760 days of history for research pairs). Gold has ~8 months on Bybit, SPY ~6. A walk-forward today would test nothing. | Fixed, pre-registered rules (nothing to train); evidence = demo trades and, opt-in, the forward book (§4). |
 | Trade them like crypto | The underlying markets close (NYSE 6.5 h a day, gold 23 h × 5 days); the perpetuals trade 24/7 on a stale index outside the session. | Entries only while the underlying is open (§3). |
 
-Availability on the demo account could not be checked from the development sandbox (Bybit is not
-reachable from it). The live bot checks it itself (§5).
+Availability on the demo account: both contracts are listed and tradable (checked by the live bot,
+23.11.2026; see the header).
 
 ## 2. Strategies (pre-registered 23.11.2026, nothing optimised)
 All on 4h candles, exploration risk (0.1 % of equity per trade × correlation scale), 1x, exchange stop.
