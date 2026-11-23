@@ -389,11 +389,28 @@ def postmortem(reg, ft, now=None) -> dict:
 
 # ---------------------------------------------------------------------------- health line
 STOP_GRACE_S = 180  # a fresh position gets its exchange stop within a minute or two
+ENTRY_STUCK_S = 15 * 60  # config/trade.json unfilledtimeout entry 12 min + the stop grace
 
 
 def _has_exchange_stop(t: dict) -> bool:
     return any(o.get("ft_order_side") == "stoploss" and o.get("status") in ("open", "new", None)
                for o in t.get("orders") or [])
+
+
+def _entry_state(t: dict) -> tuple[bool, object]:
+    """(entry working with nothing filled, time the position began). A limit entry can wait up to 12
+    minutes (unfilledtimeout) and Freqtrade places the exchange stop once it has filled, so while
+    nothing is filled there is no position to protect (audit 22.11, A2). Any filled amount is a
+    position: the grace runs from the first fill. Without Freqtrade's entry flags: as before."""
+    entries = [o for o in t.get("orders") or [] if o.get("ft_is_entry")]
+    filled = [o for o in entries if (o.get("filled") or 0) > 0]
+    # only an entry with nothing filled yet is "no position": a partial fill is a position to protect
+    working = not filled and any(o.get("is_open") or o.get("status") in ("open", "new") for o in entries)
+    fills = [parse_dt(o.get("order_filled_date") or o.get("order_filled_timestamp") or o.get("order_date")
+                      or o.get("order_timestamp")) for o in filled]
+    began = parse_dt(t.get("open_fill_date") or t.get("open_fill_timestamp")) or \
+        min((f for f in fills if f is not None), default=None) or parse_dt(t.get("open_date") or t.get("open_timestamp"))
+    return working, began
 
 
 def health(open_trades: list[dict], equity: float | None, now=None) -> dict:
@@ -403,7 +420,10 @@ def health(open_trades: list[dict], equity: float | None, now=None) -> dict:
     bare = []
     for t in open_trades or []:
         od = parse_dt(t.get("open_date") or t.get("open_timestamp"))
-        young = od is not None and (now - od).total_seconds() < STOP_GRACE_S
+        working, began = _entry_state(t)
+        if working and not (od is not None and (now - od).total_seconds() > ENTRY_STUCK_S):
+            continue  # the entry order is still working: no position yet (or a stuck one after 15 min)
+        young = began is not None and (now - began).total_seconds() < STOP_GRACE_S
         if not young and not _has_exchange_stop(t):
             bare.append(t.get("pair"))
     risk = sum(_risk(t) for t in open_trades or [])
