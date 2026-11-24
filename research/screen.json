@@ -1,7 +1,7 @@
 {
-  "created": "2026-11-24T16:30:50.348Z",
+  "created": "2026-11-24T19:20:43.661Z",
   "engine": "Bybit Strategy Lab engine.js (owner)",
-  "evaluated": 1135970,
+  "evaluated": 1134635,
   "expected_false": 0,
   "fdr_q": 0.2,
   "holdout_tests": 19,
@@ -13,14 +13,14 @@
     "search": "first 60% of history",
     "swing": "2h\u201312h, ~3 years + last 3 months: 0.5\u201312 trades/month, PF>=1.4, every third profitable, R\u00b2>=0.75, DD<=25%; neighbours >=70% profitable; walk-forward year profitable; last 3 months not losing; Monte Carlo DD95<=35%, P(loss)<=10%"
   },
-  "seconds": 309,
+  "seconds": 417,
   "series": 120,
   "swing_coins_covered": 0,
-  "swing_decoy_survivors": 32,
+  "swing_decoy_survivors": 22.5,
   "swing_decoys": 2,
   "swing_passed_checks": 68,
   "swing_survivors": 0,
-  "swing_tested": 469,
+  "swing_tested": 470,
   "tasks": 140,
   "top": []
 }
